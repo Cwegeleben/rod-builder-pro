@@ -3,7 +3,7 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = '<NAME>'
+app = 'rbp-app-staging'
 primary_region = 'sjc'
 
 [build]
@@ -11,7 +11,7 @@ primary_region = 'sjc'
 [env]
   PORT = '3000'
   SCOPES = 'write_products'
-  SHOPIFY_APP_URL = '<URL>'
+  SHOPIFY_APP_URL = 'https://rbp-app-staging.fly.dev'
 
 [processes]
   app = 'node ./dbsetup.js npm run docker-start'

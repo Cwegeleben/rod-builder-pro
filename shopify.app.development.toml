@@ -1,10 +1,10 @@
+
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "<CLIENT_ID>"
-application_url = "<URL>"
+client_id = "fd9ef63e51cb5689467c51f5196d7105"
 embedded = true
-name = "<NAME>"
-handle = "<HANDLE>"
+name = "rbp-app-development"
+handle = "rbp-app-development"
 
 [build]
 automatically_update_urls_on_dev = true

@@ -1,0 +1,85 @@
+name: Deploy — Staging
+
+on:
+  push:
+    branches: [staging]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    name: Create Release (staging)
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify package signatures
+        run: npm audit signatures
+      - name: Create prerelease for staging
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx semantic-release --prerelease staging
+
+  deploy-shopify:
+    name: Deploy to Shopify (staging)
+    needs: [release]
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Shopify CLI
+        run: npm install -g @shopify/cli@latest
+      - name: Build
+        run: npm run build
+        env:
+          NODE_ENV: staging
+      - name: Deploy to Shopify (staging)
+        env:
+          SHOPIFY_CLI_PARTNERS_TOKEN: ${{ secrets.SHOPIFY_CLI_PARTNERS_TOKEN }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          # <!-- BEGIN RBP GENERATED: ci-branch-autodeploy-v1 -->
+          # Note: staging uses the staging app config file
+          # <!-- END RBP GENERATED: ci-branch-autodeploy-v1 -->
+          shopify app deploy --config staging -f --source-control-url "$COMMIT_URL"
+
+  deploy-fly:
+    name: Deploy to Fly (staging)
+    needs: [deploy-shopify]
+    runs-on: ubuntu-latest
+    environment: staging
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy to Fly (staging)
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_STAGING }}
+        run: |
+          # <!-- BEGIN RBP GENERATED: ci-branch-autodeploy-v1 -->
+          # Staging Fly app config
+          # <!-- END RBP GENERATED: ci-branch-autodeploy-v1 -->
+          flyctl deploy --remote-only --config fly.staging.toml
