@@ -1,0 +1,120 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: 'staging'
+      staging_tag:
+        description: 'Staging tag to promote to production (required for production)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  validate-inputs:
+    name: Validate Deployment Inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Production Requirements
+        if: github.event.inputs.environment == 'production'
+        run: |
+          if [ -z "${{ github.event.inputs.staging_tag }}" ]; then
+            echo "Error: Staging tag is required for production deployment"
+            exit 1
+          fi
+
+  release:
+    name: Create Release
+    needs: [validate-inputs]
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify package signatures
+        run: npm audit signatures
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.environment }}" = "production" ]; then
+            # Checkout the staging tag to promote
+            git fetch --all --tags
+            git checkout ${{ github.event.inputs.staging_tag }}
+            npx semantic-release
+          else
+            # Create a staging release
+            npx semantic-release --prerelease staging
+          fi
+
+  deploy-shopify:
+    name: Deploy to Shopify
+    needs: [release]
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Shopify CLI
+        run: npm install -g @shopify/cli@latest
+      - name: Build
+        run: npm run build
+        env:
+          NODE_ENV: ${{ github.event.inputs.environment }}
+      - name: Deploy to Shopify
+        env:
+          SHOPIFY_CLI_PARTNERS_TOKEN: ${{ secrets.SHOPIFY_CLI_PARTNERS_TOKEN }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          if [ "${{ github.event.inputs.environment }}" = "production" ]; then
+            shopify app deploy -f --source-control-url "$COMMIT_URL"
+          else
+            shopify app deploy --config staging -f --source-control-url "$COMMIT_URL"
+          fi
+
+  deploy-fly:
+    name: Deploy to Fly
+    needs: [deploy-shopify]
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    concurrency:
+      group: deploy-${{ github.event.inputs.environment }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy to Fly
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.environment }}" = "production" ]; then
+            flyctl deploy --remote-only --config fly.production.toml
+          else
+            flyctl deploy --remote-only --config fly.staging.toml
+          fi

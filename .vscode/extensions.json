@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "graphql.vscode-graphql",
+    "shopify.polaris-for-vscode",
+    "esbenp.prettier-vscode",
+    "bradlc.vscode-tailwindcss",
+    "dbaeumer.vscode-eslint",
+    "vivaxy.vscode-conventional-commits"
+  ]
+}
