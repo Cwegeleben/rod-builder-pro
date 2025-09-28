@@ -1,11 +1,12 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from '@remix-run/react'
 import type { LinksFunction } from '@remix-run/node'
-import styles from './styles/globals.css?url'
-import theme from './styles/theme.css?url'
+import { cssBundleHref } from '@remix-run/css-bundle'
+// Ensure these are included in the css bundle for consistent SSR/CSR hrefs
+import './styles/globals.css'
+import './styles/theme.css'
 
 export const links: LinksFunction = () => [
-  { rel: 'stylesheet', href: theme },
-  { rel: 'stylesheet', href: styles },
+  ...(cssBundleHref ? [{ rel: 'stylesheet', href: cssBundleHref }] : []),
   { rel: 'preconnect', href: 'https://cdn.shopify.com/' },
   { rel: 'stylesheet', href: 'https://cdn.shopify.com/static/fonts/inter/v4/styles.css' },
 ]
