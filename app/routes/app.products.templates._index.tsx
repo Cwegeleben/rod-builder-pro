@@ -158,7 +158,7 @@ export default function TemplatesIndexPage() {
                     <IndexTable.Cell>{t.fields.length}</IndexTable.Cell>
                     <IndexTable.Cell>
                       <Text as="span" tone="subdued">
-                        {new Date(t.updatedAt).toLocaleString()}
+                        {new Date(t.updatedAt).toISOString().replace('T', ' ').replace(/\..+$/, '')} UTC
                       </Text>
                     </IndexTable.Cell>
                     <IndexTable.Cell>
