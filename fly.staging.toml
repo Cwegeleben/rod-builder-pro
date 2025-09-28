@@ -10,6 +10,7 @@ primary_region = 'sjc'
 
 [env]
   PORT = '3000'
+  HOST = '0.0.0.0'
   SCOPES = 'write_products'
   SHOPIFY_APP_URL = 'https://rbp-app-staging.fly.dev'
 
