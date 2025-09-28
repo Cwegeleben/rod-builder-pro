@@ -108,6 +108,13 @@ fly apps create <APP_NAME>-staging
 
 Remember to create them in the Lightspace organization.
 
+## Project Guidelines
+
+<!-- BEGIN RBP GENERATED: ux-guidelines-readme-v3-0 -->
+
+- **UI/IA:** Mirror Shopify Admin across pages and navigation (Polaris + App Bridge NavMenu; sub-nav via Tabs; IndexTable/IndexFilters for lists; sticky header; column picker; relative links).
+<!-- END RBP GENERATED: ux-guidelines-readme-v3-0 -->
+
 ## Shopify app creation
 
 You need to create three apps: one for development, one for staging and another one for production. You can do so by running the following command:
