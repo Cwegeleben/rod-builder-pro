@@ -30,3 +30,52 @@ model Session {
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
 }
+
+// <!-- BEGIN RBP GENERATED: products-module-v3-0 -->
+enum SpecFieldStorageMode {
+  PRODUCT_FIELD
+  METAFIELD
+}
+
+enum ProductCoreField {
+  TITLE
+  BODY_HTML
+  VENDOR
+  PRODUCT_TYPE
+  TAGS
+  // extend later if needed
+}
+
+model SpecTemplate {
+  id          String      @id @default(cuid())
+  title       String
+  handle      String      @unique
+  description String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  fields      SpecField[]
+}
+
+model SpecField {
+  id            String               @id @default(cuid())
+  templateId    String
+  template      SpecTemplate         @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  key           String               // programmatic key
+  label         String
+  type          String               // ui type: text, number, boolean, select
+  required      Boolean              @default(false)
+  storageMode   SpecFieldStorageMode @default(METAFIELD)
+  // Optional persisted ordering to support drag-and-drop reordering
+  position      Int                  @default(0)
+
+  // If PRODUCT_FIELD
+  productField  ProductCoreField?
+
+  // If METAFIELD
+  namespace     String?              // ex. "facts"
+  metafieldKey  String?              // ex. "upc"
+  metafieldType String?              // ex. "single_line_text_field"
+
+  @@unique([templateId, key])
+}
+// <!-- END RBP GENERATED: products-module-v3-0 -->

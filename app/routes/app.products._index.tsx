@@ -1,5 +1,8 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { Page, Layout, Card, Text, Button } from '@shopify/polaris'
+// <!-- BEGIN RBP GENERATED: products-module-v3-0 -->
+import { ProductsTabs } from '../components/products-tabs'
+// <!-- END RBP GENERATED: products-module-v3-0 -->
 import { authenticate } from '../shopify.server'
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -10,6 +13,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function ProductsIndex() {
   return (
     <Page title="Products" primaryAction={{ content: 'Import Products', url: 'import' }}>
+      {/* <!-- BEGIN RBP GENERATED: products-module-v3-0 --> */}
+      <div className="mb-m">
+        <ProductsTabs />
+      </div>
+      {/* <!-- END RBP GENERATED: products-module-v3-0 --> */}
       <Layout>
         <Layout.Section>
           <Card>

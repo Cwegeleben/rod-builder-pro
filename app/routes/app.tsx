@@ -21,6 +21,14 @@ export default function App() {
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
       <NavMenu>
+        {/* <!-- BEGIN RBP GENERATED: products-module-v3-0 --> */}
+        {/* Use NavMenu with top-level items only; subnav appears as Tabs within Products section */}
+        <a href="/app" rel="home">
+          Home
+        </a>
+        <a href="/app/products">Products</a>
+        <a href="/app/settings">Settings</a>
+        {/* <!-- END RBP GENERATED: products-module-v3-0 --> */}
         <Link to="." rel="home">
           Home
         </Link>

@@ -1,25 +1,36 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node'
 import { json, redirect } from '@remix-run/node'
-import { Form, useActionData, useNavigation } from '@remix-run/react'
+import { Form, useActionData, useLoaderData, useNavigation } from '@remix-run/react'
 import { Page, Layout, Card, Text, TextField, Select, Button, InlineError } from '@shopify/polaris'
+// <!-- BEGIN RBP GENERATED: products-module-v3-0 -->
+import { ProductsTabs } from '../components/products-tabs'
+// <!-- END RBP GENERATED: products-module-v3-0 -->
 import { useState } from 'react'
 import { authenticate } from '../shopify.server'
+// <!-- BEGIN RBP GENERATED: products-module-v3-0 -->
+import { listTemplates } from '../models/specTemplate.server'
+// <!-- END RBP GENERATED: products-module-v3-0 -->
 
 type ActionData = {
   ok?: boolean
-  errors?: { sourceUrl?: string; productType?: string }
+  errors?: { sourceUrl?: string; templateId?: string }
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request)
-  return null
+  // <!-- BEGIN RBP GENERATED: products-module-v3-0 -->
+  const { items } = await listTemplates({ perPage: 100 })
+  return json({ templates: items })
+  // <!-- END RBP GENERATED: products-module-v3-0 -->
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   await authenticate.admin(request)
   const form = await request.formData()
   const sourceUrl = String(form.get('sourceUrl') || '')
-  const productType = String(form.get('productType') || '')
+  // <!-- BEGIN RBP GENERATED: products-module-v3-0 -->
+  const templateId = String(form.get('templateId') || '')
+  // <!-- END RBP GENERATED: products-module-v3-0 -->
 
   const errors: ActionData['errors'] = {}
   try {
@@ -28,9 +39,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } catch {
     errors.sourceUrl = 'Enter a valid http(s) URL'
   }
-  if (!productType) {
-    errors.productType = 'Select a product type'
+  // <!-- BEGIN RBP GENERATED: products-module-v3-0 -->
+  if (!templateId) {
+    errors.templateId = 'Select a Spec Template'
   }
+  // <!-- END RBP GENERATED: products-module-v3-0 -->
 
   if (Object.keys(errors).length > 0) {
     return json<ActionData>({ ok: false, errors }, { status: 400 })
@@ -41,14 +54,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 }
 
 export default function ImportProductsIndex() {
+  const data = useLoaderData<typeof loader>()
   const actionData = useActionData<ActionData>()
   const nav = useNavigation()
   const [sourceUrl, setSourceUrl] = useState('')
-  const [productType, setProductType] = useState('')
+  // <!-- BEGIN RBP GENERATED: products-module-v3-0 -->
+  const [templateId, setTemplateId] = useState('')
+  // <!-- END RBP GENERATED: products-module-v3-0 -->
   const isSubmitting = nav.state === 'submitting'
 
   return (
     <Page title="Import Products">
+      {/* <!-- BEGIN RBP GENERATED: products-module-v3-0 --> */}
+      <div className="mb-m">
+        <ProductsTabs />
+      </div>
+      {/* <!-- END RBP GENERATED: products-module-v3-0 --> */}
       <Layout>
         <Layout.Section>
           <Card>
@@ -65,19 +86,22 @@ export default function ImportProductsIndex() {
                     placeholder="https://example.com/products.csv or https://example.com/category"
                     error={actionData?.errors?.sourceUrl}
                   />
+                  {/* <!-- BEGIN RBP GENERATED: products-module-v3-0 --> */}
                   <Select
-                    name="productType"
+                    name="templateId"
                     label="Spec Template"
                     options={[
                       { label: 'Select…', value: '' },
-                      { label: 'Rod Blank', value: 'rod-blank' },
-                      { label: 'Guide Set', value: 'guide-set' },
-                      { label: 'Reel Seat', value: 'reel-seat' },
+                      ...(data?.templates ?? []).map((t: { id: string; title: string }) => ({
+                        label: t.title,
+                        value: t.id,
+                      })),
                     ]}
-                    value={productType}
-                    onChange={setProductType}
-                    error={actionData?.errors?.productType}
+                    value={templateId}
+                    onChange={setTemplateId}
+                    error={actionData?.errors?.templateId}
                   />
+                  {/* <!-- END RBP GENERATED: products-module-v3-0 --> */}
                   <div>
                     <Button submit variant="primary" loading={isSubmitting}>
                       Queue Import
@@ -89,6 +113,20 @@ export default function ImportProductsIndex() {
             </div>
           </Card>
         </Layout.Section>
+        {/* <!-- BEGIN RBP GENERATED: products-module-v3-0 --> */}
+        <Layout.Section>
+          <Card>
+            <div className="p-m space-y-s">
+              <Text as="h3" variant="headingMd">
+                Recent imports
+              </Text>
+              <Text as="p" tone="subdued">
+                No recent imports.
+              </Text>
+            </div>
+          </Card>
+        </Layout.Section>
+        {/* <!-- END RBP GENERATED: products-module-v3-0 --> */}
       </Layout>
     </Page>
   )
