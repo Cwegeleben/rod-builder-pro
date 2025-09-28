@@ -191,3 +191,11 @@ shopify app webhook trigger \
 - [App extensions](https://shopify.dev/docs/apps/app-extensions/list)
 - [Shopify Functions](https://shopify.dev/docs/api/functions)
 - [Getting started with internationalizing your app](https://shopify.dev/docs/apps/best-practices/internationalization/getting-started)
+
+## Redirects in a Shopify Embedded App
+
+When deprecating or moving routes, don’t 404 legacy URLs. Add thin redirect stubs that preserve Shopify’s query string (embedded, hmac, host, etc.). See `docs/redirects-guidelines.md` for code samples and a checklist.
+
+## Admin Integration Guide
+
+For best practices on integrating with Shopify Admin (App home, App Bridge + Polaris, UI extensions, admin links, performance), see `docs/admin-integration.md`.
