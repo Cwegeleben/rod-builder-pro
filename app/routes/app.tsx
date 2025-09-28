@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from '@remix-run/node'
-import { Link, Outlet, useLoaderData, useRouteError } from '@remix-run/react'
+import { Outlet, useLoaderData, useRouteError } from '@remix-run/react'
 import { boundary } from '@shopify/shopify-app-remix/server'
 import { AppProvider } from '@shopify/shopify-app-remix/react'
 import { NavMenu } from '@shopify/app-bridge-react'
@@ -29,12 +29,6 @@ export default function App() {
         <a href="/app/products">Products</a>
         <a href="/app/settings">Settings</a>
         {/* <!-- END RBP GENERATED: products-module-v3-0 --> */}
-        <Link to="." rel="home">
-          Home
-        </Link>
-        <Link to="products">Products</Link>
-        <Link to="products/import">Import Products</Link>
-        <Link to="product-types">Spec Templates</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>

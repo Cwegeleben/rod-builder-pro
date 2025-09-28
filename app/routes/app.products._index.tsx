@@ -33,7 +33,7 @@ export default function ProductsIndex() {
                   <Button url="import" variant="primary">
                     Import Products
                   </Button>
-                  <Button url="../product-types" variant="secondary">
+                  <Button url="templates" variant="secondary">
                     Manage Spec Templates
                   </Button>
                 </div>
