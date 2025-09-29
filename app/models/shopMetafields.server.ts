@@ -121,8 +121,16 @@ export async function syncTemplatesToShop(admin: AdminApi): Promise<void> {
       value,
     },
   })
+  if (!resp.ok) {
+    const text = await resp.text()
+    throw new Error(`metafieldsSet HTTP ${resp.status}: ${text}`)
+  }
   const data = (await resp.json()) as {
     data?: { metafieldsSet?: { userErrors?: Array<{ field?: string[]; message: string }> } }
+    errors?: Array<{ message: string }>
+  }
+  if (data?.errors?.length) {
+    throw new Error(`metafieldsSet GQL error: ${data.errors.map(e => e.message).join('; ')}`)
   }
   const errs = data?.data?.metafieldsSet?.userErrors ?? []
   if (errs.length) throw new Error(`metafieldsSet failed: ${errs.map(e => e.message).join('; ')}`)
