@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node'
 import { json, redirect } from '@remix-run/node'
 import { Form, useActionData, useNavigation } from '@remix-run/react'
-import { Page, Layout, Card, Text, TextField, Select, Button, InlineError } from '@shopify/polaris'
+import { Card, Text, TextField, Select, Button, InlineError } from '@shopify/polaris'
 import { useState } from 'react'
 import { authenticate } from '../shopify.server'
 
@@ -48,48 +48,42 @@ export default function ImportProductsIndex() {
   const isSubmitting = nav.state === 'submitting'
 
   return (
-    <Page title="Import Products">
-      <Layout>
-        <Layout.Section>
-          <Card>
-            <div className="p-m space-y-m">
-              <Text as="p">Submit a source URL to import products into a selected Spec Template.</Text>
-              <Form method="post" replace>
-                <div className="space-y-m">
-                  <TextField
-                    name="sourceUrl"
-                    label="Source URL"
-                    value={sourceUrl}
-                    onChange={setSourceUrl}
-                    autoComplete="off"
-                    placeholder="https://example.com/products.csv or https://example.com/category"
-                    error={actionData?.errors?.sourceUrl}
-                  />
-                  <Select
-                    name="productType"
-                    label="Spec Template"
-                    options={[
-                      { label: 'Select…', value: '' },
-                      { label: 'Rod Blank', value: 'rod-blank' },
-                      { label: 'Guide Set', value: 'guide-set' },
-                      { label: 'Reel Seat', value: 'reel-seat' },
-                    ]}
-                    value={productType}
-                    onChange={setProductType}
-                    error={actionData?.errors?.productType}
-                  />
-                  <div>
-                    <Button submit variant="primary" loading={isSubmitting}>
-                      Queue Import
-                    </Button>
-                  </div>
-                </div>
-              </Form>
-              {actionData?.errors && <InlineError message="Please fix the errors above." fieldID="sourceUrl" />}
+    <Card>
+      <div className="p-m space-y-m">
+        <Text as="p">Submit a source URL to import products into a selected Spec Template.</Text>
+        <Form method="post" replace>
+          <div className="space-y-m">
+            <TextField
+              name="sourceUrl"
+              label="Source URL"
+              value={sourceUrl}
+              onChange={setSourceUrl}
+              autoComplete="off"
+              placeholder="https://example.com/products.csv or https://example.com/category"
+              error={actionData?.errors?.sourceUrl}
+            />
+            <Select
+              name="productType"
+              label="Spec Template"
+              options={[
+                { label: 'Select…', value: '' },
+                { label: 'Rod Blank', value: 'rod-blank' },
+                { label: 'Guide Set', value: 'guide-set' },
+                { label: 'Reel Seat', value: 'reel-seat' },
+              ]}
+              value={productType}
+              onChange={setProductType}
+              error={actionData?.errors?.productType}
+            />
+            <div>
+              <Button submit variant="primary" loading={isSubmitting}>
+                Queue Import
+              </Button>
             </div>
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </Page>
+          </div>
+        </Form>
+        {actionData?.errors && <InlineError message="Please fix the errors above." fieldID="sourceUrl" />}
+      </div>
+    </Card>
   )
 }

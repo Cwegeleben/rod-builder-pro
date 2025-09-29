@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { useFetcher, useLoaderData } from '@remix-run/react'
-import { Page, Card, TextField, Text, Button, InlineStack, BlockStack, Select, Checkbox } from '@shopify/polaris'
+import { Card, TextField, Text, Button, InlineStack, BlockStack, Select, Checkbox } from '@shopify/polaris'
 import { useState } from 'react'
 import { authenticate } from '../shopify.server'
 import { getTemplateWithFields } from '../models/specTemplate.server'
@@ -93,7 +93,7 @@ export default function TemplateDetail() {
   // SENTINEL: products-workspace-v3-0 (Spec Template detail editor)
   // BEGIN products-workspace-v3-0
   return (
-    <Page title="Spec Templates">
+    <>
       <Card>
         <BlockStack>
           <Text as="h2" variant="headingMd">
@@ -126,7 +126,7 @@ export default function TemplateDetail() {
           </BlockStack>
         </BlockStack>
       </Card>
-    </Page>
+    </>
   )
   // END products-workspace-v3-0
 }

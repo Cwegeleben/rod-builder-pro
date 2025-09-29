@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
-import { Link, Outlet, useLocation } from '@remix-run/react'
-import { Page, Layout, Tabs, InlineStack } from '@shopify/polaris'
+import { Outlet, useLocation, useNavigate } from '@remix-run/react'
+import { Page, Layout, Tabs } from '@shopify/polaris'
 import { authenticate } from '../shopify.server'
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -10,13 +10,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 function useActiveTab(): number {
   const { pathname } = useLocation()
-  if (pathname.endsWith('/products/templates')) return 2
-  if (pathname.endsWith('/products/import')) return 1
+  if (pathname.includes('/products/templates')) return 2
+  if (pathname.includes('/products/import')) return 1
   return 0
 }
 
 export default function ProductsLayout() {
   const selected = useActiveTab()
+  const navigate = useNavigate()
   // SENTINEL: products-workspace-v3-0 (Products workspace layout with tabs)
   // BEGIN products-workspace-v3-0
   return (
@@ -35,14 +36,12 @@ export default function ProductsLayout() {
               },
             ]}
             selected={selected}
-            onSelect={() => {}}
-          >
-            <InlineStack gap="200">
-              <Link to=".">All</Link>
-              <Link to="import">Import</Link>
-              <Link to="templates">Spec Templates</Link>
-            </InlineStack>
-          </Tabs>
+            onSelect={index => {
+              if (index === 0) navigate('.')
+              else if (index === 1) navigate('import')
+              else navigate('templates')
+            }}
+          />
         </Layout.Section>
         <Layout.Section>
           <Outlet />
