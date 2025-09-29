@@ -199,3 +199,17 @@ When deprecating or moving routes, don’t 404 legacy URLs. Add thin redirect st
 ## Admin Integration Guide
 
 For best practices on integrating with Shopify Admin (App home, App Bridge + Polaris, UI extensions, admin links, performance), see `docs/admin-integration.md`.
+
+## Admin-style UX Direction
+
+We are restructuring the app to emulate Shopify Admin for a consistent, familiar experience:
+
+- Global admin-style layout with left navigation and page headers
+- Index/detail pages patterned after Shopify Admin
+- URL-driven state for filters, sorting, pagination, and saved views
+- Server-side filtering with cursor pagination; optimistic bulk actions with rollback
+
+Design docs:
+
+- Admin architecture: `docs/admin/admin-architecture.md`
+- Products module spec: `docs/admin/products.md`

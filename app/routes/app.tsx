@@ -6,6 +6,7 @@ import { NavMenu } from '@shopify/app-bridge-react'
 import polarisStyles from '@shopify/polaris/build/esm/styles.css?url'
 
 import { authenticate } from '../shopify.server'
+import AdminLayout from '../components/AdminLayout'
 
 export const links = () => [{ rel: 'stylesheet', href: polarisStyles }]
 
@@ -20,7 +21,7 @@ export default function App() {
 
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
-      {/* SENTINEL: products-workspace-v3-0 (Sidebar nav flattening) */}
+      {/* SENTINEL: products-workspace-v3-0 (Sidebar nav flattening -> AdminLayout) */}
       {/* BEGIN products-workspace-v3-0 */}
       <NavMenu>
         <Link to="." rel="home">
@@ -28,8 +29,10 @@ export default function App() {
         </Link>
         <Link to="products">Products</Link>
       </NavMenu>
+      <AdminLayout>
+        <Outlet />
+      </AdminLayout>
       {/* END products-workspace-v3-0 */}
-      <Outlet />
     </AppProvider>
   )
 }

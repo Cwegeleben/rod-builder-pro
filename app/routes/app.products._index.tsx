@@ -1,34 +1,376 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
-import { Card, Text, Button } from '@shopify/polaris'
+import { json } from '@remix-run/node'
+import { useLoaderData, useSearchParams, Link, useFetcher } from '@remix-run/react'
+import {
+  Card,
+  IndexTable,
+  useIndexResourceState,
+  Text,
+  Button,
+  BlockStack,
+  InlineStack,
+  IndexFilters,
+  ChoiceList,
+  IndexFiltersMode,
+} from '@shopify/polaris'
+import { useCallback, useMemo, useState } from 'react'
 import { authenticate } from '../shopify.server'
 
+type ProductRow = {
+  id: string
+  title: string
+  status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED'
+  vendor?: string | null
+  productType?: string | null
+  updatedAt?: string | null
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request)
-  return null
+  const { admin } = await authenticate.admin(request)
+  const url = new URL(request.url)
+  const q = url.searchParams.get('q') || ''
+  const statusParams = url.searchParams.getAll('status')
+  const sortParam = url.searchParams.get('sort') || 'updatedAt desc'
+  const first = Math.max(1, Math.min(100, parseInt(url.searchParams.get('first') || '25', 10)))
+  const after = url.searchParams.get('after') || undefined
+
+  const mapSort = (s: string): { sortKey: 'UPDATED_AT' | 'TITLE'; reverse: boolean } => {
+    const [field, dir] = s.split(' ')
+    if (field === 'title') return { sortKey: 'TITLE', reverse: dir === 'desc' }
+    return { sortKey: 'UPDATED_AT', reverse: dir !== 'asc' }
+  }
+  const { sortKey, reverse } = mapSort(sortParam)
+
+  const queryTokens: string[] = []
+  if (q) queryTokens.push(q)
+  if (statusParams.length === 1) {
+    queryTokens.push(`status:${statusParams[0]}`)
+  } else if (statusParams.length > 1) {
+    queryTokens.push(`(${statusParams.map(s => `status:${s}`).join(' OR ')})`)
+  }
+  const finalQuery = queryTokens.join(' ')
+
+  const GQL = `#graphql
+    query Products($first:Int!, $after:String, $query:String, $sortKey: ProductSortKeys, $reverse:Boolean) {
+      products(first:$first, after:$after, query:$query, sortKey:$sortKey, reverse:$reverse) {
+        edges {
+          cursor
+          node {
+            id
+            title
+            status
+            vendor
+            productType
+            updatedAt
+          }
+        }
+        pageInfo { hasNextPage hasPreviousPage }
+      }
+    }
+  `
+
+  const resp = await admin.graphql(GQL, {
+    variables: { first, after, query: finalQuery || undefined, sortKey, reverse },
+  })
+  const data = (await resp.json()) as {
+    data?: {
+      products?: {
+        edges: Array<{ cursor: string; node: ProductRow }>
+        pageInfo: { hasNextPage: boolean; hasPreviousPage: boolean }
+      }
+    }
+  }
+  const edges = data?.data?.products?.edges ?? []
+  const items: ProductRow[] = edges.map(e => ({
+    id: e.node.id,
+    title: e.node.title,
+    status: e.node.status,
+    vendor: e.node.vendor,
+    productType: e.node.productType,
+    updatedAt: e.node.updatedAt,
+  }))
+  const nextCursor: string | null = edges.length > 0 ? edges[edges.length - 1].cursor : null
+
+  return json({ items, q, status: statusParams, sort: sortParam, first, nextCursor })
 }
 
 export default function ProductsIndex() {
+  const { items, q, status, sort, nextCursor } = useLoaderData<typeof loader>() as {
+    items: ProductRow[]
+    q: string
+    status: string[]
+    sort: string
+    nextCursor: string | null
+  }
+  const [params, setParams] = useSearchParams()
+  const [mode, setMode] = useState<IndexFiltersMode>(IndexFiltersMode.Default)
+  const tabs = useMemo(
+    () => [
+      { id: 'all', content: 'All products' },
+      { id: 'active', content: 'Active' },
+      { id: 'draft', content: 'Draft' },
+      { id: 'archived', content: 'Archived' },
+    ],
+    [],
+  )
+  const selectedTab = useMemo(() => {
+    const view = params.get('view') || 'all'
+    const idx = tabs.findIndex(t => t.id === view)
+    return idx >= 0 ? idx : 0
+  }, [params, tabs])
+
+  const { selectedResources, allResourcesSelected, handleSelectionChange, clearSelection } =
+    useIndexResourceState<ProductRow>(items, {
+      resourceIDResolver: item => item.id,
+    })
+  const fetcher = useFetcher()
+
+  const onQueryChange = useCallback(
+    (value: string) => {
+      const next = new URLSearchParams(params)
+      if (value) next.set('q', value)
+      else next.delete('q')
+      setParams(next, { replace: true })
+    },
+    [params, setParams],
+  )
+
+  const onSortChange = useCallback(
+    (value: string[]) => {
+      const next = new URLSearchParams(params)
+      const v = value?.[0]
+      if (v) next.set('sort', v)
+      else next.delete('sort')
+      setParams(next)
+    },
+    [params, setParams],
+  )
+
+  const empty = items.length === 0
+
+  // Columns chooser via URL param `columns`; fallback to defaults
+  const allColumns = [
+    { key: 'title', label: 'Title' },
+    { key: 'status', label: 'Status' },
+    { key: 'vendor', label: 'Vendor' },
+    { key: 'productType', label: 'Type' },
+    { key: 'updatedAt', label: 'Updated' },
+  ] as const
+  const defaultColumnKeys = ['title', 'status', 'vendor', 'productType', 'updatedAt'] as const
+  const selectedColumnKeys = (() => {
+    const values = params.getAll('columns')
+    if (values.length === 0) return defaultColumnKeys as unknown as string[]
+    return values
+  })()
+  const headings = selectedColumnKeys.map(key => ({
+    title: allColumns.find(c => c.key === key)?.label || key,
+  })) as unknown as [{ title: string }, ...{ title: string }[]]
+
   return (
     <Card>
-      <div className="p-m space-y-m">
-        <Text as="h2" variant="headingLg">
-          Products
-        </Text>
-        <div className="space-y-s">
-          <Text as="p" tone="subdued">
-            No products yet.
+      <BlockStack gap="400">
+        <InlineStack align="space-between">
+          <Text as="h2" variant="headingLg">
+            Products
           </Text>
-          {/* SENTINEL: products-workspace-v3-0 (Products index under tabs) */}
-          <div className="gap-s flex">
+          <InlineStack gap="200">
             <Button url="import" variant="primary">
               Import Products
             </Button>
-            <Button url="templates" variant="secondary">
-              Manage Spec Templates
-            </Button>
-          </div>
-        </div>
-      </div>
+            <Button url="templates">Spec Templates</Button>
+          </InlineStack>
+        </InlineStack>
+
+        <IndexFilters
+          queryValue={q}
+          queryPlaceholder="Filter products"
+          onQueryChange={onQueryChange}
+          onQueryClear={() => onQueryChange('')}
+          tabs={tabs}
+          selected={selectedTab}
+          onSelect={index => {
+            const next = new URLSearchParams(params)
+            const tab = tabs[index]
+            next.set('view', tab.id)
+            next.delete('status')
+            if (tab.id !== 'all') next.append('status', tab.id)
+            setParams(next)
+          }}
+          mode={mode}
+          setMode={setMode}
+          onClearAll={() => {
+            const next = new URLSearchParams(params)
+            next.delete('q')
+            next.delete('status')
+            next.delete('columns')
+            setParams(next)
+          }}
+          filters={[
+            {
+              key: 'status',
+              label: 'Status',
+              filter: (
+                <ChoiceList
+                  title="Status"
+                  titleHidden
+                  choices={[
+                    { label: 'Active', value: 'active' },
+                    { label: 'Draft', value: 'draft' },
+                    { label: 'Archived', value: 'archived' },
+                  ]}
+                  selected={status}
+                  onChange={values => {
+                    const next = new URLSearchParams(params)
+                    next.delete('status')
+                    values.forEach(v => next.append('status', v))
+                    setParams(next)
+                  }}
+                />
+              ),
+            },
+            {
+              key: 'columns',
+              label: 'Columns',
+              filter: (
+                <ChoiceList
+                  title="Columns"
+                  titleHidden
+                  choices={allColumns.map(c => ({ label: c.label, value: c.key }))}
+                  selected={selectedColumnKeys}
+                  allowMultiple
+                  onChange={values => {
+                    const next = new URLSearchParams(params)
+                    next.delete('columns')
+                    values.forEach(v => next.append('columns', v))
+                    setParams(next)
+                  }}
+                />
+              ),
+            },
+          ]}
+          sortOptions={[
+            { label: 'Updated', value: 'updatedAt desc', directionLabel: 'Newest first' },
+            { label: 'Updated', value: 'updatedAt asc', directionLabel: 'Oldest first' },
+            { label: 'Title', value: 'title asc', directionLabel: 'A-Z' },
+            { label: 'Title', value: 'title desc', directionLabel: 'Z-A' },
+          ]}
+          sortSelected={[sort]}
+          onSort={onSortChange}
+        />
+
+        {empty ? (
+          <Card>
+            <div className="p-m space-y-m">
+              <Text as="p" tone="subdued">
+                No products yet.
+              </Text>
+              <InlineStack gap="200">
+                <Button url="import" variant="primary">
+                  Import Products
+                </Button>
+                <Button url="templates" variant="secondary">
+                  Manage Spec Templates
+                </Button>
+              </InlineStack>
+            </div>
+          </Card>
+        ) : (
+          <BlockStack gap="300">
+            <InlineStack gap="200" align="space-between">
+              <Text as="p" tone="subdued">
+                {selectedResources.length} selected
+              </Text>
+              <InlineStack gap="200">
+                <Button
+                  disabled={selectedResources.length === 0 || fetcher.state === 'submitting'}
+                  onClick={() => {
+                    const form = new FormData()
+                    form.append('_action', 'setStatus')
+                    form.append('status', 'ACTIVE')
+                    selectedResources.forEach(id => form.append('ids', String(id)))
+                    fetcher.submit(form, { method: 'post', action: '/app/resources/products' })
+                    clearSelection()
+                  }}
+                >
+                  Set active
+                </Button>
+                <Button
+                  disabled={selectedResources.length === 0 || fetcher.state === 'submitting'}
+                  onClick={() => {
+                    const form = new FormData()
+                    form.append('_action', 'setStatus')
+                    form.append('status', 'DRAFT')
+                    selectedResources.forEach(id => form.append('ids', String(id)))
+                    fetcher.submit(form, { method: 'post', action: '/app/resources/products' })
+                    clearSelection()
+                  }}
+                >
+                  Set draft
+                </Button>
+                <Button
+                  tone="critical"
+                  disabled={selectedResources.length === 0 || fetcher.state === 'submitting'}
+                  onClick={() => {
+                    const form = new FormData()
+                    form.append('_action', 'setStatus')
+                    form.append('status', 'ARCHIVED')
+                    selectedResources.forEach(id => form.append('ids', String(id)))
+                    fetcher.submit(form, { method: 'post', action: '/app/resources/products' })
+                    clearSelection()
+                  }}
+                >
+                  Archive
+                </Button>
+              </InlineStack>
+            </InlineStack>
+            <IndexTable
+              resourceName={{ singular: 'product', plural: 'products' }}
+              itemCount={items.length}
+              selectedItemsCount={allResourcesSelected ? 'All' : selectedResources.length}
+              onSelectionChange={handleSelectionChange}
+              headings={headings}
+            >
+              {items.map((item, index) => (
+                <IndexTable.Row
+                  id={item.id}
+                  key={item.id}
+                  position={index}
+                  selected={selectedResources.includes(item.id)}
+                >
+                  {selectedColumnKeys.map(key => (
+                    <IndexTable.Cell key={key}>
+                      {key === 'title' ? (
+                        <Link to={`/app/products/${item.id}`}>{item.title}</Link>
+                      ) : key === 'status' ? (
+                        <Text as="span">{item.status.toLowerCase()}</Text>
+                      ) : key === 'vendor' ? (
+                        <Text as="span">{item.vendor || '-'}</Text>
+                      ) : key === 'productType' ? (
+                        <Text as="span">{item.productType || '-'}</Text>
+                      ) : key === 'updatedAt' ? (
+                        <Text as="span">{item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '-'}</Text>
+                      ) : null}
+                    </IndexTable.Cell>
+                  ))}
+                </IndexTable.Row>
+              ))}
+            </IndexTable>
+            <InlineStack align="end" gap="200">
+              <Button
+                disabled={!nextCursor}
+                onClick={() => {
+                  if (!nextCursor) return
+                  const next = new URLSearchParams(params)
+                  next.set('after', nextCursor)
+                  setParams(next)
+                }}
+              >
+                Next
+              </Button>
+            </InlineStack>
+          </BlockStack>
+        )}
+      </BlockStack>
     </Card>
   )
 }
