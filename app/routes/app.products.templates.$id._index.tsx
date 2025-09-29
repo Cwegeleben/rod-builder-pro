@@ -14,7 +14,7 @@ import {
   IndexTable,
   useIndexResourceState,
 } from '@shopify/polaris'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { authenticate } from '../shopify.server'
 import { getTemplateWithFields } from '../models/specTemplate.server'
 
@@ -87,6 +87,8 @@ export default function TemplateDetail() {
   const revalidator = useRevalidator()
   const [name, setName] = useState(data.name)
   const [editing, setEditing] = useState<LoaderData['fields'][number] | null>(null)
+  const [dirty, setDirty] = useState(false)
+  const publishFetcher = useFetcher()
   const { selectedResources, allResourcesSelected, handleSelectionChange } = useIndexResourceState(data.fields, {
     resourceIDResolver: item => item.id,
   })
@@ -97,6 +99,7 @@ export default function TemplateDetail() {
     form.append('id', data.id)
     form.append('name', next)
     renameFetcher.submit(form, { method: 'post', action: '/resources/spec-templates' })
+    setDirty(true)
   }
 
   const addFieldSubmit = (formValues: Record<string, string | boolean>) => {
@@ -105,6 +108,7 @@ export default function TemplateDetail() {
     form.append('templateId', data.id)
     for (const [k, v] of Object.entries(formValues)) form.append(k, String(v))
     addFetcher.submit(form, { method: 'post', action: '/resources/spec-templates' })
+    setDirty(true)
   }
 
   // SENTINEL: products-workspace-v3-0 (Spec Template detail editor)
@@ -127,6 +131,7 @@ export default function TemplateDetail() {
             onChange={v => {
               setName(v)
               rename(v)
+              setDirty(true)
             }}
             autoComplete="off"
           />
@@ -175,7 +180,7 @@ export default function TemplateDetail() {
                   <Text as="span">{f.required ? 'Yes' : 'No'}</Text>
                 </IndexTable.Cell>
                 <IndexTable.Cell>
-                  <FieldActions field={f} onEdit={() => setEditing(f)} />
+                  <FieldActions field={f} onEdit={() => setEditing(f)} onDirty={() => setDirty(true)} />
                 </IndexTable.Cell>
               </IndexTable.Row>
             ))}
@@ -191,8 +196,39 @@ export default function TemplateDetail() {
           onSaved={() => {
             setEditing(null)
             revalidator.revalidate()
+            setDirty(true)
           }}
         />
+      )}
+
+      {dirty && (
+        <div className="p-m">
+          <InlineStack align="space-between">
+            <Text as="p">You have unpublished changes</Text>
+            <InlineStack gap="200">
+              <Button
+                onClick={() => {
+                  const form = new FormData()
+                  form.append('_action', 'publishTemplates')
+                  publishFetcher.submit(form, { method: 'post', action: '/resources/spec-templates' })
+                }}
+                variant="primary"
+                loading={publishFetcher.state === 'submitting'}
+              >
+                Publish
+              </Button>
+              <Button
+                onClick={() => {
+                  revalidator.revalidate()
+                  setName(data.name)
+                  setDirty(false)
+                }}
+              >
+                Discard
+              </Button>
+            </InlineStack>
+          </InlineStack>
+        </div>
       )}
     </>
   )
@@ -349,13 +385,22 @@ function AddField({ onSubmit }: { onSubmit: (values: Record<string, string | boo
   )
 }
 
-function FieldActions({ field, onEdit }: { field: LoaderData['fields'][number]; onEdit: () => void }) {
+function FieldActions({
+  field,
+  onEdit,
+  onDirty,
+}: {
+  field: LoaderData['fields'][number]
+  onEdit: () => void
+  onDirty: () => void
+}) {
   const fetcher = useFetcher()
   const remove = () => {
     const form = new FormData()
     form.append('_action', 'deleteField')
     form.append('id', field.id)
     fetcher.submit(form, { method: 'post', action: '/resources/spec-templates' })
+    onDirty()
   }
   const move = (direction: 'up' | 'down') => {
     const form = new FormData()
@@ -363,7 +408,12 @@ function FieldActions({ field, onEdit }: { field: LoaderData['fields'][number]; 
     form.append('id', field.id)
     form.append('direction', direction)
     fetcher.submit(form, { method: 'post', action: '/resources/spec-templates' })
+    onDirty()
   }
+
+  useEffect(() => {
+    // no-op; placeholder if we later need to react to fetcher completion
+  }, [fetcher.state])
 
   return (
     <InlineStack gap="100">

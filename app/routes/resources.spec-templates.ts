@@ -13,23 +13,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const actionType = String(form.get('_action') || '')
 
   switch (actionType) {
+    case 'publishTemplates': {
+      await syncTemplatesToShop(admin)
+      return json({ ok: true })
+    }
     case 'createTemplate': {
       const name = String(form.get('name') || 'Untitled template')
       const t = await createTemplate(name)
-      await syncTemplatesToShop(admin)
       return redirect(`/app/products/templates/${t.id}`)
     }
     case 'deleteTemplates': {
       const ids = form.getAll('ids').map(String)
       await deleteTemplates(ids)
-      await syncTemplatesToShop(admin)
       return json({ ok: true })
     }
     case 'renameTemplate': {
       const id = String(form.get('id'))
       const name = String(form.get('name'))
       await renameTemplate(id, name)
-      await syncTemplatesToShop(admin)
       return json({ ok: true })
     }
     case 'addField': {
@@ -55,7 +56,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         metafieldKey,
         metafieldType,
       })
-      await syncTemplatesToShop(admin)
       return json({ ok: true, field: f })
     }
     case 'updateField': {
@@ -65,20 +65,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (!['_action', 'id'].includes(k)) data[k] = v
       }
       const f = await updateField(id, data)
-      await syncTemplatesToShop(admin)
       return json({ ok: true, field: f })
     }
     case 'deleteField': {
       const id = String(form.get('id'))
       await deleteField(id)
-      await syncTemplatesToShop(admin)
       return json({ ok: true })
     }
     case 'reorderField': {
       const id = String(form.get('id'))
       const direction = String(form.get('direction')) as 'up' | 'down'
       const f = await reorderField(id, direction)
-      await syncTemplatesToShop(admin)
       return json({ ok: true, field: f })
     }
     default:
