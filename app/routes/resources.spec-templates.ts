@@ -1,13 +1,14 @@
 import type { ActionFunctionArgs } from '@remix-run/node'
 import { json, redirect } from '@remix-run/node'
 import { authenticate } from '../shopify.server'
+import { syncTemplatesToShop } from '../models/shopMetafields.server'
 import { createTemplate, deleteTemplates, renameTemplate } from '../models/specTemplate.server'
 import { addField, updateField, deleteField, reorderField } from '../models/specField.server'
 
 // SENTINEL: products-workspace-v3-0 (Resource route for mutations)
 // BEGIN products-workspace-v3-0
 export const action = async ({ request }: ActionFunctionArgs) => {
-  await authenticate.admin(request)
+  const { admin } = await authenticate.admin(request)
   const form = await request.formData()
   const actionType = String(form.get('_action') || '')
 
@@ -15,17 +16,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     case 'createTemplate': {
       const name = String(form.get('name') || 'Untitled template')
       const t = await createTemplate(name)
+      await syncTemplatesToShop(admin)
       return redirect(`/app/products/templates/${t.id}`)
     }
     case 'deleteTemplates': {
       const ids = form.getAll('ids').map(String)
       await deleteTemplates(ids)
+      await syncTemplatesToShop(admin)
       return json({ ok: true })
     }
     case 'renameTemplate': {
       const id = String(form.get('id'))
       const name = String(form.get('name'))
       await renameTemplate(id, name)
+      await syncTemplatesToShop(admin)
       return json({ ok: true })
     }
     case 'addField': {
@@ -51,6 +55,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         metafieldKey,
         metafieldType,
       })
+      await syncTemplatesToShop(admin)
       return json({ ok: true, field: f })
     }
     case 'updateField': {
@@ -60,17 +65,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (!['_action', 'id'].includes(k)) data[k] = v
       }
       const f = await updateField(id, data)
+      await syncTemplatesToShop(admin)
       return json({ ok: true, field: f })
     }
     case 'deleteField': {
       const id = String(form.get('id'))
       await deleteField(id)
+      await syncTemplatesToShop(admin)
       return json({ ok: true })
     }
     case 'reorderField': {
       const id = String(form.get('id'))
       const direction = String(form.get('direction')) as 'up' | 'down'
       const f = await reorderField(id, direction)
+      await syncTemplatesToShop(admin)
       return json({ ok: true, field: f })
     }
     default:

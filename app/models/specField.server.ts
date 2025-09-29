@@ -14,13 +14,11 @@ export async function addField(params: {
   metafieldKey?: string | null
   metafieldType?: string | null
 }) {
-  // @ts-expect-error prisma type for custom models will exist after generate
   const maxPos = await prisma.specField.aggregate({
     where: { templateId: params.templateId },
     _max: { position: true },
   })
   const position = (maxPos._max.position ?? 0) + 1
-  // @ts-expect-error prisma type for custom models will exist after generate
   return prisma.specField.create({
     data: { ...params, position },
   })
@@ -30,22 +28,28 @@ export async function updateField(id: string, data: Record<string, FormDataEntry
   const patch: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(data)) {
     if (['required'].includes(k)) patch[k] = v === 'on' || v === 'true'
+    else if (['coreFieldPath', 'metafieldNamespace', 'metafieldKey', 'metafieldType'].includes(k))
+      patch[k] = v === '' ? null : v
     else patch[k] = v
   }
-  // @ts-expect-error prisma type for custom models will exist after generate
+  // If switching storage, clear the other mapping fields explicitly
+  if (patch['storage'] === 'CORE') {
+    patch['metafieldNamespace'] = null
+    patch['metafieldKey'] = null
+    patch['metafieldType'] = null
+  } else if (patch['storage'] === 'METAFIELD') {
+    patch['coreFieldPath'] = null
+  }
   return prisma.specField.update({ where: { id }, data: patch })
 }
 
 export async function deleteField(id: string) {
-  // @ts-expect-error prisma type for custom models will exist after generate
   return prisma.specField.delete({ where: { id } })
 }
 
 export async function reorderField(id: string, direction: 'up' | 'down') {
-  // @ts-expect-error prisma type for custom models will exist after generate
   const current = await prisma.specField.findUnique({ where: { id } })
   if (!current) return null
-  // @ts-expect-error prisma type for custom models will exist after generate
   const swapWith = await prisma.specField.findFirst({
     where: {
       templateId: current.templateId,
@@ -55,12 +59,9 @@ export async function reorderField(id: string, direction: 'up' | 'down') {
   })
   if (!swapWith) return current
   await prisma.$transaction([
-    // @ts-expect-error prisma type for custom models will exist after generate
     prisma.specField.update({ where: { id: current.id }, data: { position: swapWith.position } }),
-    // @ts-expect-error prisma type for custom models will exist after generate
     prisma.specField.update({ where: { id: swapWith.id }, data: { position: current.position } }),
   ])
-  // @ts-expect-error prisma type for custom models will exist after generate
   return prisma.specField.findUnique({ where: { id } })
 }
 // END products-workspace-v3-0
