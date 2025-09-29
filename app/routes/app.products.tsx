@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { Outlet } from '@remix-run/react'
-import { Page, Layout, Text } from '@shopify/polaris'
+import { Page, Layout } from '@shopify/polaris'
 import { authenticate } from '../shopify.server'
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -14,11 +14,6 @@ export default function ProductsLayout() {
   return (
     <Page title="Products">
       <Layout>
-        <Layout.Section>
-          <Text as="p" tone="subdued">
-            Browse and manage products. Use the left navigation for Import and Spec Templates.
-          </Text>
-        </Layout.Section>
         <Layout.Section>
           <Outlet />
         </Layout.Section>

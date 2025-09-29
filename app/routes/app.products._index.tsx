@@ -177,7 +177,7 @@ export default function ProductsIndex() {
             <Button url="import" variant="primary">
               Import Products
             </Button>
-            <Button url="templates">Spec Templates</Button>
+            <Button url="templates">Templates</Button>
           </InlineStack>
         </InlineStack>
 
@@ -269,7 +269,7 @@ export default function ProductsIndex() {
                   Import Products
                 </Button>
                 <Button url="templates" variant="secondary">
-                  Manage Spec Templates
+                  Templates
                 </Button>
               </InlineStack>
             </div>

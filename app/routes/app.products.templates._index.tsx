@@ -44,11 +44,11 @@ export default function TemplatesIndex() {
     <Card>
       <BlockStack>
         <InlineStack align="space-between">
-          <Text as="p" tone="subdued">
-            Manage template schemas for product specs.
+          <Text as="h2" variant="headingLg">
+            Templates
           </Text>
           <Button onClick={createTemplate} variant="primary">
-            New template
+            Add template
           </Button>
         </InlineStack>
         <IndexTable

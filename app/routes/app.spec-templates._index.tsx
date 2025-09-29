@@ -32,19 +32,19 @@ export default function SpecTemplatesIndex() {
   }
 
   return (
-    <Page title="Spec Templates" primaryAction={{ content: 'Import Products', url: '/app/import' }}>
+    <Page title="Templates" primaryAction={{ content: 'Add template' }}>
       <Layout>
         <Layout.Section>
           <Card>
             <div className="p-m space-y-m">
               <Text as="p" tone="subdued">
-                Define the fields/columns shown in your Catalog per product type.
+                Manage template schemas for product specs.
               </Text>
 
               <div className="gap-s flex items-end">
                 <TextField label="New template name" value={name} onChange={setName} autoComplete="off" />
                 <Button onClick={addTemplate} variant="primary">
-                  Add Template
+                  Add template
                 </Button>
               </div>
 

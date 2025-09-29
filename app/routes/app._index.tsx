@@ -25,9 +25,7 @@ export default function Index() {
                   Products
                 </Button>
                 <Button url="products/import">Import Products</Button>
-                <Button url="product-types" variant="secondary">
-                  Spec Templates
-                </Button>
+                {/* Templates entry lives under Products > Templates; omitting legacy link */}
               </div>
             </div>
           </Card>
