@@ -30,3 +30,44 @@ model Session {
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
 }
+
+// SENTINEL: products-workspace-v3-0 (Prisma models)
+// BEGIN products-workspace-v3-0
+enum SpecFieldType {
+  text
+  number
+  boolean
+  select
+}
+
+enum FieldStorage {
+  CORE
+  METAFIELD
+}
+
+model SpecTemplate {
+  id        String      @id @default(cuid())
+  name      String      @unique
+  fields    SpecField[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}
+
+model SpecField {
+  id                 String        @id @default(cuid())
+  templateId         String
+  template           SpecTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  key                String
+  label              String
+  type               SpecFieldType
+  required           Boolean       @default(false)
+  position           Int
+  storage            FieldStorage
+  coreFieldPath      String?
+  metafieldNamespace String?
+  metafieldKey       String?
+  metafieldType      String?
+
+  @@unique([templateId, key])
+}
+// END products-workspace-v3-0

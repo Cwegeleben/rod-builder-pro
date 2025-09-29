@@ -21,11 +21,12 @@ export default function ProductsIndex() {
                 <Text as="p" tone="subdued">
                   No products yet.
                 </Text>
+                {/* SENTINEL: products-workspace-v3-0 (Products index under tabs) */}
                 <div className="gap-s flex">
                   <Button url="import" variant="primary">
                     Import Products
                   </Button>
-                  <Button url="../product-types" variant="secondary">
+                  <Button url="templates" variant="secondary">
                     Manage Spec Templates
                   </Button>
                 </div>

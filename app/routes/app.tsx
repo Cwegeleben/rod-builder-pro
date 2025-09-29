@@ -20,14 +20,15 @@ export default function App() {
 
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
+      {/* SENTINEL: products-workspace-v3-0 (Sidebar nav flattening) */}
+      {/* BEGIN products-workspace-v3-0 */}
       <NavMenu>
         <Link to="." rel="home">
           Home
         </Link>
         <Link to="products">Products</Link>
-        <Link to="products/import">Import Products</Link>
-        <Link to="product-types">Spec Templates</Link>
       </NavMenu>
+      {/* END products-workspace-v3-0 */}
       <Outlet />
     </AppProvider>
   )
