@@ -81,20 +81,23 @@ async function buildTemplatesPayload() {
   return payload
 }
 
-async function getShopId(admin: AdminApi): Promise<string> {
+// Prefer AppInstallation metafield storage to avoid additional scopes.
+async function getAppInstallationId(admin: AdminApi): Promise<string> {
   const GQL = `#graphql
-    query ShopId { shop { id } }
+    query AppInst { currentAppInstallation { id } }
   `
   const resp = await admin.graphql(GQL)
-  const data = (await resp.json()) as { data?: { shop?: { id: string } } }
-  const id = data?.data?.shop?.id
-  if (!id) throw new Error('Unable to resolve Shop ID from Admin API')
+  if (!resp.ok) throw new Error(`currentAppInstallation HTTP ${resp.status}`)
+  const data = (await resp.json()) as { data?: { currentAppInstallation?: { id: string } } }
+  const id = data?.data?.currentAppInstallation?.id
+  if (!id) throw new Error('Unable to resolve AppInstallation ID')
   return id
 }
 
 // Public: sync the shop-level metafield containing all templates as JSON
 export async function syncTemplatesToShop(admin: AdminApi): Promise<void> {
-  const ownerId = await getShopId(admin)
+  // Store under the AppInstallation metafield. No special metafield scopes required.
+  const ownerId = await getAppInstallationId(admin)
   const payload = await buildTemplatesPayload()
   const value = JSON.stringify(payload)
 
@@ -168,7 +171,7 @@ export async function getTemplatesFromShop(
 ): Promise<{ version: string; updatedAt: string; templates: TemplateOut[] } | null> {
   const GQL = `#graphql
     query GetTemplates($namespace: String!, $key: String!) {
-      shop {
+      currentAppInstallation {
         metafield(namespace: $namespace, key: $key) {
           id
           type
@@ -182,8 +185,8 @@ export async function getTemplatesFromShop(
   const resp = await admin.graphql(GQL, {
     variables: { namespace: NS, key: SHOP_TEMPLATES_KEY },
   })
-  const data = (await resp.json()) as { data?: { shop?: { metafield?: { value?: string | null } } } }
-  const str = data?.data?.shop?.metafield?.value
+  const data = (await resp.json()) as { data?: { currentAppInstallation?: { metafield?: { value?: string | null } } } }
+  const str = data?.data?.currentAppInstallation?.metafield?.value
   if (!str) return null
   try {
     return JSON.parse(str)
