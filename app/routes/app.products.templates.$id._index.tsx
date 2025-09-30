@@ -173,6 +173,14 @@ export default function TemplateDetail() {
         </BlockStack>
       </Card>
       <div style={{ height: 12 }} />
+      {/* Guard: require a template name before adding fields */}
+      {!name.trim() && (
+        <div className="p-m">
+          <Banner tone="info" title="Add a template name to get started">
+            <p>Enter and save a template name to enable field creation. We’ll use it to prefill metafield mapping.</p>
+          </Banner>
+        </div>
+      )}
       {publishError && (
         <div className="p-m">
           <Banner tone="critical" title="Publish failed">
@@ -186,7 +194,7 @@ export default function TemplateDetail() {
             Fields
           </Text>
           {/* Add field */}
-          <AddField onSubmit={addFieldSubmit} />
+          <AddField templateName={name} existingKeys={data.fields.map(f => f.key)} onSubmit={addFieldSubmit} />
           {/* Existing fields in a table */}
           <IndexTable
             resourceName={{ singular: 'field', plural: 'fields' }}
@@ -233,6 +241,7 @@ export default function TemplateDetail() {
       {/* Edit field modal */}
       {editing && (
         <EditFieldModal
+          templateName={name}
           field={editing}
           onClose={() => setEditing(null)}
           onSaved={() => {
@@ -249,7 +258,15 @@ export default function TemplateDetail() {
   // END products-workspace-v3-0
 }
 
-function AddField({ onSubmit }: { onSubmit: (values: Record<string, string | boolean>) => void }) {
+function AddField({
+  templateName,
+  existingKeys,
+  onSubmit,
+}: {
+  templateName: string
+  existingKeys: string[]
+  onSubmit: (values: Record<string, string | boolean>) => void
+}) {
   const [key, setKey] = useState('')
   const [label, setLabel] = useState('')
   const [type, setType] = useState<'text' | 'number' | 'boolean' | 'select'>('text')
@@ -269,6 +286,29 @@ function AddField({ onSubmit }: { onSubmit: (values: Record<string, string | boo
       .replace(/^_+|_+$/g, '')
       .replace(/_+/g, '_')
 
+  const dedupeKey = (base: string) => {
+    let k = base
+    let i = 2
+    while (existingKeys.includes(k)) {
+      k = `${base}_${i}`
+      i += 1
+    }
+    return k
+  }
+
+  const metafieldTypeFor = (t: 'text' | 'number' | 'boolean' | 'select') => {
+    switch (t) {
+      case 'number':
+        return 'number_integer'
+      case 'boolean':
+        return 'boolean'
+      case 'select':
+        return 'single_line_text_field'
+      default:
+        return 'single_line_text_field'
+    }
+  }
+
   const keyError = key
     ? /[a-z0-9_]+/.test(key)
       ? undefined
@@ -285,11 +325,20 @@ function AddField({ onSubmit }: { onSubmit: (values: Record<string, string | boo
     }
   })()
 
-  const isValid = !keyError && !labelError && !storageErrors.ns && !storageErrors.mkey && !storageErrors.mtype
+  const duplicateKey = key ? existingKeys.includes(key) : false
+  const isValid =
+    !keyError && !labelError && !storageErrors.ns && !storageErrors.mkey && !storageErrors.mtype && !duplicateKey
 
   const onLabelChange = (v: string) => {
     setLabel(v)
-    if (!keyEdited) setKey(slugify(v))
+    if (!keyEdited) {
+      const base = `${templateName ? slugify(templateName) + '_' : ''}${slugify(v)}`
+      setKey(dedupeKey(base))
+    }
+    if (storage === 'METAFIELD') {
+      if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
+      if (!metafieldKey) setMetaKey(slugify(v))
+    }
   }
 
   const onKeyChange = (v: string) => {
@@ -331,13 +380,17 @@ function AddField({ onSubmit }: { onSubmit: (values: Record<string, string | boo
               onChange={onKeyChange}
               autoComplete="off"
               helpText="Machine key (auto-generated from label). You can override."
-              error={keyError}
+              error={duplicateKey ? 'Key already exists' : keyError}
             />
             <Select
               label="Type"
               options={['text', 'number', 'boolean', 'select'].map(v => ({ label: v, value: v }))}
               value={type}
-              onChange={v => setType(v as 'text' | 'number' | 'boolean' | 'select')}
+              onChange={v => {
+                const nv = v as 'text' | 'number' | 'boolean' | 'select'
+                setType(nv)
+                if (storage === 'METAFIELD') setMetaType(metafieldTypeFor(nv))
+              }}
             />
             <Checkbox label="Required" checked={required} onChange={setRequired} />
           </FormLayout.Group>
@@ -350,7 +403,15 @@ function AddField({ onSubmit }: { onSubmit: (values: Record<string, string | boo
                 { label: 'Metafield', value: 'METAFIELD' },
               ]}
               value={storage}
-              onChange={v => setStorage(v as 'CORE' | 'METAFIELD')}
+              onChange={v => {
+                const ns = v as 'CORE' | 'METAFIELD'
+                setStorage(ns)
+                if (ns === 'METAFIELD') {
+                  if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
+                  if (!metafieldKey) setMetaKey(slugify(label || ''))
+                  setMetaType(metafieldTypeFor(type))
+                }
+              }}
               helpText="Choose where this value is stored on the product"
             />
             {storage === 'CORE' ? (
@@ -389,7 +450,7 @@ function AddField({ onSubmit }: { onSubmit: (values: Record<string, string | boo
           </FormLayout.Group>
 
           <InlineStack align="end">
-            <Button onClick={submit} variant="primary" disabled={!isValid}>
+            <Button onClick={submit} variant="primary" disabled={!isValid || !templateName.trim()}>
               Add field
             </Button>
           </InlineStack>
@@ -448,10 +509,12 @@ function FieldActions({
 }
 
 function EditFieldModal({
+  templateName,
   field,
   onClose,
   onSaved,
 }: {
+  templateName: string
   field: LoaderData['fields'][number]
   onClose: () => void
   onSaved: () => void
@@ -466,6 +529,25 @@ function EditFieldModal({
   const [metafieldNamespace, setMetaNs] = useState<string>(field.metafieldNamespace || '')
   const [metafieldKey, setMetaKey] = useState<string>(field.metafieldKey || '')
   const [metafieldType, setMetaType] = useState<string>(field.metafieldType || 'single_line_text_field')
+  const slugify = (s: string) =>
+    s
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .replace(/_+/g, '_')
+  const metafieldTypeFor = (t: 'text' | 'number' | 'boolean' | 'select') => {
+    switch (t) {
+      case 'number':
+        return 'number_integer'
+      case 'boolean':
+        return 'boolean'
+      case 'select':
+        return 'single_line_text_field'
+      default:
+        return 'single_line_text_field'
+    }
+  }
 
   const keyError = key
     ? /[a-z0-9_]+/.test(key)
@@ -541,7 +623,15 @@ function EditFieldModal({
                   { label: 'Metafield', value: 'METAFIELD' },
                 ]}
                 value={storage}
-                onChange={v => setStorage(v as 'CORE' | 'METAFIELD')}
+                onChange={v => {
+                  const ns = v as 'CORE' | 'METAFIELD'
+                  setStorage(ns)
+                  if (ns === 'METAFIELD') {
+                    if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
+                    if (!metafieldKey) setMetaKey(slugify(label || ''))
+                    setMetaType(metafieldTypeFor(type))
+                  }
+                }}
               />
               {storage === 'CORE' ? (
                 <Select
