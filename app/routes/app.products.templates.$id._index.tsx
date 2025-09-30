@@ -338,17 +338,21 @@ function AddField({
     setLabel(v)
     if (!keyEdited) {
       const base = `${templateName ? slugify(templateName) + '_' : ''}${slugify(v)}`
-      setKey(dedupeKey(base))
+      const nextKey = dedupeKey(base)
+      setKey(nextKey)
+      // Prefill metafield key from the machine key
+      if (storage === 'METAFIELD' && !metafieldKey) setMetaKey(slugify(nextKey))
     }
     if (storage === 'METAFIELD') {
       if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
-      if (!metafieldKey) setMetaKey(slugify(v))
+      // meta key handled above from machine key
     }
   }
 
   const onKeyChange = (v: string) => {
     setKey(v)
     setKeyEdited(true)
+    if (storage === 'METAFIELD' && !metafieldKey) setMetaKey(slugify(v))
   }
 
   const submit = () => {
@@ -413,7 +417,7 @@ function AddField({
                 setStorage(ns)
                 if (ns === 'METAFIELD') {
                   if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
-                  if (!metafieldKey) setMetaKey(slugify(label || ''))
+                  if (!metafieldKey) setMetaKey(slugify(key || label || ''))
                   setMetaType(metafieldTypeFor(type))
                 }
               }}
@@ -572,6 +576,11 @@ function EditFieldModal({
 
   const isValid = !keyError && !labelError && !storageErrors.ns && !storageErrors.mkey && !storageErrors.mtype
 
+  const onKeyChanged = (v: string) => {
+    setKey(v)
+    if (storage === 'METAFIELD' && !metafieldKey) setMetaKey(slugify(v))
+  }
+
   const onSubmit = () => {
     if (!isValid) return
     const form = new FormData()
@@ -610,7 +619,7 @@ function EditFieldModal({
           <FormLayout>
             <FormLayout.Group>
               <TextField label="Label" value={label} onChange={setLabel} error={labelError} autoComplete="off" />
-              <TextField label="Key" value={key} onChange={setKey} error={keyError} autoComplete="off" />
+              <TextField label="Key" value={key} onChange={onKeyChanged} error={keyError} autoComplete="off" />
               <Select
                 label="Type"
                 options={['text', 'number', 'boolean', 'select'].map(v => ({ label: v, value: v }))}
@@ -633,7 +642,7 @@ function EditFieldModal({
                   setStorage(ns)
                   if (ns === 'METAFIELD') {
                     if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
-                    if (!metafieldKey) setMetaKey(slugify(label || ''))
+                    if (!metafieldKey) setMetaKey(slugify(key || label || ''))
                     setMetaType(metafieldTypeFor(type))
                   }
                 }}
