@@ -129,7 +129,7 @@ export default function TemplateDetail() {
   // BEGIN products-workspace-v3-0
   return (
     <>
-      <HelpBanner id={`template-detail-${data.id}`} title="How this page works">
+      <HelpBanner id={`template-detail-${data.id}`} title="How this page works" learnMoreHref="/app/docs">
         Name your template, add fields, then Publish. Publishing syncs changes to a shop metafield so products can use
         this template. You can map fields to core product properties or to product metafields.
       </HelpBanner>

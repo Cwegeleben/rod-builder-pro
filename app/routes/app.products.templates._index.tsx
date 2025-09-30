@@ -44,7 +44,7 @@ export default function TemplatesIndex() {
   return (
     <Card>
       <BlockStack>
-        <HelpBanner id="templates-index" title="Product spec templates">
+        <HelpBanner id="templates-index" title="Product spec templates" learnMoreHref="/app/docs">
           Create templates that define the fields your products should capture. Publish to sync with Shopify. Assign a
           template to a product from the product row.
         </HelpBanner>
