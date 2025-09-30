@@ -13,6 +13,8 @@ import {
   FormLayout,
   IndexTable,
   useIndexResourceState,
+  ContextualSaveBar,
+  Banner,
 } from '@shopify/polaris'
 import { useEffect, useState } from 'react'
 import { authenticate } from '../shopify.server'
@@ -89,9 +91,20 @@ export default function TemplateDetail() {
   const [editing, setEditing] = useState<LoaderData['fields'][number] | null>(null)
   const [dirty, setDirty] = useState(false)
   const publishFetcher = useFetcher()
+  type PublishResult = { ok: boolean; error?: string }
+  const publishData = publishFetcher.data as PublishResult | undefined
+  const publishOk = publishFetcher.state === 'idle' && publishData?.ok === true
+  const publishError =
+    publishFetcher.state === 'idle' && publishData && publishData.ok === false ? publishData.error : undefined
   const { selectedResources, allResourcesSelected, handleSelectionChange } = useIndexResourceState(data.fields, {
-    resourceIDResolver: item => item.id,
+    resourceIDResolver: (item: LoaderData['fields'][number]) => item.id,
   })
+  // Clear dirty after successful publish; show any server error in the bar
+  useEffect(() => {
+    if (publishOk) {
+      setDirty(false)
+    }
+  }, [publishOk])
 
   const rename = (next: string) => {
     const form = new FormData()
@@ -115,6 +128,28 @@ export default function TemplateDetail() {
   // BEGIN products-workspace-v3-0
   return (
     <>
+      {dirty && (
+        <ContextualSaveBar
+          message="You have unpublished changes"
+          saveAction={{
+            content: 'Publish',
+            loading: publishFetcher.state === 'submitting',
+            onAction: () => {
+              const form = new FormData()
+              form.append('_action', 'publishTemplates')
+              publishFetcher.submit(form, { method: 'post', action: '/resources/spec-templates' })
+            },
+          }}
+          discardAction={{
+            content: 'Discard',
+            onAction: () => {
+              revalidator.revalidate()
+              setName(data.name)
+              setDirty(false)
+            },
+          }}
+        />
+      )}
       <Card>
         <BlockStack>
           <InlineStack align="space-between">
@@ -138,6 +173,13 @@ export default function TemplateDetail() {
         </BlockStack>
       </Card>
       <div style={{ height: 12 }} />
+      {publishError && (
+        <div className="p-m">
+          <Banner tone="critical" title="Publish failed">
+            <p>{publishError}</p>
+          </Banner>
+        </div>
+      )}
       <Card>
         <BlockStack>
           <Text as="h2" variant="headingMd">
@@ -201,35 +243,7 @@ export default function TemplateDetail() {
         />
       )}
 
-      {dirty && (
-        <div className="p-m">
-          <InlineStack align="space-between">
-            <Text as="p">You have unpublished changes</Text>
-            <InlineStack gap="200">
-              <Button
-                onClick={() => {
-                  const form = new FormData()
-                  form.append('_action', 'publishTemplates')
-                  publishFetcher.submit(form, { method: 'post', action: '/resources/spec-templates' })
-                }}
-                variant="primary"
-                loading={publishFetcher.state === 'submitting'}
-              >
-                Publish
-              </Button>
-              <Button
-                onClick={() => {
-                  revalidator.revalidate()
-                  setName(data.name)
-                  setDirty(false)
-                }}
-              >
-                Discard
-              </Button>
-            </InlineStack>
-          </InlineStack>
-        </div>
-      )}
+      {/* ContextualSaveBar covers save/discard; no inline bar needed */}
     </>
   )
   // END products-workspace-v3-0
