@@ -19,6 +19,7 @@ import {
 import { useEffect, useState } from 'react'
 import { authenticate } from '../shopify.server'
 import { getTemplateWithFields } from '../models/specTemplate.server'
+import { HelpBanner } from '../components/HelpBanner'
 
 type LoaderData = {
   id: string
@@ -128,6 +129,10 @@ export default function TemplateDetail() {
   // BEGIN products-workspace-v3-0
   return (
     <>
+      <HelpBanner id={`template-detail-${data.id}`} title="How this page works">
+        Name your template, add fields, then Publish. Publishing syncs changes to a shop metafield so products can use
+        this template. You can map fields to core product properties or to product metafields.
+      </HelpBanner>
       {dirty && (
         <ContextualSaveBar
           message="You have unpublished changes"

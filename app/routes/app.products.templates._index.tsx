@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { Link, useFetcher, useLoaderData } from '@remix-run/react'
 import { Card, IndexTable, useIndexResourceState, Text, Button, InlineStack, BlockStack } from '@shopify/polaris'
+import { HelpBanner } from '../components/HelpBanner'
 import { authenticate } from '../shopify.server'
 import { listTemplatesSummary } from '../models/specTemplate.server'
 
@@ -43,6 +44,10 @@ export default function TemplatesIndex() {
   return (
     <Card>
       <BlockStack>
+        <HelpBanner id="templates-index" title="Product spec templates">
+          Create templates that define the fields your products should capture. Publish to sync with Shopify. Assign a
+          template to a product from the product row.
+        </HelpBanner>
         <InlineStack align="space-between">
           <Text as="h2" variant="headingLg">
             Templates
