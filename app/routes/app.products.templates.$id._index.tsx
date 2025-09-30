@@ -279,7 +279,6 @@ function AddField({
   const [storage, setStorage] = useState<'CORE' | 'METAFIELD'>('CORE')
   const [coreFieldPath, setCoreFieldPath] = useState('title')
   const [metafieldNamespace, setMetaNs] = useState('')
-  const [metafieldKey, setMetaKey] = useState('')
   const [metafieldType, setMetaType] = useState('single_line_text_field')
   const [keyEdited, setKeyEdited] = useState(false)
 
@@ -325,14 +324,12 @@ function AddField({
     return {
       core: undefined,
       ns: metafieldNamespace ? undefined : 'Namespace is required',
-      mkey: metafieldKey ? undefined : 'Metafield key is required',
       mtype: metafieldType ? undefined : 'Type is required',
     }
   })()
 
   const duplicateKey = key ? existingKeys.includes(key) : false
-  const isValid =
-    !keyError && !labelError && !storageErrors.ns && !storageErrors.mkey && !storageErrors.mtype && !duplicateKey
+  const isValid = !keyError && !labelError && !storageErrors.ns && !storageErrors.mtype && !duplicateKey
 
   const onLabelChange = (v: string) => {
     setLabel(v)
@@ -340,19 +337,16 @@ function AddField({
       const base = `${templateName ? slugify(templateName) + '_' : ''}${slugify(v)}`
       const nextKey = dedupeKey(base)
       setKey(nextKey)
-      // Prefill metafield key from the machine key
-      if (storage === 'METAFIELD' && !metafieldKey) setMetaKey(slugify(nextKey))
+      // metafield key derives from machine key; no separate state here
     }
     if (storage === 'METAFIELD') {
       if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
-      // meta key handled above from machine key
     }
   }
 
   const onKeyChange = (v: string) => {
     setKey(v)
     setKeyEdited(true)
-    if (storage === 'METAFIELD' && !metafieldKey) setMetaKey(slugify(v))
   }
 
   const submit = () => {
@@ -361,7 +355,7 @@ function AddField({
     if (storage === 'CORE') values.coreFieldPath = coreFieldPath
     else {
       values.metafieldNamespace = metafieldNamespace
-      values.metafieldKey = metafieldKey
+      values.metafieldKey = key
       values.metafieldType = metafieldType
     }
     onSubmit(values)
@@ -417,7 +411,6 @@ function AddField({
                 setStorage(ns)
                 if (ns === 'METAFIELD') {
                   if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
-                  if (!metafieldKey) setMetaKey(slugify(key || label || ''))
                   setMetaType(metafieldTypeFor(type))
                 }
               }}
@@ -439,13 +432,6 @@ function AddField({
                   onChange={setMetaNs}
                   autoComplete="off"
                   error={storageErrors.ns}
-                />
-                <TextField
-                  label="Metafield key"
-                  value={metafieldKey}
-                  onChange={setMetaKey}
-                  autoComplete="off"
-                  error={storageErrors.mkey}
                 />
                 <TextField
                   label="Metafield type"
