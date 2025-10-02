@@ -250,3 +250,66 @@ Add these scopes to each environment's `shopify.app.*.toml` and re-install/re-au
 
 - `read_metaobjects,write_metaobjects`
 - Existing: `write_products` (and if you still use shop metafields: `read_shop_metafields,write_shop_metafields`)
+
+## Production build & deploy (Shopify + Fly)
+
+This project deploys two things for production: your Shopify app configuration (via the Shopify CLI) and your server on Fly.io.
+
+Prerequisites:
+
+- You have `shopify.app.production.toml` configured (client_id, handle, application_url, scopes, webhooks) and pointing to your production app.
+- Fly apps exist and secrets are set: `rbp-app` (production) and optionally `rbp-app-staging` (staging).
+- Logged into Shopify CLI and Fly CLI.
+
+1. Build locally (optional but recommended)
+
+```bash
+npm run typecheck
+npm run build
+```
+
+2. Release a new Shopify app version (production)
+
+The Shopify CLI reads defaults from `shopify.app.production.toml` when present.
+
+```bash
+# Ensure the default config points to production
+cp shopify.app.production.toml shopify.app.toml
+
+# Release a new version to the production app
+npm run deploy
+```
+
+If scopes changed, merchants must re-authorize the app after this release.
+
+3. Deploy server to Fly (production)
+
+```bash
+# Push latest code
+git push origin production
+
+# Deploy using the production Fly config
+fly deploy --config fly.production.toml --now
+```
+
+4. Verify
+
+- App URL: https://rbp-app.fly.dev
+- Shopify Partners → Apps → rbp-app → Versions → Confirm the latest version is released.
+- In your store, open the app to trigger re-auth if scopes changed.
+
+Staging (optional):
+
+```bash
+# Shopify app release to staging
+cp shopify.app.staging.toml shopify.app.toml
+npm run deploy
+
+# Fly staging deploy
+fly deploy --config fly.staging.toml --now
+```
+
+Troubleshooting:
+
+- Shopify CLI config selection: if the CLI doesn’t pick up your intended app, ensure you copied the correct `shopify.app.*.toml` to `shopify.app.toml` before running `npm run deploy`.
+- Fly deploy build cache: if builds look stale, add `--build-arg` or run with `--remote-only` depending on your environment.

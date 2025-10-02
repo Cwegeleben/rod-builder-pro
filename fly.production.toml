@@ -10,7 +10,7 @@ primary_region = 'sjc'
 
 [env]
   PORT = '3000'
-  SCOPES = 'write_products,read_shop_metafields,write_shop_metafields'
+  SCOPES = 'write_products,read_metaobjects,write_metaobjects'
   SHOPIFY_APP_URL = 'https://rbp-app.fly.dev'
 
 [processes]
