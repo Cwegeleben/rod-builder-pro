@@ -71,3 +71,12 @@ model SpecField {
   @@unique([templateId, key])
 }
 // END products-workspace-v3-0
+
+// Product type to template mapping
+model ProductTypeTemplateMap {
+  id          String   @id @default(cuid())
+  productType String   @unique
+  templateId  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
