@@ -81,6 +81,111 @@ async function buildTemplatesPayload() {
   return payload
 }
 
+// Prefer Metaobject storage when available; fallback to AppInstallation metafield.
+// AppInstallation path requires no extra scopes; Metaobjects require read_metaobjects/write_metaobjects.
+
+// -- Metaobject helpers -------------------------------------------------------
+async function ensureTemplateMetaobjectDefinition(admin: AdminApi): Promise<string> {
+  // Create or fetch a metaobject definition with type "rbp_product_spec_templates"
+  const TYPE = 'rbp_product_spec_templates'
+  // Try to look up by type
+  const GET_DEF = `#graphql
+    query GetDef($type: String!) {
+      metaobjectDefinitionByType(type: $type) { id type name fieldDefinitions { key name type } }
+    }
+  `
+  const getResp = await admin.graphql(GET_DEF, { variables: { type: TYPE } })
+  if (!getResp.ok) throw new Error(`Get metaobject def HTTP ${getResp.status}`)
+  const got = (await getResp.json()) as {
+    data?: { metaobjectDefinitionByType?: { id: string } | null }
+    errors?: Array<{ message: string }>
+  }
+  if (got?.errors?.length) throw new Error(got.errors.map(e => e.message).join('; '))
+  const existingId = got?.data?.metaobjectDefinitionByType?.id
+  if (existingId) return existingId
+
+  // Create definition with a single text field 'payload' to hold JSON string
+  const CREATE_DEF = `#graphql
+    mutation CreateDef($type: String!, $name: String!) {
+      metaobjectDefinitionCreate(
+        definition: {
+          type: $type
+          name: $name
+          fieldDefinitions: [
+            { key: "payload", name: "Payload", type: single_line_text_field, required: true }
+          ]
+        }
+      ) {
+        metaobjectDefinition { id type }
+        userErrors { field message }
+      }
+    }
+  `
+  const createResp = await admin.graphql(CREATE_DEF, { variables: { type: TYPE, name: 'RBP Product Spec Templates' } })
+  if (!createResp.ok) throw new Error(`Create metaobject def HTTP ${createResp.status}`)
+  const cjson = (await createResp.json()) as {
+    data?: {
+      metaobjectDefinitionCreate?: {
+        metaobjectDefinition?: { id: string } | null
+        userErrors?: Array<{ field?: string[]; message: string }>
+      }
+    }
+    errors?: Array<{ message: string }>
+  }
+  if (cjson?.errors?.length) throw new Error(cjson.errors.map(e => e.message).join('; '))
+  const errs = cjson?.data?.metaobjectDefinitionCreate?.userErrors ?? []
+  if (errs.length) throw new Error(`metaobjectDefinitionCreate failed: ${errs.map(e => e.message).join('; ')}`)
+  const id = cjson?.data?.metaobjectDefinitionCreate?.metaobjectDefinition?.id
+  if (!id) throw new Error('No metaobject definition id returned')
+  return id
+}
+
+async function upsertTemplatesMetaobject(admin: AdminApi, payloadJson: string): Promise<void> {
+  const TYPE = 'rbp_product_spec_templates'
+  await ensureTemplateMetaobjectDefinition(admin)
+  const UPSERT = `#graphql
+    mutation Upsert($type: String!, $handle: String!, $payload: String!) {
+      metaobjectUpsert(
+        handle: { type: $type, handle: $handle }
+        metaobject: { type: $type, fields: [{ key: "payload", value: $payload }] }
+      ) {
+        metaobject { id handle type }
+        userErrors { field message }
+      }
+    }
+  `
+  const resp = await admin.graphql(UPSERT, { variables: { type: TYPE, handle: 'templates', payload: payloadJson } })
+  if (!resp.ok) throw new Error(`metaobjectUpsert HTTP ${resp.status}`)
+  const data = (await resp.json()) as {
+    data?: { metaobjectUpsert?: { userErrors?: Array<{ field?: string[]; message: string }> } }
+    errors?: Array<{ message: string }>
+  }
+  if (data?.errors?.length) throw new Error(data.errors.map(e => e.message).join('; '))
+  const errs = data?.data?.metaobjectUpsert?.userErrors ?? []
+  if (errs.length) throw new Error(`metaobjectUpsert failed: ${errs.map(e => e.message).join('; ')}`)
+}
+
+async function getTemplatesFromMetaobject(admin: AdminApi): Promise<string | null> {
+  const TYPE = 'rbp_product_spec_templates'
+  const GET = `#graphql
+    query ByHandle($type: String!, $handle: String!) {
+      metaobjectByHandle(handle: { type: $type, handle: $handle }) {
+        id
+        fields { key value }
+      }
+    }
+  `
+  const resp = await admin.graphql(GET, { variables: { type: TYPE, handle: 'templates' } })
+  if (!resp.ok) return null
+  const data = (await resp.json()) as {
+    data?: { metaobjectByHandle?: { fields?: Array<{ key: string; value: string | null }> | null } }
+  }
+  const fields = data?.data?.metaobjectByHandle?.fields || []
+  const payload = fields.find(f => f.key === 'payload')?.value
+  return payload ?? null
+}
+
+// -- AppInstallation metafield helpers ---------------------------------------
 // Prefer AppInstallation metafield storage to avoid additional scopes.
 async function getAppInstallationId(admin: AdminApi): Promise<string> {
   const GQL = `#graphql
@@ -96,8 +201,6 @@ async function getAppInstallationId(admin: AdminApi): Promise<string> {
 
 // Public: sync the shop-level metafield containing all templates as JSON
 export async function syncTemplatesToShop(admin: AdminApi): Promise<void> {
-  // Store under the AppInstallation metafield. No special metafield scopes required.
-  const ownerId = await getAppInstallationId(admin)
   const payload = await buildTemplatesPayload()
   const value = JSON.stringify(payload)
 
@@ -106,7 +209,16 @@ export async function syncTemplatesToShop(admin: AdminApi): Promise<void> {
   if (value.length > 60000) {
     console.warn(`Templates JSON is large (${value.length} chars). Consider chunking across multiple metafields.`)
   }
+  // Try metaobject first
+  try {
+    await upsertTemplatesMetaobject(admin, value)
+    return
+  } catch (e) {
+    console.warn('Metaobject upsert failed, falling back to AppInstallation metafield:', e)
+  }
 
+  // Fallback: store under the AppInstallation metafield. No special metafield scopes required.
+  const ownerId = await getAppInstallationId(admin)
   const GQL = `#graphql
     mutation SetTemplates($ownerId: ID!, $namespace: String!, $key: String!, $type: String!, $value: String!) {
       metafieldsSet(metafields: [{ ownerId: $ownerId, namespace: $namespace, key: $key, type: $type, value: $value }]) {
@@ -116,13 +228,7 @@ export async function syncTemplatesToShop(admin: AdminApi): Promise<void> {
     }
   `
   const resp = await admin.graphql(GQL, {
-    variables: {
-      ownerId,
-      namespace: NS,
-      key: SHOP_TEMPLATES_KEY,
-      type: 'json',
-      value,
-    },
+    variables: { ownerId, namespace: NS, key: SHOP_TEMPLATES_KEY, type: 'json', value },
   })
   if (!resp.ok) {
     const text = await resp.text()
@@ -132,9 +238,7 @@ export async function syncTemplatesToShop(admin: AdminApi): Promise<void> {
     data?: { metafieldsSet?: { userErrors?: Array<{ field?: string[]; message: string }> } }
     errors?: Array<{ message: string }>
   }
-  if (data?.errors?.length) {
-    throw new Error(`metafieldsSet GQL error: ${data.errors.map(e => e.message).join('; ')}`)
-  }
+  if (data?.errors?.length) throw new Error(`metafieldsSet GQL error: ${data.errors.map(e => e.message).join('; ')}`)
   const errs = data?.data?.metafieldsSet?.userErrors ?? []
   if (errs.length) throw new Error(`metafieldsSet failed: ${errs.map(e => e.message).join('; ')}`)
 }
@@ -169,24 +273,24 @@ export async function assignTemplateToProduct(admin: AdminApi, productId: string
 export async function getTemplatesFromShop(
   admin: AdminApi,
 ): Promise<{ version: string; updatedAt: string; templates: TemplateOut[] } | null> {
-  const GQL = `#graphql
-    query GetTemplates($namespace: String!, $key: String!) {
-      currentAppInstallation {
-        metafield(namespace: $namespace, key: $key) {
-          id
-          type
-          namespace
-          key
-          value
+  // Try metaobject first
+  const metaobjectStr = await getTemplatesFromMetaobject(admin)
+  const str =
+    metaobjectStr ??
+    (await (async () => {
+      const GQL = `#graphql
+      query GetTemplates($namespace: String!, $key: String!) {
+        currentAppInstallation {
+          metafield(namespace: $namespace, key: $key) { value }
         }
       }
-    }
-  `
-  const resp = await admin.graphql(GQL, {
-    variables: { namespace: NS, key: SHOP_TEMPLATES_KEY },
-  })
-  const data = (await resp.json()) as { data?: { currentAppInstallation?: { metafield?: { value?: string | null } } } }
-  const str = data?.data?.currentAppInstallation?.metafield?.value
+    `
+      const resp = await admin.graphql(GQL, { variables: { namespace: NS, key: SHOP_TEMPLATES_KEY } })
+      const data = (await resp.json()) as {
+        data?: { currentAppInstallation?: { metafield?: { value?: string | null } } }
+      }
+      return data?.data?.currentAppInstallation?.metafield?.value ?? null
+    })())
   if (!str) return null
   try {
     return JSON.parse(str)

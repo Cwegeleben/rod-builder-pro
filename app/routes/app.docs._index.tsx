@@ -31,15 +31,17 @@ export default function DocsIndex() {
             How does publishing work?
           </Text>
           <Text as="p">
-            Changes you make are kept locally until you Publish. Publishing writes all templates to a shop metafield so
-            that other parts of the app can read them.
+            Changes you make are kept locally until you Publish. Publishing upserts one metaobject per template so that
+            other parts of the app can read them. We also support an optional product metafield that references the
+            selected template.
           </Text>
           <List>
             <List.Item>
-              Shop metafield: <code>rbp/product_spec_templates</code> (type <code>json</code>) contains all templates.
+              Metaobject type: <code>rbp_template</code> (one entry per template).
             </List.Item>
             <List.Item>
-              Product metafield: <code>rbp/product_spec_template_id</code> stores which template a product uses.
+              Optional Product metafield: <code>rbp/product_spec_template</code> of type
+              <code> metaobject_reference</code> points to the chosen template.
             </List.Item>
           </List>
         </BlockStack>

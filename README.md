@@ -213,3 +213,40 @@ Design docs:
 
 - Admin architecture: `docs/admin/admin-architecture.md`
 - Products module spec: `docs/admin/products.md`
+
+## Store setup: templates metaobjects and metafields
+
+To enable product spec templates across the store, set up the following in Shopify Admin:
+
+1. Metaobject definition (Settings → Custom data → Metaobjects)
+
+- Type API handle: `rbp_template`
+- Name: Product spec template
+- Display name template: `{{ name }}`
+- Access: Admin
+- Fields:
+  - `template_id` (Single line text, required)
+  - `name` (Single line text, required)
+  - `fields_json` (JSON, required)
+  - `version` (Integer or text, optional)
+  - `updated_at` (Date and time, optional)
+
+2. Optional product metafield (Settings → Custom data → Products)
+
+- Name: Spec template
+- Namespace and key: `rbp.product_spec_template`
+- Type: Metaobject
+- Metaobject type: `rbp_template`
+- Access: Admin
+
+With this in place:
+
+- Publishing templates creates/updates one metaobject per template (handle = `template_id`).
+- Assigning a template to a product can store a metaobject reference in `rbp/product_spec_template`.
+
+### Required app scopes
+
+Add these scopes to each environment's `shopify.app.*.toml` and re-install/re-auth shops after deploying:
+
+- `read_metaobjects,write_metaobjects`
+- Existing: `write_products` (and if you still use shop metafields: `read_shop_metafields,write_shop_metafields`)

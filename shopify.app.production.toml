@@ -36,8 +36,8 @@ api_version = "2025-01"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-# Use resource-specific scopes for shop metafields (January25+)
-scopes = "write_products,read_shop_metafields,write_shop_metafields"
+# Metaobjects for template definitions; keep write_products for product metafields
+scopes = "write_products,read_metaobjects,write_metaobjects"
 
 [auth]
 redirect_urls = [

@@ -1,7 +1,8 @@
 import type { ActionFunctionArgs } from '@remix-run/node'
 import { json, redirect } from '@remix-run/node'
 import { authenticate } from '../shopify.server'
-import { syncTemplatesToShop } from '../models/shopMetafields.server'
+// import { syncTemplatesToShop } from '../models/shopMetafields.server'
+import { upsertTemplatesToMetaobjects } from '../models/shopMetaobjects.server'
 import { createTemplate, deleteTemplates, renameTemplate } from '../models/specTemplate.server'
 import { addField, updateField, deleteField, reorderField } from '../models/specField.server'
 
@@ -15,7 +16,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     switch (actionType) {
       case 'publishTemplates': {
-        await syncTemplatesToShop(admin)
+        // Prefer metaobjects for template storage; keep metafield sync as a fallback until fully migrated
+        await upsertTemplatesToMetaobjects(admin)
         return json({ ok: true })
       }
       case 'createTemplate': {

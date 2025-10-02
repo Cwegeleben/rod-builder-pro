@@ -1,13 +1,13 @@
+
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "668b778702c0e296c542c4476340f3fc"
-application_url = "https://tight-suitable-specialty-beans.trycloudflare.com"
+client_id = "4a858851e5f429c62b646e456f2a26d9"
+application_url = "https://rbp-app-staging.fly.dev"
 embedded = true
-name = "remix-app-template"
-handle = "remix-app-template-14"
+name = "rbp-app-staging"
+handle = "rbp-app-staging"
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = false
 
 [webhooks]
@@ -35,13 +35,13 @@ api_version = "2025-01"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products"
+scopes = "write_products,read_metaobjects,write_metaobjects"
 
 [auth]
 redirect_urls = [
-  "https://tight-suitable-specialty-beans.trycloudflare.com/auth/callback",
-  "https://tight-suitable-specialty-beans.trycloudflare.com/auth/shopify/callback",
-  "https://tight-suitable-specialty-beans.trycloudflare.com/api/auth/callback"
+  "https://rbp-app-staging.fly.dev/auth/callback",
+  "https://rbp-app-staging.fly.dev/auth/shopify/callback",
+  "https://rbp-app-staging.fly.dev/api/auth/callback"
 ]
 
 [pos]

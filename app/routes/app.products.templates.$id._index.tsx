@@ -130,8 +130,8 @@ export default function TemplateDetail() {
   return (
     <>
       <HelpBanner id={`template-detail-${data.id}`} title="How this page works" learnMoreHref="/app/docs">
-        Name your template, add fields, then Publish. Publishing syncs changes to a shop metafield so products can use
-        this template. You can map fields to core product properties or to product metafields.
+        Name your template, add fields, then Publish. Publishing creates/updates a metaobject entry for this template so
+        products can use it. You can map fields to core product properties or to product metafields.
       </HelpBanner>
       {dirty && (
         <ContextualSaveBar
