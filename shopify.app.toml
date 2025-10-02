@@ -1,11 +1,12 @@
 
+
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "4a858851e5f429c62b646e456f2a26d9"
-application_url = "https://rbp-app-staging.fly.dev"
+client_id = "06dc36b1aaf1e90bb4d008e62f8d1bd7"
+name = "rbp-app"
 embedded = true
-name = "rbp-app-staging"
-handle = "rbp-app-staging"
+handle = "rbp-app"
+application_url = "https://rbp-app.fly.dev"
 
 [build]
 automatically_update_urls_on_dev = false
@@ -33,15 +34,20 @@ api_version = "2025-01"
   compliance_topics = ["shop/redact"]
   uri = "/webhooks/shop/redact"
 
+  [[webhooks.subscriptions]]
+  topics = ["products/create"]
+  uri = "/webhooks/products/create"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+# Metaobjects for template definitions; keep write_products for product metafields
 scopes = "write_products,read_metaobjects,write_metaobjects"
 
 [auth]
 redirect_urls = [
-  "https://rbp-app-staging.fly.dev/auth/callback",
-  "https://rbp-app-staging.fly.dev/auth/shopify/callback",
-  "https://rbp-app-staging.fly.dev/api/auth/callback"
+  "https://rbp-app.fly.dev/auth/callback",
+  "https://rbp-app.fly.dev/auth/shopify/callback",
+  "https://rbp-app.fly.dev/api/auth/callback"
 ]
 
 [pos]
