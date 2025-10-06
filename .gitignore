@@ -27,3 +27,7 @@ database.sqlite
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Local debug routes (do not commit)
+/app/routes/resources.metaobjects.debug.tsx
+app/routes/resources.debug-scopes.ts
