@@ -1,7 +1,16 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { Link, useFetcher, useLoaderData } from '@remix-run/react'
-import { Card, IndexTable, useIndexResourceState, Text, Button, InlineStack, BlockStack } from '@shopify/polaris'
+import {
+  Card,
+  IndexTable,
+  useIndexResourceState,
+  Text,
+  Button,
+  InlineStack,
+  BlockStack,
+  Banner,
+} from '@shopify/polaris'
 import { HelpBanner } from '../components/HelpBanner'
 import { authenticate } from '../shopify.server'
 // NOTE: Sourcing directly from Shopify metaobjects (rbp_template) instead of local DB (Route A)
@@ -12,6 +21,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const first = 100
   let after: string | null = null
   const items: Array<{ id: string; name: string; fieldsCount: number; updatedAt: string }> = []
+  let error: string | null = null
   const GQL = `#graphql
     query List($type: String!, $first: Int!, $after: String) {
       metaobjects(type: $type, first: $first, after: $after) {
@@ -30,61 +40,67 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
     }
   `
-  while (true) {
-    const resp: Response = await admin.graphql(GQL, { variables: { type: TYPE, first, after } })
-    if (!resp.ok) throw new Response('Metaobject list failed', { status: 502 })
-    type MetaobjectsResp = {
-      data?: {
-        metaobjects?: {
-          edges: Array<{
-            cursor: string
-            node: {
-              id: string
-              handle: string
-              updatedAt: string
-              templateId?: { value?: string | null } | null
-              nameField?: { value?: string | null } | null
-              fieldsJson?: { value?: string | null } | null
-            }
-          }>
-          pageInfo: { hasNextPage: boolean; endCursor?: string | null }
+  try {
+    while (true) {
+      const resp: Response = await admin.graphql(GQL, { variables: { type: TYPE, first, after } })
+      if (!resp.ok) throw new Error(`Metaobject list failed (HTTP ${resp.status})`)
+      type MetaobjectsResp = {
+        data?: {
+          metaobjects?: {
+            edges: Array<{
+              cursor: string
+              node: {
+                id: string
+                handle: string
+                updatedAt: string
+                templateId?: { value?: string | null } | null
+                nameField?: { value?: string | null } | null
+                fieldsJson?: { value?: string | null } | null
+              }
+            }>
+            pageInfo: { hasNextPage: boolean; endCursor?: string | null }
+          }
         }
+        errors?: Array<{ message: string }>
       }
-    }
-    const data = (await resp.json()) as MetaobjectsResp
-    const edges = data?.data?.metaobjects?.edges || []
-    for (const e of edges) {
-      const node = e.node
-      const id = node?.templateId?.value || node?.handle
-      if (!id) continue
-      let fieldsCount = 0
-      if (node?.fieldsJson?.value) {
-        try {
-          const arr = JSON.parse(node.fieldsJson.value)
-          if (Array.isArray(arr)) fieldsCount = arr.length
-        } catch {
-          /* swallow parse error */
+      const data = (await resp.json()) as MetaobjectsResp
+      if (data?.errors?.length) throw new Error(data.errors.map(e => e.message).join('; '))
+      const edges = data?.data?.metaobjects?.edges || []
+      for (const e of edges) {
+        const node = e.node
+        const id = node?.templateId?.value || node?.handle
+        if (!id) continue
+        let fieldsCount = 0
+        if (node?.fieldsJson?.value) {
+          try {
+            const arr = JSON.parse(node.fieldsJson.value)
+            if (Array.isArray(arr)) fieldsCount = arr.length
+          } catch {
+            /* ignore parse error */
+          }
         }
+        items.push({
+          id,
+          name: node?.nameField?.value || '(Unnamed)',
+          fieldsCount,
+          updatedAt: node?.updatedAt || new Date().toISOString(),
+        })
       }
-      items.push({
-        id,
-        name: node?.nameField?.value || '(Unnamed)',
-        fieldsCount,
-        updatedAt: node?.updatedAt || new Date().toISOString(),
-      })
+      const pageInfo = data?.data?.metaobjects?.pageInfo
+      if (pageInfo?.hasNextPage && pageInfo?.endCursor) after = pageInfo.endCursor
+      else break
     }
-    const pageInfo = data?.data?.metaobjects?.pageInfo
-    if (pageInfo?.hasNextPage && pageInfo?.endCursor) after = pageInfo.endCursor
-    else break
+    items.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+  } catch (e) {
+    error = e instanceof Error ? e.message : 'Unknown error listing templates'
   }
-  // Sort newest updated first (Shopify may already do this, but enforce locally)
-  items.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
-  return json({ items })
+  return json({ items, error })
 }
 
 export default function TemplatesIndex() {
-  const { items } = useLoaderData<typeof loader>() as {
+  const { items, error } = useLoaderData<typeof loader>() as {
     items: Array<{ id: string; name: string; fieldsCount: number; updatedAt: string }>
+    error?: string | null
   }
   const fetcher = useFetcher()
   const { selectedResources, allResourcesSelected, handleSelectionChange } = useIndexResourceState<{ id: string }>(
@@ -126,6 +142,16 @@ export default function TemplatesIndex() {
             Add template
           </Button>
         </InlineStack>
+        {error && (
+          <Banner tone="critical" title="Unable to load templates">
+            <p>{error}</p>
+            <div style={{ marginTop: 8 }}>
+              <Button onClick={() => window.location.reload()} variant="secondary">
+                Retry
+              </Button>
+            </div>
+          </Banner>
+        )}
         <IndexTable
           resourceName={{ singular: 'template', plural: 'templates' }}
           itemCount={items.length}
