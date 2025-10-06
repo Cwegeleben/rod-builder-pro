@@ -132,21 +132,104 @@ async function updateMetaobject(admin: AdminApi, id: string, fields: Array<{ key
 }
 
 export async function upsertTemplatesToMetaobjects(admin: AdminApi): Promise<void> {
+  // Ensure definition; get the set of defined field keys so we only send valid ones
+  let definedKeys: Set<string>
+  try {
+    definedKeys = await ensureMetaobjectDefinition(admin)
+  } catch (e: unknown) {
+    let msg = ''
+    if (typeof e === 'object' && e) {
+      const maybe = e as { message?: unknown }
+      if (typeof maybe.message === 'string') msg = maybe.message
+    }
+    if (/re-auth the shop/i.test(msg) || /access denied/i.test(msg)) throw e
+    throw e
+  }
   const templates = await buildTemplates()
   const nowIso = new Date().toISOString()
   for (const t of templates) {
-    const fields = [
+    const desired = [
       { key: 'template_id', value: t.id },
       { key: 'name', value: t.name },
       { key: 'fields_json', value: JSON.stringify(t.fields) },
       { key: 'version', value: '1' },
       { key: 'updated_at', value: nowIso },
-    ]
+    ] as Array<{ key: string; value: string }>
+    const fields = desired.filter(f => definedKeys.has(f.key))
 
     const existing = await getMetaobjectByHandle(admin, t.id)
     if (existing?.id) await updateMetaobject(admin, existing.id, fields)
     else await createMetaobject(admin, t.id, fields)
   }
+}
+
+async function ensureMetaobjectDefinition(admin: AdminApi): Promise<Set<string>> {
+  // Check if a definition exists for our type; if not, create it with our fields
+  const GET_DEF = `#graphql
+    query GetDefinition($type: String!) {
+      metaobjectDefinitionByType(type: $type) {
+        name
+        type
+        fieldDefinitions { name key }
+      }
+    }
+  `
+  const getResp = await admin.graphql(GET_DEF, { variables: { type: TEMPLATE_TYPE } })
+  if (!getResp.ok) throw new Error(`metaobjectDefinitionByType HTTP ${getResp.status}`)
+  const defData = (await getResp.json()) as {
+    data?: {
+      metaobjectDefinitionByType?: { name: string; type: string; fieldDefinitions: Array<{ key: string }> } | null
+    }
+    errors?: Array<{ message: string }>
+  }
+  if (defData?.errors?.length) {
+    const accessDenied = defData.errors.find(e => /access denied/i.test(e.message))
+    if (accessDenied) {
+      throw new Error(
+        'Access denied retrieving metaobject definition. Re-auth the shop to grant read_metaobject_definitions & write_metaobject_definitions scopes, then retry Publish.',
+      )
+    }
+    throw new Error(defData.errors.map(e => e.message).join('; '))
+  }
+  if (defData?.data?.metaobjectDefinitionByType) {
+    return new Set(defData.data.metaobjectDefinitionByType.fieldDefinitions.map(f => f.key))
+  }
+
+  // Create definition with inline fieldDefinitions using field type enum
+  const CREATE_DEF = `#graphql
+    mutation CreateDefinition($type: String!, $name: String!) {
+      metaobjectDefinitionCreate(
+        definition: {
+          type: $type,
+          name: $name,
+          fieldDefinitions: [
+            { name: "Template ID", key: "template_id", type: "single_line_text_field" },
+            { name: "Name", key: "name", type: "single_line_text_field" },
+            { name: "Fields JSON", key: "fields_json", type: "multi_line_text_field" },
+            { name: "Version", key: "version", type: "single_line_text_field" },
+            { name: "Updated At", key: "updated_at", type: "single_line_text_field" }
+          ]
+        }
+      ) {
+        metaobjectDefinition { type }
+        userErrors { message }
+      }
+    }
+  `
+  const createResp = await admin.graphql(CREATE_DEF, {
+    variables: { type: TEMPLATE_TYPE, name: 'RBP Template' },
+  })
+  if (!createResp.ok) throw new Error(`metaobjectDefinitionCreate HTTP ${createResp.status}`)
+  const createData = (await createResp.json()) as {
+    data?: { metaobjectDefinitionCreate?: { userErrors?: Array<{ message: string }> } }
+  }
+  const errs = createData?.data?.metaobjectDefinitionCreate?.userErrors ?? []
+  if (errs.length)
+    throw new Error(
+      `metaobjectDefinitionCreate failed: ${errs.map(e => e.message).join('; ')}. Ensure app has write_metaobject_definitions scope and shop has re-authed.`,
+    )
+  // Return the intended set since we just created them
+  return new Set(['template_id', 'name', 'fields_json', 'version', 'updated_at'])
 }
 
 export async function assignTemplateRefToProduct(

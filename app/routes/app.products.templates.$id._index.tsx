@@ -15,6 +15,8 @@ import {
   useIndexResourceState,
   ContextualSaveBar,
   Banner,
+  Frame,
+  Toast,
 } from '@shopify/polaris'
 import { useEffect, useState } from 'react'
 import { authenticate } from '../shopify.server'
@@ -24,6 +26,7 @@ import { HelpBanner } from '../components/HelpBanner'
 type LoaderData = {
   id: string
   name: string
+  lastPublishedAt?: string | null
   fields: Array<{
     id: string
     key: string
@@ -40,7 +43,7 @@ type LoaderData = {
 }
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await authenticate.admin(request)
+  const { admin } = await authenticate.admin(request)
   const id = String(params.id)
   const tpl = await getTemplateWithFields(id)
   if (!tpl) throw new Response('Not Found', { status: 404 })
@@ -70,7 +73,20 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     metafieldKey: f.metafieldKey ?? null,
     metafieldType: f.metafieldType ?? null,
   }))
-  return json<LoaderData>({ id: tpl.id, name: tpl.name, fields })
+  let lastPublishedAt: string | null = null
+  try {
+    const q = `#graphql
+      query GetTpl($handle: String!) {
+        metaobjectByHandle(handle: {handle: $handle, type: "rbp_template"}) { updatedAt }
+      }
+    `
+    const resp = await admin.graphql(q, { variables: { handle: tpl.id } })
+    const jr = await resp.json()
+    lastPublishedAt = jr?.data?.metaobjectByHandle?.updatedAt || null
+  } catch {
+    lastPublishedAt = null
+  }
+  return json<LoaderData>({ id: tpl.id, name: tpl.name, fields, lastPublishedAt })
 }
 
 const coreFieldOptions = [
@@ -97,6 +113,7 @@ export default function TemplateDetail() {
   const publishOk = publishFetcher.state === 'idle' && publishData?.ok === true
   const publishError =
     publishFetcher.state === 'idle' && publishData && publishData.ok === false ? publishData.error : undefined
+  const [showToast, setShowToast] = useState(false)
   const { selectedResources, allResourcesSelected, handleSelectionChange } = useIndexResourceState(data.fields, {
     resourceIDResolver: (item: LoaderData['fields'][number]) => item.id,
   })
@@ -104,8 +121,10 @@ export default function TemplateDetail() {
   useEffect(() => {
     if (publishOk) {
       setDirty(false)
+      setShowToast(true)
+      revalidator.revalidate()
     }
-  }, [publishOk])
+  }, [publishOk, revalidator])
 
   const rename = (next: string) => {
     const form = new FormData()
@@ -128,11 +147,18 @@ export default function TemplateDetail() {
   // SENTINEL: products-workspace-v3-0 (Spec Template detail editor)
   // BEGIN products-workspace-v3-0
   return (
-    <>
+    <Frame>
       <HelpBanner id={`template-detail-${data.id}`} title="How this page works" learnMoreHref="/app/docs">
         Name your template, add fields, then Publish. Publishing creates/updates a metaobject entry for this template so
         products can use it. You can map fields to core product properties or to product metafields.
       </HelpBanner>
+      {data.lastPublishedAt && (
+        <div style={{ margin: '8px 0 4px' }}>
+          <Text as="p" tone="subdued" variant="bodySm">
+            Last published: {new Date(data.lastPublishedAt).toLocaleString()}
+          </Text>
+        </div>
+      )}
       {dirty && (
         <ContextualSaveBar
           message="You have unpublished changes"
@@ -190,6 +216,13 @@ export default function TemplateDetail() {
         <div className="p-m">
           <Banner tone="critical" title="Publish failed">
             <p>{publishError}</p>
+            {/* Offer re-auth guidance if scope issue detected */}
+            {/(access denied|re-auth the shop|metaobject definition)/i.test(publishError) && (
+              <p style={{ marginTop: 8 }}>
+                Possible missing scopes. Refresh the app (which triggers OAuth) or open a new Admin tab to re-auth.
+                After granting the new metaobject definition scopes, retry Publish.
+              </p>
+            )}
           </Banner>
         </div>
       )}
@@ -257,8 +290,9 @@ export default function TemplateDetail() {
         />
       )}
 
+      {showToast && <Toast content="Published" onDismiss={() => setShowToast(false)} />}
       {/* ContextualSaveBar covers save/discard; no inline bar needed */}
-    </>
+    </Frame>
   )
   // END products-workspace-v3-0
 }

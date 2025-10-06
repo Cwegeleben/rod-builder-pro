@@ -39,7 +39,7 @@ export function HelpBanner({ id, title, children, tone = 'info', learnMoreHref }
         tone={tone}
         title={title}
         onDismiss={onDismiss}
-        action={learnMoreHref ? { content: 'Learn more', url: learnMoreHref, external: true } : undefined}
+        action={learnMoreHref ? { content: 'Learn more', url: learnMoreHref } : undefined}
       >
         <p>{children}</p>
       </Banner>

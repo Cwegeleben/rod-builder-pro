@@ -6,6 +6,13 @@
       "type": "shell",
       "command": "npm run -s typecheck && npm run -s build",
       "group": "build"
+    },
+    {
+      "label": "Build app",
+      "type": "shell",
+      "command": "npm run -s build",
+      "problemMatcher": ["$tsc"],
+      "group": "build"
     }
   ]
 }
