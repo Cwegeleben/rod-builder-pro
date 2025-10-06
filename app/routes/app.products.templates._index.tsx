@@ -4,11 +4,81 @@ import { Link, useFetcher, useLoaderData } from '@remix-run/react'
 import { Card, IndexTable, useIndexResourceState, Text, Button, InlineStack, BlockStack } from '@shopify/polaris'
 import { HelpBanner } from '../components/HelpBanner'
 import { authenticate } from '../shopify.server'
-import { listTemplatesSummary } from '../models/specTemplate.server'
+// NOTE: Sourcing directly from Shopify metaobjects (rbp_template) instead of local DB (Route A)
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request)
-  const items = await listTemplatesSummary()
+  const { admin } = await authenticate.admin(request)
+  const TYPE = 'rbp_template'
+  const first = 100
+  let after: string | null = null
+  const items: Array<{ id: string; name: string; fieldsCount: number; updatedAt: string }> = []
+  const GQL = `#graphql
+    query List($type: String!, $first: Int!, $after: String) {
+      metaobjects(type: $type, first: $first, after: $after) {
+        edges {
+          cursor
+          node {
+            id
+            handle
+            updatedAt
+            templateId: field(key: "template_id") { value }
+            nameField: field(key: "name") { value }
+            fieldsJson: field(key: "fields_json") { value }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  `
+  while (true) {
+    const resp: Response = await admin.graphql(GQL, { variables: { type: TYPE, first, after } })
+    if (!resp.ok) throw new Response('Metaobject list failed', { status: 502 })
+    type MetaobjectsResp = {
+      data?: {
+        metaobjects?: {
+          edges: Array<{
+            cursor: string
+            node: {
+              id: string
+              handle: string
+              updatedAt: string
+              templateId?: { value?: string | null } | null
+              nameField?: { value?: string | null } | null
+              fieldsJson?: { value?: string | null } | null
+            }
+          }>
+          pageInfo: { hasNextPage: boolean; endCursor?: string | null }
+        }
+      }
+    }
+    const data = (await resp.json()) as MetaobjectsResp
+    const edges = data?.data?.metaobjects?.edges || []
+    for (const e of edges) {
+      const node = e.node
+      const id = node?.templateId?.value || node?.handle
+      if (!id) continue
+      let fieldsCount = 0
+      if (node?.fieldsJson?.value) {
+        try {
+          const arr = JSON.parse(node.fieldsJson.value)
+          if (Array.isArray(arr)) fieldsCount = arr.length
+        } catch {
+          /* swallow parse error */
+        }
+      }
+      items.push({
+        id,
+        name: node?.nameField?.value || '(Unnamed)',
+        fieldsCount,
+        updatedAt: node?.updatedAt || new Date().toISOString(),
+      })
+    }
+    const pageInfo = data?.data?.metaobjects?.pageInfo
+    if (pageInfo?.hasNextPage && pageInfo?.endCursor) after = pageInfo.endCursor
+    else break
+  }
+  // Sort newest updated first (Shopify may already do this, but enforce locally)
+  items.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
   return json({ items })
 }
 
