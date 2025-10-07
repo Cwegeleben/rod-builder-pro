@@ -51,6 +51,13 @@ model SpecTemplate {
   fields    SpecField[]
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
+  // Versioning
+  versions TemplateVersion[]
+  // Phase 2 (hybrid): when this row is a draft derived from a remote published template
+  remoteTemplateId String?   // canonical template_id (remote handle)
+  remoteVersion    Int?      // remote version at import time
+
+  @@index([remoteTemplateId])
 }
 
 model SpecField {
@@ -70,6 +77,19 @@ model SpecField {
 
   @@unique([templateId, key])
 }
+
+model TemplateVersion {
+  id          String       @id @default(cuid())
+  templateId  String
+  template    SpecTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  versionNumber Int
+  // Using String storage for now; upgrade to Json later with a dedicated migration.
+  dataJson     String
+  publishedAt  DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  @@unique([templateId, versionNumber])
+}
 // END products-workspace-v3-0
 
 // Product type to template mapping
@@ -80,3 +100,74 @@ model ProductTypeTemplateMap {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+// <!-- BEGIN RBP GENERATED: supplier-importer-v1 -->
+/// Supplier Importer models
+model ImportProfile {
+  id             String   @id @default(cuid())
+  supplierDomain String
+  productType    String
+  mappingJson    Json
+  paginationJson Json?
+  followDetail   Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  jobs           ImportJob[]
+
+  @@unique([supplierDomain, productType])
+}
+
+model ImportJob {
+  id          String        @id @default(cuid())
+  profileId   String?
+  profile     ImportProfile? @relation(fields: [profileId], references: [id])
+  url         String
+  productType String
+  status      String        @default("queued") // queued | running | completed | failed | cancelled
+  countsJson  Json          // { total, processed, created, updated, skipped, errors }
+  logJson     Json          // array of log lines
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  items       ImportItem[]
+}
+
+model ImportItem {
+  id         String     @id @default(cuid())
+  jobId      String
+  job        ImportJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  sourceUrl  String
+  rawJson    Json
+  mappedJson Json?
+  status     String      @default("pending") // pending | mapped | created | updated | skipped | error
+  error      String?
+  createdAt  DateTime    @default(now())
+}
+// <!-- BEGIN RBP GENERATED: supplier-inventory-sync-v1 -->
+model SupplierAuthProfile {
+  id             String   @id @default(cuid())
+  supplierDomain String
+  loginUrl       String
+  username       String
+  passwordEnc    String
+  cookieJarJson  Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([supplierDomain, username])
+}
+
+model SupplierInventorySnapshot {
+  id             String   @id @default(cuid())
+  supplierDomain String
+  productCode    String
+  qtyAvailable   Int?
+  cost           Float?
+  lastSeenAt     DateTime?
+  snapshotJson   Json?
+  status         String
+  createdAt      DateTime @default(now())
+}
+// <!-- END RBP GENERATED: supplier-inventory-sync-v1 -->
+// <!-- END RBP GENERATED: supplier-importer-v1 -->

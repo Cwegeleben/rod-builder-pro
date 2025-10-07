@@ -2,7 +2,8 @@ import { prisma } from '../db.server'
 
 // Feature flag helper
 export function isRemoteHybridEnabled() {
-  return process.env.VITE_REMOTE_TEMPLATES === '1'
+  const val = (process.env.VITE_REMOTE_TEMPLATES || '').toLowerCase().trim()
+  return val === '1' || val === 'true' || val === 'yes'
 }
 
 type AdminApi = { graphql: (query: string, init?: { variables?: Record<string, unknown> }) => Promise<Response> }
@@ -198,4 +199,87 @@ export async function createOrUpdateRemoteFromLocalDraft(admin: AdminApi, templa
     if (errs.length) throw new Error(errs.map(e => e.message).join('; '))
     return cj?.data?.metaobjectCreate?.metaobject?.id as string
   }
+}
+
+// Import a remote published template as a new local draft (Phase 2)
+// Creates a new specTemplate row with remoteTemplateId + remoteVersion populated.
+// If a draft already exists for the given remote handle (remoteTemplateId), returns existing draft id.
+export async function importRemoteTemplateAsDraft(admin: AdminApi, remoteHandle: string) {
+  const existing = await prisma.$queryRaw<
+    { id: string }[]
+  >`SELECT id FROM SpecTemplate WHERE remoteTemplateId = ${remoteHandle} LIMIT 1`
+  if (existing.length) return existing[0].id
+  const Q = `#graphql\n    query Get($type:String!,$handle:String!){\n      metaobjectByHandle(handle:{type:$type, handle:$handle}){\n        handle updatedAt\n        nameField: field(key:"name"){ value }\n        fieldsJsonField: field(key:"fields_json"){ value }\n        versionField: field(key:"version"){ value }\n      }\n    }\n  `
+  const resp = await admin.graphql(Q, { variables: { type: TEMPLATE_TYPE, handle: remoteHandle } })
+  if (!resp.ok) throw new Error(`Get remote template HTTP ${resp.status}`)
+  interface RemoteGetResp {
+    data?: {
+      metaobjectByHandle?: {
+        handle: string
+        nameField?: { value?: string | null }
+        fieldsJsonField?: { value?: string | null }
+        versionField?: { value?: string | null }
+      }
+    }
+  }
+  const json = (await resp.json()) as RemoteGetResp
+  const mo = json?.data?.metaobjectByHandle
+  if (!mo) throw new Error('Remote template not found')
+  const name = mo.nameField?.value || remoteHandle
+  const rawFields = mo.fieldsJsonField?.value
+  let parsed: Array<{
+    id?: string
+    key?: string
+    label?: string
+    type?: string
+    required?: boolean
+    position?: number
+    storage?: string
+    coreFieldPath?: string | null
+    metafield?: { namespace?: string | null; key?: string | null; type?: string | null }
+  }> = []
+  if (rawFields) {
+    try {
+      const arr = JSON.parse(rawFields)
+      if (Array.isArray(arr)) parsed = arr
+    } catch {
+      /* ignore */
+    }
+  }
+  const draftId = crypto.randomUUID()
+  const versionNum = mo.versionField?.value ? parseInt(mo.versionField.value, 10) : 1
+  await prisma.$executeRawUnsafe(
+    'INSERT INTO SpecTemplate (id, name, createdAt, updatedAt, remoteTemplateId, remoteVersion) VALUES (?,?,?,?,?,?)',
+    draftId,
+    name + ' (edit)',
+    new Date().toISOString(),
+    new Date().toISOString(),
+    remoteHandle,
+    versionNum,
+  )
+  for (const f of parsed.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))) {
+    try {
+      await prisma.specField.create({
+        data: {
+          templateId: draftId,
+          key: f.key || f.id || 'field_' + Math.random().toString(36).slice(2, 8),
+          label: f.label || f.key || 'Field',
+          type: ((): 'text' | 'number' | 'boolean' | 'select' => {
+            const vt = f.type
+            return vt === 'text' || vt === 'number' || vt === 'boolean' || vt === 'select' ? vt : 'text'
+          })(),
+          required: Boolean(f.required),
+          position: typeof f.position === 'number' ? f.position : 0,
+          storage: f.storage === 'METAFIELD' ? 'METAFIELD' : 'CORE',
+          coreFieldPath: f.coreFieldPath || null,
+          metafieldNamespace: f.metafield?.namespace || null,
+          metafieldKey: f.metafield?.key || null,
+          metafieldType: f.metafield?.type || null,
+        },
+      })
+    } catch {
+      /* skip field errors */
+    }
+  }
+  return draftId
 }

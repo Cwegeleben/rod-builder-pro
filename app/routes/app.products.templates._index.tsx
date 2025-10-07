@@ -283,7 +283,13 @@ export default function TemplatesIndex() {
           {items.map((item, index: number) => (
             <IndexTable.Row id={item.id} key={item.id} position={index} selected={selectedResources.includes(item.id)}>
               <IndexTable.Cell>
-                <Link to={`/app/products/templates/${item.id}`}>{item.name}</Link>{' '}
+                {hybrid && item.status === 'published' ? (
+                  <Text as="span" variant="bodyMd" tone="subdued">
+                    {item.name}
+                  </Text>
+                ) : (
+                  <Link to={`/app/products/templates/${item.id}`}>{item.name}</Link>
+                )}{' '}
                 {item.orphan && (
                   <Text as="span" tone="subdued" variant="bodySm">
                     (orphan)
@@ -346,6 +352,31 @@ export default function TemplatesIndex() {
                       Delete
                     </Button>
                   </InlineStack>
+                ) : hybrid && item.status === 'published' ? (
+                  <Button
+                    onClick={async () => {
+                      const fd = new FormData()
+                      fd.append('_action', 'importRemoteTemplateDraft')
+                      fd.append('id', item.id)
+                      fetcher.submit(fd, { method: 'post', action: '/resources/spec-templates' })
+                      // Watch fetcher completion via effect already in place; navigate when draftId returns
+                      type ImportResp = { ok?: boolean; draftId?: string }
+                      const int = setInterval(() => {
+                        const raw = fetcher.data as unknown
+                        if (raw && typeof raw === 'object') {
+                          const data = raw as ImportResp
+                          if (data.ok && data.draftId) {
+                            clearInterval(int)
+                            window.location.assign(`/app/products/templates/${data.draftId}`)
+                          }
+                        }
+                      }, 150)
+                      setTimeout(() => clearInterval(int), 8000)
+                    }}
+                    variant="plain"
+                  >
+                    Edit
+                  </Button>
                 ) : (
                   <Button url={`/app/products/templates/${item.id}`} variant="plain">
                     Edit
