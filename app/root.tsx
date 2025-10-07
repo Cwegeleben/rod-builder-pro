@@ -23,6 +23,12 @@ export default function App() {
         <Outlet />
         <ScrollRestoration />
         <Scripts />
+        {/* Suppress noisy OTLP beacon errors from Shopify metrics when queue saturates. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(()=>{try{const ORIG=navigator.sendBeacon?.bind(navigator);if(!ORIG)return;const BLOCK=["https://otlp-http-production.shopifysvc.com/v1/traces","https://otlp-http-production.shopifysvc.com/v1/metrics"];navigator.sendBeacon=function(u,d){try{if(typeof u==="string"&&BLOCK.some(b=>u.startsWith(b))){return true;} }catch{} return ORIG(u,d);};}catch(e){}})();`,
+          }}
+        />
       </body>
     </html>
   )
