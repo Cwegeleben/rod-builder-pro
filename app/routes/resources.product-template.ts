@@ -1,9 +1,11 @@
 import type { ActionFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { authenticate } from '../shopify.server'
+import { requireHqShopOr404 } from '../lib/access.server'
 import { assignTemplateRefToProduct } from '../models/shopMetaobjects.server'
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  await requireHqShopOr404(request)
   const { admin } = await authenticate.admin(request)
   const form = await request.formData()
   const actionType = String(form.get('_action') || '')

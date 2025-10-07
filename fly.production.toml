@@ -12,9 +12,11 @@ primary_region = 'sjc'
   PORT = '3000'
   SCOPES = 'write_products,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions'
   SHOPIFY_APP_URL = 'https://rbp-app.fly.dev'
+  # Cap V8 old space for a 2GB machine (leave ~25% native overhead)
+  NODE_OPTIONS = '--max-old-space-size=1536'
 
 [processes]
-  app = 'node ./dbsetup.js npm run docker-start'
+  app = '/sbin/tini -- scripts/start-production.sh'
 
 [[mounts]]
   source = 'data'
@@ -26,12 +28,21 @@ primary_region = 'sjc'
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = 'stop'
+  # Keep machine warm to avoid cold starts and failed early health checks
+  auto_stop_machines = false
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ['app']
+  [[http_service.checks]]
+    interval = '15s'
+    timeout = '3s'
+    grace_period = '30s'
+    method = 'GET'
+    path = '/resources/health'
+    protocol = 'http'
+    tls_skip_verify = false
 
 [[vm]]
-  memory = '1gb'
+  memory = '2gb'
   cpu_kind = 'shared'
   cpus = 1

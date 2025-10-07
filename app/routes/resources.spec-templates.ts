@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from '@remix-run/node'
 import { json, redirect } from '@remix-run/node'
 import { authenticate } from '../shopify.server'
+import { requireHqShopOr404 } from '../lib/access.server'
 // import { syncTemplatesToShop } from '../models/shopMetafields.server'
 import { upsertTemplatesToMetaobjects } from '../models/shopMetaobjects.server'
 import { snapshotTemplate } from '../models/templateVersion.server'
@@ -21,6 +22,7 @@ import {
 // SENTINEL: products-workspace-v3-0 (Resource route for mutations)
 // BEGIN products-workspace-v3-0
 export const action = async ({ request }: ActionFunctionArgs) => {
+  await requireHqShopOr404(request)
   try {
     const { admin } = await authenticate.admin(request)
     const form = await request.formData()

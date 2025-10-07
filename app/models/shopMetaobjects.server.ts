@@ -131,7 +131,10 @@ async function updateMetaobject(admin: AdminApi, id: string, fields: Array<{ key
   return data?.data?.metaobjectUpdate?.metaobject?.id as string
 }
 
-export async function upsertTemplatesToMetaobjects(admin: AdminApi): Promise<void> {
+export async function upsertTemplatesToMetaobjects(
+  admin: AdminApi,
+  options?: { templateIds?: string[] },
+): Promise<void> {
   // Ensure definition; get the set of defined field keys so we only send valid ones
   let definedKeys: Set<string>
   try {
@@ -145,7 +148,11 @@ export async function upsertTemplatesToMetaobjects(admin: AdminApi): Promise<voi
     if (/re-auth the shop/i.test(msg) || /access denied/i.test(msg)) throw e
     throw e
   }
-  const templates = await buildTemplates()
+  let templates = await buildTemplates()
+  if (options?.templateIds && options.templateIds.length) {
+    const set = new Set(options.templateIds)
+    templates = templates.filter(t => set.has(t.id))
+  }
   const nowIso = new Date().toISOString()
   for (const t of templates) {
     const desired = [

@@ -1,6 +1,11 @@
 // SENTINEL: products-workspace-v3-0 (Data access helpers)
 // BEGIN products-workspace-v3-0
 import { prisma } from '../db.server'
+import { CORE_FIELD_PATH_SET } from './specTemplateCoreFields'
+
+export function isCoreFieldRecord(f: { storage: string; coreFieldPath: string | null }) {
+  return f.storage === 'CORE' && !!f.coreFieldPath && CORE_FIELD_PATH_SET.has(f.coreFieldPath)
+}
 
 export async function addField(params: {
   templateId: string
@@ -50,6 +55,8 @@ export async function deleteField(id: string) {
 export async function reorderField(id: string, direction: 'up' | 'down') {
   const current = await prisma.specField.findUnique({ where: { id } })
   if (!current) return null
+  // Prevent reordering core fields
+  if (isCoreFieldRecord({ storage: current.storage, coreFieldPath: current.coreFieldPath })) return current
   const swapWith = await prisma.specField.findFirst({
     where: {
       templateId: current.templateId,
@@ -58,6 +65,8 @@ export async function reorderField(id: string, direction: 'up' | 'down') {
     orderBy: { position: direction === 'up' ? 'desc' : 'asc' },
   })
   if (!swapWith) return current
+  // Do not swap with a core field (keep core block anchored)
+  if (isCoreFieldRecord({ storage: swapWith.storage, coreFieldPath: swapWith.coreFieldPath })) return current
   await prisma.$transaction([
     prisma.specField.update({ where: { id: current.id }, data: { position: swapWith.position } }),
     prisma.specField.update({ where: { id: swapWith.id }, data: { position: current.position } }),

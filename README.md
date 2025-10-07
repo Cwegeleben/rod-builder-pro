@@ -313,3 +313,72 @@ Troubleshooting:
 
 - Shopify CLI config selection: if the CLI doesn’t pick up your intended app, ensure you copied the correct `shopify.app.*.toml` to `shopify.app.toml` before running `npm run deploy`.
 - Fly deploy build cache: if builds look stale, add `--build-arg` or run with `--remote-only` depending on your environment.
+
+## Operations & Database Migrations
+
+### Overview
+
+Runtime migrations are no longer executed automatically on every container boot to avoid blocking availability when a migration fails. Instead:
+
+- Initial startup runs a soft `prisma migrate deploy` inside `dbsetup.js` (skips failures unless `STRICT_MIGRATIONS=1`).
+- The `setup` script only runs `prisma generate` (no deploy).
+- A manual GitHub Actions workflow (`.github/workflows/prisma-migrate.yml`) can be triggered to apply migrations centrally.
+
+### Handling a Failed Migration (P3009)
+
+If you see P3009 (failed migration) in logs:
+
+1. Backup DB (Fly volume copy of `dev.sqlite`).
+2. Decide whether the migration partially applied. Inspect schema using `sqlite3`.
+3. Mark it resolved:
+
+- Rolled back: `npx prisma migrate resolve --rolled-back <migration_name>`
+- Applied: `npx prisma migrate resolve --applied <migration_name>`
+
+4. Create a corrective migration: `npx prisma migrate dev --name fix_<desc>`
+5. Deploy: `npx prisma migrate deploy` (via Action or console).
+
+Helper scripts:
+
+```
+scripts/migrate/status.sh          # Shows status
+scripts/migrate/resolve-failed.sh  # Resolve a migration (applied|rolled-back)
+```
+
+### Recommended Flow for New Schema Changes
+
+1. Develop & test locally: `npx prisma migrate dev`.
+2. Push branch → PR → Merge.
+3. Trigger the "Prisma Migrate Deploy" GitHub Action (select environment).
+4. Confirm status is clean (no pending, no failed) before scaling or heavy tasks.
+
+### Environment Flags
+
+- `STRICT_MIGRATIONS=1` → Fail startup if migrate fails (use after DB is clean).
+- `SKIP_MIGRATE=1` → Skip even the soft migrate attempt (emergency only).
+
+### Removing Debug Utilities
+
+The memory debug route and periodic memory logger were removed. To reintroduce temporary memory diagnostics, re-create a `resources.memory-debug` route and add an interval logger guarded by an env variable.
+
+### Operational Runbook (Quick Reference)
+
+```
+# Backup DB
+fly ssh console -a rbp-app
+cp /data/dev.sqlite /data/dev.sqlite.bak.$(date +%Y%m%d%H%M%S)
+
+# Check status
+npx prisma migrate status
+
+# Resolve failed migration (example)
+npx prisma migrate resolve --rolled-back 20251006062503_reset_with_template_version
+
+# Create fix
+npx prisma migrate dev --name fix_template_version
+
+# Deploy (manual console or workflow)
+npx prisma migrate deploy
+```
+
+Document any manual resolve steps in the CHANGELOG for traceability.

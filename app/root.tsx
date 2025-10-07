@@ -1,4 +1,4 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from '@remix-run/react'
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteError, isRouteErrorResponse } from '@remix-run/react'
 import type { LinksFunction } from '@remix-run/node'
 // Import CSS as side effects so Remix/Vite add them to the route's CSS manifest.
 // This ensures the same hashed filenames are used on server and client, avoiding hydration mismatches.
@@ -33,3 +33,60 @@ export default function App() {
     </html>
   )
 }
+
+// <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 -->
+export function ErrorBoundary() {
+  const error = useRouteError()
+  let status = 500
+  let message = 'An unexpected error occurred.'
+  if (isRouteErrorResponse(error)) {
+    status = error.status
+    if (status === 404) message = 'Not Found'
+    else if (status === 401) message = 'Unauthorized'
+  }
+  return (
+    <html>
+      <head>
+        <Meta />
+        <Links />
+        <title>{message}</title>
+      </head>
+      <body>
+        <div
+          style={{
+            display: 'flex',
+            minHeight: '100dvh',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontFamily: 'Inter,system-ui,sans-serif',
+          }}
+        >
+          <div style={{ textAlign: 'center', maxWidth: 360, padding: '2rem' }}>
+            <h1 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>{message}</h1>
+            <p style={{ color: '#555', fontSize: 14, marginBottom: '1.25rem' }}>
+              {status === 404
+                ? 'The page you are looking for does not exist.'
+                : 'Please try again or return to the previous page.'}
+            </p>
+            <a
+              href="/app/products"
+              style={{
+                display: 'inline-block',
+                background: '#2C62F6',
+                color: '#fff',
+                textDecoration: 'none',
+                padding: '0.5rem 1rem',
+                borderRadius: 6,
+                fontSize: 14,
+              }}
+            >
+              Go to Products
+            </a>
+          </div>
+        </div>
+        <Scripts />
+      </body>
+    </html>
+  )
+}
+// <!-- END RBP GENERATED: supplier-importer-ui-v1 -->

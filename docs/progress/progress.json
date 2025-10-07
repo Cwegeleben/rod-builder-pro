@@ -1,0 +1,70 @@
+[
+  {
+    "date": "2025-10-05",
+    "feature": "Supplier Importer v1.0",
+    "change": "ADD",
+    "sentinel": "supplier-importer-v1",
+    "apps": ["rbp-shopify-app"],
+    "files": [
+      "app/routes/hq.import.tsx",
+      "app/routes/hq.import.jobs.$id.tsx",
+      "app/components/importer/ImportWizard.tsx",
+      "app/components/importer/SelectorTrainer.tsx",
+      "app/components/importer/PreviewTable.tsx",
+      "app/services/importer/fetchPage.ts",
+      "app/services/importer/selectorApply.ts",
+      "app/services/importer/pagination.ts",
+      "app/services/importer/mapping.ts",
+      "app/services/importer/shopifyCreate.ts",
+      "app/services/importer/dedupe.ts",
+      "app/services/importer/jobs.ts",
+      "app/routes/api.importer.preview.ts",
+      "app/routes/api.importer.run.ts",
+      "app/routes/api.importer.jobs.$id.ts",
+      "prisma/schema.prisma",
+      "app/config/robots.ts",
+      "app/config/throttle.ts",
+      "app/lib/html.ts"
+    ],
+    "tests": "N/A",
+    "preflight": "PASS",
+    "notes": "Selector mapping importer, HQ-only, writes draft products with access=none."
+  },
+  {
+    "date": "2025-10-05",
+    "feature": "Supplier Inventory Sync v1.0",
+    "change": "ADD",
+    "sentinel": "supplier-inventory-sync-v1",
+    "apps": ["rbp-shopify-app"],
+    "files": [
+      "app/services/inventory/supplierSync.ts",
+      "app/services/inventory/playwrightAuth.ts",
+      "app/services/inventory/selectorApply.ts",
+      "app/services/inventory/shopifyUpdate.ts",
+      "app/routes/api.suppliers.sync.ts",
+      "app/routes/api.suppliers.status.ts",
+      "app/routes/api.suppliers.inventory.ts",
+      "scripts/cron/supplier_sync.ts",
+      "prisma/schema.prisma"
+    ],
+    "tests": "N/A",
+    "preflight": "PASS",
+    "notes": "Daily authenticated supplier inventory sync; writes snapshots + Shopify metafields."
+  },
+  {
+    "date": "2025-10-06",
+    "feature": "Supplier Importer UI Integration v1.0",
+    "change": "MODIFY",
+    "sentinel": "supplier-importer-ui-v1",
+    "apps": ["rbp-shopify-app"],
+    "files": [
+      "app/routes/app.products.tsx",
+      "app/routes/app.products.import.tsx",
+      "app/routes/app.products.import._index.tsx",
+      "app/routes/app.products._index.tsx"
+    ],
+    "tests": "N/A",
+    "preflight": "PASS",
+    "notes": "Replaced Import button; mounted Import Wizard at /app/products/import; HQ-gated; relative links."
+  }
+]

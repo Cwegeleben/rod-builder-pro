@@ -1,6 +1,7 @@
 // SENTINEL: products-workspace-v3-0 (Data access helpers)
 // BEGIN products-workspace-v3-0
 import { prisma } from '../db.server'
+import { buildCoreFieldDefsForTemplate } from './specTemplateCoreFields'
 
 export async function listTemplatesSummary() {
   const templates = await prisma.specTemplate.findMany({
@@ -63,6 +64,25 @@ export async function renameTemplate(id: string, name: string) {
   if (!desired) return prisma.specTemplate.update({ where: { id }, data: { name } })
   const taken = await prisma.specTemplate.findFirst({ where: { name: desired, NOT: { id } }, select: { id: true } })
   const finalName = taken ? await nextUniqueName(desired) : desired
-  return prisma.specTemplate.update({ where: { id }, data: { name: finalName } })
+
+  // Load current core fields (by coreFieldPath) so we can remap their keys to the new prefix
+  const currentCore = await prisma.specField.findMany({
+    where: { templateId: id, storage: 'CORE', coreFieldPath: { not: null } },
+    select: { id: true, key: true, coreFieldPath: true },
+  })
+  const newDefs = buildCoreFieldDefsForTemplate(finalName)
+  const defsByPath = new Map(newDefs.map(d => [d.coreFieldPath, d]))
+
+  // Collect updates only for fields whose path matches known core definitions
+  const updates: Array<ReturnType<typeof prisma.specField.update>> = []
+  for (const f of currentCore) {
+    if (!f.coreFieldPath) continue
+    const next = defsByPath.get(f.coreFieldPath)
+    if (next && next.key !== f.key) {
+      updates.push(prisma.specField.update({ where: { id: f.id }, data: { key: next.key } }))
+    }
+  }
+
+  return prisma.$transaction([prisma.specTemplate.update({ where: { id }, data: { name: finalName } }), ...updates])
 }
 // END products-workspace-v3-0

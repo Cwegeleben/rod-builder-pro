@@ -15,14 +15,18 @@ import {
 import { HelpBanner } from '../components/HelpBanner'
 import { useEffect, useRef } from 'react'
 import { authenticate } from '../shopify.server'
+import { requireHqShopOr404 } from '../lib/access.server'
 // prisma imported indirectly via listTemplatesSummary
 import { listTemplatesSummary } from '../models/specTemplate.server'
 import { isRemoteHybridEnabled, listPublishedRemoteTemplates } from '../models/remoteTemplates.server'
 // NOTE: Sourcing directly from Shopify metaobjects (rbp_template) instead of local DB (Route A)
 
+// HQ gating via shared util
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const hybrid = isRemoteHybridEnabled()
   const { admin } = await authenticate.admin(request)
+  await requireHqShopOr404(request)
   const url = new URL(request.url)
   const showOrphans = !hybrid && url.searchParams.get('showOrphans') === '1'
   const items: Array<{

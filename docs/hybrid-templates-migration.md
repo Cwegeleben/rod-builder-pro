@@ -235,3 +235,14 @@ To disable quickly:
 ---
 
 Questions or adjustments: update this doc and reference any new helper functions as phases evolve.
+
+### Phase 2 Implementation Status (Rolling)
+
+Implemented in latest commit:
+
+- Schema columns: `remoteTemplateId`, `remoteVersion`.
+- Import helper: `importRemoteTemplateAsDraft` (remote -> local draft).
+- UI change: Hybrid published templates now use an Edit button that first imports a draft, then navigates.
+- Action: `importRemoteTemplateDraft` in `resources.spec-templates`.
+
+Pending next increments (not yet implemented): optimistic concurrency, snapshot history integration on hybrid publish, diffing & badges.

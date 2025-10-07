@@ -20,13 +20,18 @@ import {
 } from '@shopify/polaris'
 import { useEffect, useState } from 'react'
 import { authenticate } from '../shopify.server'
+import { requireHqShopOr404 } from '../lib/access.server'
 import { getTemplateWithFields } from '../models/specTemplate.server'
+import { CORE_SPEC_FIELD_DEFS } from '../models/specTemplateCoreFields'
+import { loadTemplateSnapshotData, loadPublishedSnapshot, diffTemplate } from '../models/templateVersion.server'
 import { HelpBanner } from '../components/HelpBanner'
 
 type LoaderData = {
+  status: 'ok' | 'orphan'
   id: string
   name: string
   lastPublishedAt?: string | null
+  orphan: boolean
   fields: Array<{
     id: string
     key: string
@@ -40,13 +45,80 @@ type LoaderData = {
     metafieldKey?: string | null
     metafieldType?: string | null
   }>
+  diff?: {
+    added: number
+    removed: number
+    changed: number
+  }
 }
+
+// HQ gating via shared util
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request)
+  await requireHqShopOr404(request)
   const id = String(params.id)
   const tpl = await getTemplateWithFields(id)
-  if (!tpl) throw new Response('Not Found', { status: 404 })
+  if (!tpl) {
+    // Try to load remote metaobject to detect orphan
+    try {
+      const q = `#graphql
+        query Orphan($handle:String!){
+          metaobjectByHandle(handle:{type:"rbp_template", handle:$handle}){
+            handle
+            updatedAt
+            nameField: field(key:"name"){ value }
+            fieldsJson: field(key:"fields_json"){ value }
+          }
+        }`
+      const { admin } = await authenticate.admin(request)
+      const resp = await admin.graphql(q, { variables: { handle: id } })
+      if (resp.ok) {
+        const jr = await resp.json()
+        const mo = jr?.data?.metaobjectByHandle
+        if (mo) {
+          let parsed: unknown[] = []
+          try {
+            const arr = JSON.parse(mo.fieldsJson?.value || '[]')
+            if (Array.isArray(arr)) parsed = arr
+          } catch {
+            /* ignore */
+          }
+          return json<LoaderData>({
+            status: 'orphan',
+            id,
+            name: mo.nameField?.value || '(Unnamed)',
+            lastPublishedAt: mo.updatedAt || null,
+            fields: parsed.map((f, i) => {
+              const obj = (typeof f === 'object' && f !== null ? f : {}) as Record<string, unknown>
+              const typeRaw = obj.type
+              const allowedTypes = new Set(['text', 'number', 'boolean', 'select'])
+              const type = allowedTypes.has(String(typeRaw))
+                ? (String(typeRaw) as LoaderData['fields'][number]['type'])
+                : 'text'
+              return {
+                id: String(obj.id || obj.key || `orphan-${i}`),
+                key: String(obj.key || `field_${i}`),
+                label: String(obj.label || obj.key || `Field ${i + 1}`),
+                type,
+                required: Boolean(obj.required) || false,
+                position: typeof obj.position === 'number' ? obj.position : i,
+                storage: obj.storage === 'CORE' ? 'CORE' : 'METAFIELD',
+                coreFieldPath: (obj.coreFieldPath as string) || null,
+                metafieldNamespace: (obj.metafieldNamespace as string) || null,
+                metafieldKey: (obj.metafieldKey as string) || null,
+                metafieldType: (obj.metafieldType as string) || null,
+              }
+            }),
+            orphan: true,
+          })
+        }
+      }
+    } catch {
+      /* swallow */
+    }
+    throw new Response('Not Found', { status: 404 })
+  }
   type FieldRec = {
     id: string
     key: string
@@ -86,7 +158,19 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   } catch {
     lastPublishedAt = null
   }
-  return json<LoaderData>({ id: tpl.id, name: tpl.name, fields, lastPublishedAt })
+  // Compute diff vs last published snapshot (latest version)
+  let diff: LoaderData['diff'] | undefined
+  try {
+    const published = await loadPublishedSnapshot(tpl.id)
+    const current = await loadTemplateSnapshotData(tpl.id)
+    const d = diffTemplate(published, current)
+    if (d.added.length || d.removed.length || d.changed.length) {
+      diff = { added: d.added.length, removed: d.removed.length, changed: d.changed.length }
+    }
+  } catch {
+    /* ignore diff errors */
+  }
+  return json<LoaderData>({ status: 'ok', id: tpl.id, name: tpl.name, fields, lastPublishedAt, orphan: false, diff })
 }
 
 const coreFieldOptions = [
@@ -101,6 +185,23 @@ const coreFieldOptions = [
 
 export default function TemplateDetail() {
   const data = useLoaderData<LoaderData>()
+  if (data.status === 'orphan') {
+    return (
+      <Frame>
+        <div className="p-m">
+          <Banner tone="warning" title="Orphan template">
+            <p>
+              This template exists remotely as a metaobject but has no local record. You can restore it locally (which
+              recreates the draft) or delete the remote metaobject if it is no longer needed.
+            </p>
+            <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+              <RestoreOrphanButtons id={data.id} />
+            </div>
+          </Banner>
+        </div>
+      </Frame>
+    )
+  }
   const renameFetcher = useFetcher()
   const addFetcher = useFetcher()
   const revalidator = useRevalidator()
@@ -114,9 +215,19 @@ export default function TemplateDetail() {
   const publishError =
     publishFetcher.state === 'idle' && publishData && publishData.ok === false ? publishData.error : undefined
   const [showToast, setShowToast] = useState(false)
-  const { selectedResources, allResourcesSelected, handleSelectionChange } = useIndexResourceState(data.fields, {
-    resourceIDResolver: (item: LoaderData['fields'][number]) => item.id,
-  })
+  const coreFieldPathSet = new Set(CORE_SPEC_FIELD_DEFS.map(f => f.coreFieldPath))
+  const coreFields = data.fields.filter(
+    f => f.storage === 'CORE' && f.coreFieldPath && coreFieldPathSet.has(f.coreFieldPath),
+  )
+  const metaFields = data.fields.filter(f => !coreFields.includes(f))
+  const unified = [...coreFields, ...metaFields]
+  const { selectedResources, allResourcesSelected, handleSelectionChange } = useIndexResourceState(
+    unified.filter(f => f.storage === 'METAFIELD'),
+    {
+      resourceIDResolver: (item: LoaderData['fields'][number]) => item.id,
+    },
+  )
+  const [showAddForm, setShowAddForm] = useState(false)
   // Clear dirty after successful publish; show any server error in the bar
   useEffect(() => {
     if (publishOk) {
@@ -155,8 +266,18 @@ export default function TemplateDetail() {
       {data.lastPublishedAt && (
         <div style={{ margin: '8px 0 4px' }}>
           <Text as="p" tone="subdued" variant="bodySm">
-            Last published: {new Date(data.lastPublishedAt).toLocaleString()}
+            Last published: {new Date(data.lastPublishedAt).toISOString().replace('T', ' ').replace(/Z$/, '')}
           </Text>
+        </div>
+      )}
+      {data.diff && (
+        <div style={{ margin: '4px 0 12px' }}>
+          <Banner tone="info" title="Unpublished changes detected">
+            <p>
+              {data.diff.added} added, {data.diff.removed} removed, {data.diff.changed} modified field
+              {data.diff.changed === 1 ? '' : 's'}.
+            </p>
+          </Banner>
         </div>
       )}
       {dirty && (
@@ -168,6 +289,7 @@ export default function TemplateDetail() {
             onAction: () => {
               const form = new FormData()
               form.append('_action', 'publishTemplates')
+              form.append('templateId', data.id)
               publishFetcher.submit(form, { method: 'post', action: '/resources/spec-templates' })
             },
           }}
@@ -228,50 +350,82 @@ export default function TemplateDetail() {
       )}
       <Card>
         <BlockStack>
-          <Text as="h2" variant="headingMd">
-            Fields
-          </Text>
-          {/* Add field */}
-          <AddField templateName={name} existingKeys={data.fields.map(f => f.key)} onSubmit={addFieldSubmit} />
-          {/* Existing fields in a table */}
+          <InlineStack align="space-between" blockAlign="center">
+            <Text as="h2" variant="headingMd">
+              Fields
+            </Text>
+            {!showAddForm && (
+              <Button variant="primary" onClick={() => setShowAddForm(true)} disabled={!name.trim()}>
+                Add field
+              </Button>
+            )}
+          </InlineStack>
+          {showAddForm && (
+            <AddField
+              templateName={name}
+              existingKeys={data.fields.map(f => f.key)}
+              onSubmit={vals => {
+                addFieldSubmit(vals)
+                setShowAddForm(false)
+              }}
+              onCancel={() => setShowAddForm(false)}
+            />
+          )}
           <IndexTable
             resourceName={{ singular: 'field', plural: 'fields' }}
-            itemCount={data.fields.length}
+            itemCount={unified.length}
             selectedItemsCount={allResourcesSelected ? 'All' : selectedResources.length}
             onSelectionChange={handleSelectionChange}
             headings={[
               { title: 'Label' },
               { title: 'Key' },
               { title: 'Type' },
-              { title: 'Storage' },
               { title: 'Required' },
+              { title: 'Source' },
               { title: 'Actions' },
             ]}
           >
-            {data.fields.map((f, index) => (
-              <IndexTable.Row id={f.id} key={f.id} position={index} selected={selectedResources.includes(f.id)}>
-                <IndexTable.Cell>
-                  <Text as="span">{f.label}</Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                  <Text as="span" tone="subdued">
-                    {f.key}
-                  </Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                  <Text as="span">{f.type}</Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                  <Text as="span">{f.storage === 'CORE' ? 'Core' : 'Metafield'}</Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                  <Text as="span">{f.required ? 'Yes' : 'No'}</Text>
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                  <FieldActions field={f} onEdit={() => setEditing(f)} onDirty={() => setDirty(true)} />
-                </IndexTable.Cell>
-              </IndexTable.Row>
-            ))}
+            {unified.map((f, index) => {
+              const selectable = f.storage === 'METAFIELD'
+              return (
+                <IndexTable.Row
+                  id={f.id}
+                  key={f.id}
+                  position={index}
+                  selected={selectable && selectedResources.includes(f.id)}
+                  disabled={!selectable}
+                >
+                  <IndexTable.Cell>
+                    <Text as="span">{f.label}</Text>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    <Text as="span" tone="subdued">
+                      {f.key}
+                    </Text>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    <Text as="span">{f.type}</Text>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    <Text as="span">{f.required ? 'Yes' : 'No'}</Text>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    <Text as="span" tone="subdued">
+                      {f.storage === 'CORE' ? 'Core' : 'Metafield'}
+                    </Text>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    {f.storage === 'METAFIELD' ? (
+                      <FieldActions field={f} onEdit={() => setEditing(f)} onDirty={() => setDirty(true)} />
+                    ) : (
+                      <Text as="span" tone="subdued">
+                        —
+                      </Text>
+                    )}
+                  </IndexTable.Cell>
+                </IndexTable.Row>
+              )
+            })}
           </IndexTable>
         </BlockStack>
       </Card>
@@ -301,19 +455,21 @@ function AddField({
   templateName,
   existingKeys,
   onSubmit,
+  onCancel,
 }: {
   templateName: string
   existingKeys: string[]
   onSubmit: (values: Record<string, string | boolean>) => void
+  onCancel: () => void
 }) {
   const [key, setKey] = useState('')
   const [label, setLabel] = useState('')
-  const [type, setType] = useState<'text' | 'number' | 'boolean' | 'select'>('text')
-  const [required, setRequired] = useState(false)
-  const [storage, setStorage] = useState<'CORE' | 'METAFIELD'>('CORE')
-  const [coreFieldPath, setCoreFieldPath] = useState('title')
+  // Simplified rules: type=text, required=true, namespace derived from templateName, metafield type fixed
+  const type = 'text' as const
+  const required = true
+  const storage: 'CORE' | 'METAFIELD' = 'METAFIELD'
   const [metafieldNamespace, setMetaNs] = useState('')
-  const [metafieldType, setMetaType] = useState('single_line_text_field')
+  const metafieldType = 'single_line_text_field'
   const [keyEdited, setKeyEdited] = useState(false)
 
   const slugify = (s: string) =>
@@ -334,18 +490,7 @@ function AddField({
     return k
   }
 
-  const metafieldTypeFor = (t: 'text' | 'number' | 'boolean' | 'select') => {
-    switch (t) {
-      case 'number':
-        return 'number_integer'
-      case 'boolean':
-        return 'boolean'
-      case 'select':
-        return 'single_line_text_field'
-      default:
-        return 'single_line_text_field'
-    }
-  }
+  // No dynamic metafield type mapping needed (always single_line_text_field)
 
   const keyError = key
     ? /[a-z0-9_]+/.test(key)
@@ -353,17 +498,9 @@ function AddField({
       : 'Use lowercase letters, numbers, and underscores'
     : 'Key is required'
   const labelError = label ? undefined : 'Label is required'
-  const storageErrors = (() => {
-    if (storage === 'CORE') return { core: undefined, ns: undefined, mkey: undefined, mtype: undefined }
-    return {
-      core: undefined,
-      ns: metafieldNamespace ? undefined : 'Namespace is required',
-      mtype: metafieldType ? undefined : 'Type is required',
-    }
-  })()
 
   const duplicateKey = key ? existingKeys.includes(key) : false
-  const isValid = !keyError && !labelError && !storageErrors.ns && !storageErrors.mtype && !duplicateKey
+  const isValid = !keyError && !labelError && !duplicateKey
 
   const onLabelChange = (v: string) => {
     setLabel(v)
@@ -373,9 +510,7 @@ function AddField({
       setKey(nextKey)
       // metafield key derives from machine key; no separate state here
     }
-    if (storage === 'METAFIELD') {
-      if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
-    }
+    if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
   }
 
   const onKeyChange = (v: string) => {
@@ -386,12 +521,9 @@ function AddField({
   const submit = () => {
     if (!isValid) return
     const values: Record<string, string | boolean> = { key, label, type, required, storage }
-    if (storage === 'CORE') values.coreFieldPath = coreFieldPath
-    else {
-      values.metafieldNamespace = metafieldNamespace
-      values.metafieldKey = key
-      values.metafieldType = metafieldType
-    }
+    values.metafieldNamespace = metafieldNamespace
+    values.metafieldKey = key
+    values.metafieldType = metafieldType
     onSubmit(values)
     setKey('')
     setLabel('')
@@ -419,68 +551,17 @@ function AddField({
               helpText="Machine key (auto-generated from label). You can override."
               error={duplicateKey ? 'Key already exists' : keyError}
             />
-            <Select
-              label="Type"
-              options={['text', 'number', 'boolean', 'select'].map(v => ({ label: v, value: v }))}
-              value={type}
-              onChange={v => {
-                const nv = v as 'text' | 'number' | 'boolean' | 'select'
-                setType(nv)
-                if (storage === 'METAFIELD') setMetaType(metafieldTypeFor(nv))
-              }}
-            />
-            <Checkbox label="Required" checked={required} onChange={setRequired} />
+            {/* Namespace hidden; informative text instead */}
+            <Text tone="subdued" as="span">
+              Namespace: {metafieldNamespace || slugify(templateName || 'product_spec')}
+            </Text>
           </FormLayout.Group>
-
-          <FormLayout.Group>
-            <Select
-              label="Storage"
-              options={[
-                { label: 'Core', value: 'CORE' },
-                { label: 'Metafield', value: 'METAFIELD' },
-              ]}
-              value={storage}
-              onChange={v => {
-                const ns = v as 'CORE' | 'METAFIELD'
-                setStorage(ns)
-                if (ns === 'METAFIELD') {
-                  if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
-                  setMetaType(metafieldTypeFor(type))
-                }
-              }}
-              helpText="Choose where this value is stored on the product"
-            />
-            {storage === 'CORE' ? (
-              <Select
-                label="Core field"
-                options={coreFieldOptions}
-                value={coreFieldPath}
-                onChange={setCoreFieldPath}
-                helpText="Map to a built-in product field"
-              />
-            ) : (
-              <>
-                <TextField
-                  label="Metafield namespace"
-                  value={metafieldNamespace}
-                  onChange={setMetaNs}
-                  autoComplete="off"
-                  error={storageErrors.ns}
-                />
-                <TextField
-                  label="Metafield type"
-                  value={metafieldType}
-                  onChange={setMetaType}
-                  autoComplete="off"
-                  error={storageErrors.mtype}
-                />
-              </>
-            )}
-          </FormLayout.Group>
-
           <InlineStack align="end">
             <Button onClick={submit} variant="primary" disabled={!isValid || !templateName.trim()}>
-              Add field
+              Save field
+            </Button>
+            <Button onClick={onCancel} variant="plain">
+              Cancel
             </Button>
           </InlineStack>
         </FormLayout>
@@ -537,6 +618,32 @@ function FieldActions({
   )
 }
 
+function RestoreOrphanButtons({ id }: { id: string }) {
+  const fetcher = useFetcher()
+  const restoring = fetcher.state === 'submitting'
+  return (
+    <>
+      <fetcher.Form method="post" action="/resources/spec-templates">
+        <input type="hidden" name="_action" value="restoreOrphanTemplate" />
+        <input type="hidden" name="id" value={id} />
+        <Button submit variant="primary" disabled={restoring} loading={restoring}>
+          Restore locally
+        </Button>
+      </fetcher.Form>
+      <fetcher.Form method="post" action="/resources/spec-templates">
+        <input type="hidden" name="_action" value="deleteOrphanTemplate" />
+        <input type="hidden" name="id" value={id} />
+        <Button submit tone="critical" variant="secondary" disabled={restoring}>
+          Delete remote
+        </Button>
+      </fetcher.Form>
+      <Button url="/app/products/templates" variant="plain">
+        Back
+      </Button>
+    </>
+  )
+}
+
 function EditFieldModal({
   templateName,
   field,
@@ -551,13 +658,13 @@ function EditFieldModal({
   const fetcher = useFetcher()
   const [key, setKey] = useState(field.key)
   const [label, setLabel] = useState(field.label)
-  const [type, setType] = useState<LoaderData['fields'][number]['type']>(field.type)
-  const [required, setRequired] = useState<boolean>(field.required)
+  const [type] = useState<LoaderData['fields'][number]['type']>(field.storage === 'METAFIELD' ? 'text' : field.type)
+  const [required] = useState<boolean>(field.storage === 'METAFIELD' ? true : field.required)
   const [storage, setStorage] = useState<'CORE' | 'METAFIELD'>(field.storage)
   const [coreFieldPath, setCoreFieldPath] = useState<string>(field.coreFieldPath || 'title')
   const [metafieldNamespace, setMetaNs] = useState<string>(field.metafieldNamespace || '')
   const [metafieldKey, setMetaKey] = useState<string>(field.metafieldKey || '')
-  const [metafieldType, setMetaType] = useState<string>(field.metafieldType || 'single_line_text_field')
+  const [metafieldType] = useState<string>('single_line_text_field')
   const slugify = (s: string) =>
     s
       .toLowerCase()
@@ -565,18 +672,7 @@ function EditFieldModal({
       .replace(/[^a-z0-9]+/g, '_')
       .replace(/^_+|_+$/g, '')
       .replace(/_+/g, '_')
-  const metafieldTypeFor = (t: 'text' | 'number' | 'boolean' | 'select') => {
-    switch (t) {
-      case 'number':
-        return 'number_integer'
-      case 'boolean':
-        return 'boolean'
-      case 'select':
-        return 'single_line_text_field'
-      default:
-        return 'single_line_text_field'
-    }
-  }
+  // metafieldTypeFor removed; types locked to text
 
   const keyError = key
     ? /[a-z0-9_]+/.test(key)
@@ -642,11 +738,21 @@ function EditFieldModal({
               <TextField label="Key" value={key} onChange={onKeyChanged} error={keyError} autoComplete="off" />
               <Select
                 label="Type"
-                options={['text', 'number', 'boolean', 'select'].map(v => ({ label: v, value: v }))}
-                value={type}
-                onChange={v => setType(v as typeof type)}
+                options={[{ label: 'text', value: 'text' }]}
+                value={type === 'text' ? 'text' : 'text'}
+                onChange={() => {
+                  /* locked */
+                }}
+                disabled={field.storage === 'METAFIELD'}
+                helpText={field.storage === 'METAFIELD' ? 'Metafield types locked to text' : undefined}
               />
-              <Checkbox label="Required" checked={required} onChange={setRequired} />
+              <Checkbox
+                label="Required"
+                checked={true}
+                onChange={() => {}}
+                disabled
+                helpText="Metafields are always required"
+              />
             </FormLayout.Group>
 
             <FormLayout.Group>
@@ -663,7 +769,6 @@ function EditFieldModal({
                   if (ns === 'METAFIELD') {
                     if (!metafieldNamespace) setMetaNs(slugify(templateName || 'product_spec'))
                     if (!metafieldKey) setMetaKey(slugify(key || label || ''))
-                    setMetaType(metafieldTypeFor(type))
                   }
                 }}
               />
@@ -679,11 +784,26 @@ function EditFieldModal({
                   <TextField
                     label="Metafield namespace"
                     value={metafieldNamespace}
-                    onChange={setMetaNs}
+                    onChange={() => {}}
                     autoComplete="off"
+                    disabled
+                    helpText="Locked"
                   />
-                  <TextField label="Metafield key" value={metafieldKey} onChange={setMetaKey} autoComplete="off" />
-                  <TextField label="Metafield type" value={metafieldType} onChange={setMetaType} autoComplete="off" />
+                  <TextField
+                    label="Metafield key"
+                    value={metafieldKey}
+                    onChange={setMetaKey}
+                    autoComplete="off"
+                    disabled
+                    helpText="Locked"
+                  />
+                  <TextField
+                    label="Metafield type"
+                    value="single_line_text_field"
+                    autoComplete="off"
+                    disabled
+                    helpText="Locked"
+                  />
                 </>
               )}
             </FormLayout.Group>

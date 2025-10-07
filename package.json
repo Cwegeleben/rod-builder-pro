@@ -11,7 +11,9 @@
     "env": "shopify app env",
     "start": "remix-serve ./build/server/index.js",
     "docker-start": "npm run setup && npm run start",
-    "setup": "prisma generate && prisma migrate deploy",
+    "setup": "prisma generate",
+    "migrate:soft": "prisma migrate deploy || echo 'Soft migrate ignored failure'",
+    "setup:full": "prisma generate && prisma migrate deploy",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
     "lint:fix": "eslint --fix --cache --cache-location ./node_modules/.cache/eslint .",
     "typecheck": "tsc --noEmit",
@@ -25,7 +27,9 @@
     "test:integration": "vitest --run --project integration",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "prepare": "node .husky/install.mjs"
+    "prepare": "node .husky/install.mjs",
+    "preflight:inventory-auth": "node scripts/preflight/inventory-auth-scan.mjs",
+    "validate:templateversion-json": "node scripts/migrate/validate-templateversion-json.mjs"
   },
   "type": "module",
   "engines": {

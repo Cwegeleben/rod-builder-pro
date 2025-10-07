@@ -1,5 +1,5 @@
 FROM node:22.14.0-alpine
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl ca-certificates tini
 
 EXPOSE 3000
 
@@ -16,12 +16,15 @@ ENV NODE_ENV=development
 RUN npm ci --ignore-scripts
 
 COPY . .
+RUN chmod +x scripts/start-production.sh
 
 # Build the Remix app
 RUN npm run build
 
-# Remove devDependencies to slim the final image, then set production env
-RUN npm prune --omit=dev && npm cache clean --force
+# Optionally prune devDependencies to slim the final image (default true)
+ARG PRUNE_DEV=true
+RUN if [ "$PRUNE_DEV" = "true" ]; then npm prune --omit=dev && npm cache clean --force; else echo "[build] Skipping dev prune for maintenance variant"; fi
 ENV NODE_ENV=production
 
-CMD ["npm", "run", "docker-start"]
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["scripts/start-production.sh"]

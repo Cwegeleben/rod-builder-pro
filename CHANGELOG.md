@@ -1,5 +1,21 @@
 # @shopify/shopify-app-template-remix
 
+## [Unreleased]
+
+### Fixed / Operations
+
+- Resolved failed Prisma migration `20251006062503_reset_with_template_version` by marking it rolled back in production and replacing its contents with a documented no-op placeholder to preserve ordering.
+- Aligned `TemplateVersion.dataJson` field type back to `String` in schema to match production; future upgrade to `Json` will be delivered via a forward-only migration.
+- Reset local dev DB to eliminate drift and ensure clean migration history after placeholder insertion.
+
+### Tooling
+
+- Added `npm run validate:templateversion-json` to audit JSON validity before future column type conversion.
+
+### Follow-ups
+
+- Create new migration to convert `TemplateVersion.dataJson` to JSON with data copy + verification.
+
 ## 2025.01.31
 
 - [#952](https://github.com/Shopify/shopify-app-template-remix/pull/952) Update to Shopify App API v2025-01

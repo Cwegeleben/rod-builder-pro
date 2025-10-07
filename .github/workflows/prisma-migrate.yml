@@ -1,0 +1,45 @@
+name: Prisma Migrate Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment (production|staging)'
+        required: true
+        default: production
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: production
+      # Expect DATABASE_URL to be provided as an environment secret mapping for each environment.
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps (prod + dev for prisma)
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Show migration status (pre)
+        run: npx prisma migrate status
+
+      - name: Deploy migrations
+        run: npx prisma migrate deploy
+
+      - name: Show migration status (post)
+        run: npx prisma migrate status
+
+      - name: Summary
+        run: |
+          echo "All done. If status shows no pending migrations, deployment successful."

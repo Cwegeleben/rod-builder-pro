@@ -15,6 +15,7 @@ import {
 } from '@shopify/polaris'
 import { useCallback, useMemo, useState } from 'react'
 import { authenticate } from '../shopify.server'
+import { isHqShop } from '../lib/access.server'
 
 type ProductRow = {
   id: string
@@ -24,6 +25,8 @@ type ProductRow = {
   productType?: string | null
   updatedAt?: string | null
 }
+
+// HQ detection centralized
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request)
@@ -91,16 +94,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }))
   const nextCursor: string | null = edges.length > 0 ? edges[edges.length - 1].cursor : null
 
-  return json({ items, q, status: statusParams, sort: sortParam, first, nextCursor })
+  const hq = await isHqShop(request)
+  return json({ items, q, status: statusParams, sort: sortParam, first, nextCursor, hq })
 }
 
 export default function ProductsIndex() {
-  const { items, q, status, sort, nextCursor } = useLoaderData<typeof loader>() as {
+  const { items, q, status, sort, nextCursor, hq } = useLoaderData<typeof loader>() as {
     items: ProductRow[]
     q: string
     status: string[]
     sort: string
     nextCursor: string | null
+    hq: boolean
   }
   const [params, setParams] = useSearchParams()
   const [mode, setMode] = useState<IndexFiltersMode>(IndexFiltersMode.Default)
@@ -174,10 +179,14 @@ export default function ProductsIndex() {
             Products
           </Text>
           <InlineStack gap="200">
-            <Button url="import" variant="primary">
-              Import Products
-            </Button>
-            <Button url="templates">Templates</Button>
+            {/* <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 --> */}
+            {hq && (
+              <Button url="import" variant="primary">
+                Import from Supplier
+              </Button>
+            )}
+            {/* <!-- END RBP GENERATED: supplier-importer-ui-v1 --> */}
+            {hq && <Button url="templates">Templates</Button>}
           </InlineStack>
         </InlineStack>
 
@@ -265,12 +274,18 @@ export default function ProductsIndex() {
                 No products yet.
               </Text>
               <InlineStack gap="200">
-                <Button url="import" variant="primary">
-                  Import Products
-                </Button>
-                <Button url="templates" variant="secondary">
-                  Templates
-                </Button>
+                {/* <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 --> */}
+                {hq && (
+                  <Button url="import" variant="primary">
+                    Import from Supplier
+                  </Button>
+                )}
+                {/* <!-- END RBP GENERATED: supplier-importer-ui-v1 --> */}
+                {hq && (
+                  <Button url="templates" variant="secondary">
+                    Templates
+                  </Button>
+                )}
               </InlineStack>
             </div>
           </Card>
