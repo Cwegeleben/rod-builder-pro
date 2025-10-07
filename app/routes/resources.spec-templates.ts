@@ -12,6 +12,7 @@ import {
   buildCoreFieldDefsForTemplate,
   slugifyTemplateName,
 } from '../models/specTemplateCoreFields'
+import { isRemoteHybridEnabled, createOrUpdateRemoteFromLocalDraft } from '../models/remoteTemplates.server'
 
 // SENTINEL: products-workspace-v3-0 (Resource route for mutations)
 // BEGIN products-workspace-v3-0
@@ -91,6 +92,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           ),
         )
         return redirect(`/app/products/templates/${t.id}`)
+      }
+      case 'publishHybridTemplate': {
+        if (!isRemoteHybridEnabled()) return json({ ok: false, error: 'Hybrid mode disabled' }, { status: 400 })
+        const templateId = String(form.get('id'))
+        // Publish (upsert) remote metaobject from local draft
+        const adminApi = { graphql: admin.graphql.bind(admin) }
+        await createOrUpdateRemoteFromLocalDraft(adminApi, templateId)
+        // Hard delete local draft (template + cascade fields via FK)
+        await prisma.specTemplate.delete({ where: { id: templateId } })
+        return json({ ok: true, published: templateId })
       }
       case 'deleteTemplates': {
         const ids = form.getAll('ids').map(String)
