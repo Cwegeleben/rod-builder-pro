@@ -6,12 +6,12 @@
 */
 -- DropTable
 PRAGMA foreign_keys=off;
-DROP TABLE "_prisma_migration_lock";
+DROP TABLE IF EXISTS "_prisma_migration_lock";
 PRAGMA foreign_keys=on;
 
 -- CreateTable
 CREATE TABLE "ImporterVersion" (
-    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT DEFAULT 1,
+    "id" INTEGER NOT NULL PRIMARY KEY DEFAULT 1,
     "version" TEXT NOT NULL DEFAULT '2.0-scrape',
     "updatedAt" DATETIME NOT NULL
 );
@@ -23,7 +23,7 @@ CREATE TABLE "ImportRun" (
     "startedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "finishedAt" DATETIME,
     "status" TEXT NOT NULL,
-    "summary" JSONB
+    "summary" JSON
 );
 
 -- CreateTable
@@ -32,9 +32,9 @@ CREATE TABLE "ImportDiff" (
     "importRunId" TEXT NOT NULL,
     "externalId" TEXT NOT NULL,
     "diffType" TEXT NOT NULL,
-    "before" JSONB,
-    "after" JSONB,
-    "validation" JSONB,
+    "before" JSON,
+    "after" JSON,
+    "validation" JSON,
     "resolution" TEXT,
     "resolvedBy" TEXT,
     "resolvedAt" DATETIME
@@ -48,9 +48,9 @@ CREATE TABLE "PartStaging" (
     "title" TEXT NOT NULL,
     "partType" TEXT NOT NULL,
     "description" TEXT,
-    "images" JSONB,
-    "rawSpecs" JSONB,
-    "normSpecs" JSONB,
+    "images" JSON,
+    "rawSpecs" JSON,
+    "normSpecs" JSON,
     "priceMsrp" DECIMAL,
     "priceWh" DECIMAL,
     "hashContent" TEXT NOT NULL DEFAULT '',
@@ -78,9 +78,9 @@ PRAGMA defer_foreign_keys=OFF;
 CREATE UNIQUE INDEX "PartStaging_supplierId_externalId_key" ON "PartStaging"("supplierId", "externalId");
 
 -- RedefineIndex
-DROP INDEX "SpecField_templateId_key_unique";
+DROP INDEX IF EXISTS "SpecField_templateId_key_unique";
 CREATE UNIQUE INDEX "SpecField_templateId_key_key" ON "SpecField"("templateId", "key");
 
 -- RedefineIndex
-DROP INDEX "sqlite_autoindex_SpecTemplate_2";
+DROP INDEX IF EXISTS "sqlite_autoindex_SpecTemplate_2";
 CREATE UNIQUE INDEX "SpecTemplate_name_key" ON "SpecTemplate"("name");

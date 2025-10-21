@@ -36,6 +36,7 @@ type PartLike = {
 type LoaderData = {
   runId: string
   shop: string
+  supplierId?: string
   counts: { add: number; change: number; delete: number; conflict: number; unresolvedAdds: number }
   adds: DiffRow[]
   changes: DiffRow[]
@@ -50,6 +51,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const runId = String(params.runId)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db: any = prisma as any
+  const run = (await db.importRun.findUnique({ where: { id: runId }, select: { supplierId: true } })) as {
+    supplierId: string
+  } | null
   const diffs = (await db.importDiff.findMany({
     where: { importRunId: runId },
     select: { id: true, externalId: true, diffType: true, before: true, after: true, resolution: true },
@@ -115,6 +119,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return json<LoaderData>({
     runId,
     shop,
+    supplierId: run?.supplierId,
     counts: {
       add: adds.length,
       change: changes.length,
@@ -155,7 +160,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
 export default function RunDetailPage() {
   const data = useLoaderData<typeof loader>() as LoaderData
-  const { runId, shop, counts } = data
+  const { runId, shop, counts, supplierId } = data
   const canApply = counts.unresolvedAdds === 0
 
   const resolveFetcher = useFetcher<{ ok?: boolean; error?: string }>()
@@ -339,7 +344,7 @@ export default function RunDetailPage() {
   return (
     <Card>
       <BlockStack gap="300">
-        <ImportNav current="runs" title={`Run ${runId.slice(0, 8)}…`} />
+        <ImportNav current="runs" title={`Run ${runId.slice(0, 8)}…${supplierId ? ` — ${supplierId}` : ''}`} />
         <InlineStack align="space-between" blockAlign="center">
           <InlineStack gap="200" blockAlign="center">
             <Badge tone="success">{`Adds ${counts.add}`}</Badge>

@@ -6,12 +6,20 @@ export default defineWorkspace([
       include: ['**/*.unit.test.ts'],
       name: 'unit',
       environment: 'node',
+      // Serialize tests to avoid concurrent Prisma DB setup on SQLite
+      maxThreads: 1,
+      minThreads: 1,
       setupFiles: ['tests/vitest.setup.ts'],
     },
   },
   {
     test: {
       include: ['**/*.it.test.tsx'],
+      poolOptions: {
+        threads: {
+          singleThread: true,
+        },
+      },
       name: 'integration',
       browser: {
         enabled: true,

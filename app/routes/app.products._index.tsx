@@ -146,7 +146,7 @@ export default function ProductsIndex() {
     useIndexResourceState<ProductRow>(items, {
       resourceIDResolver: item => item.id,
     })
-  const fetcher = useFetcher()
+  const fetcher = useFetcher<{ ok?: boolean; runId?: string }>()
 
   const onQueryChange = useCallback(
     (value: string) => {
@@ -200,8 +200,26 @@ export default function ProductsIndex() {
             {/* <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 --> */}
             {hq && (
               // <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (button) -->
-              <Button variant="primary" disabled={false} url="/app/admin/import/runs" id="btn-import-products">
-                Import from Supplier
+              <Button
+                variant="primary"
+                disabled={fetcher.state === 'submitting'}
+                onClick={async () => {
+                  try {
+                    const fd = new FormData()
+                    fd.append('_action', 'start')
+                    fetcher.submit(fd, { method: 'post', action: '/app/admin/import/start-run' })
+                  } catch {
+                    try {
+                      const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+                      w.shopifyToast?.error?.('Failed to start import')
+                    } catch {
+                      /* ignore */
+                    }
+                  }
+                }}
+                id="btn-import-products"
+              >
+                Start Import
               </Button>
               // <!-- END RBP GENERATED: hq-products-import-wire-v1 (button) -->
             )}
@@ -414,19 +432,38 @@ export default function ProductsIndex() {
         )}
       </BlockStack>
       {/* <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (hook) --> */}
-      <ImportWiring hq={hq} />
+      <ImportWiring fetcher={fetcher} />
       {/* <!-- END RBP GENERATED: hq-products-import-wire-v1 (hook) --> */}
     </Card>
   )
 }
 
 // <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (component) -->
-function ImportWiring({ hq }: { hq: boolean }) {
-  // No-op: Import buttons now navigate to the dedicated Import Wizard at /hq/import
-  // Keeping component for future inline wiring if needed.
+type StartRunFetcher = ReturnType<typeof useFetcher<{ ok?: boolean; runId?: string }>>
+function ImportWiring({ fetcher }: { fetcher: StartRunFetcher }) {
   useEffect(() => {
-    // nothing for now
-  }, [hq])
+    if (fetcher.state === 'idle' && fetcher.data?.ok && fetcher.data.runId) {
+      // Toast and navigate to run detail
+      try {
+        const w = window as unknown as { shopifyToast?: { success?: (m: string) => void } }
+        w.shopifyToast?.success?.('Import started')
+      } catch {
+        /* ignore */
+      }
+      try {
+        window.location.assign(`/app/admin/import/runs/${fetcher.data.runId}`)
+      } catch {
+        /* ignore */
+      }
+    } else if (fetcher.state === 'idle' && fetcher.data && !fetcher.data.ok) {
+      try {
+        const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+        w.shopifyToast?.error?.('Failed to start import')
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [fetcher.state, fetcher.data])
   return null
 }
 // <!-- END RBP GENERATED: hq-products-import-wire-v1 (component) -->
