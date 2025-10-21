@@ -23,6 +23,7 @@ type ProductRow = {
   status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED'
   vendor?: string | null
   productType?: string | null
+  // Preformatted on server in a deterministic UTC format to avoid hydration mismatches
   updatedAt?: string | null
 }
 
@@ -90,7 +91,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     status: e.node.status,
     vendor: e.node.vendor,
     productType: e.node.productType,
-    updatedAt: e.node.updatedAt,
+    // Format on server using UTC and a fixed template (YYYY-MM-DD HH:mm:ss UTC)
+    updatedAt: e.node.updatedAt
+      ? (() => {
+          try {
+            const d = new Date(e.node.updatedAt)
+            const pad = (n: number) => String(n).padStart(2, '0')
+            const YYYY = d.getUTCFullYear()
+            const MM = pad(d.getUTCMonth() + 1)
+            const DD = pad(d.getUTCDate())
+            const hh = pad(d.getUTCHours())
+            const mm = pad(d.getUTCMinutes())
+            const ss = pad(d.getUTCSeconds())
+            return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss} UTC`
+          } catch {
+            return e.node.updatedAt
+          }
+        })()
+      : null,
   }))
   const nextCursor: string | null = edges.length > 0 ? edges[edges.length - 1].cursor : null
 
@@ -381,7 +399,7 @@ export default function ProductsIndex() {
                       ) : key === 'productType' ? (
                         <Text as="span">{item.productType || '-'}</Text>
                       ) : key === 'updatedAt' ? (
-                        <Text as="span">{item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '-'}</Text>
+                        <Text as="span">{item.updatedAt || '-'}</Text>
                       ) : null}
                     </IndexTable.Cell>
                   ))}
@@ -440,7 +458,7 @@ function ImportWiring({ hq }: { hq: boolean }) {
       // If you have a dedicated endpoint, replace below. This uses a generic supplier import preview/run.
       const form = new FormData()
       form.append('supplier', 'batson')
-      fetcher.submit(form, { method: 'post', action: '/app/api/importer/run' })
+      fetcher.submit(form, { method: 'post', action: '/api/importer/run' })
       // 2) Toast (simple alert for now; replace with Polaris Toast if available globally)
       toast.success('Import started')
       // 3) Begin polling newest runs for ready status
@@ -464,7 +482,7 @@ function ImportWiring({ hq }: { hq: boolean }) {
         return
       }
       try {
-        const res = await fetch('/app/api/importer/run', { method: 'GET' })
+        const res = await fetch('/api/importer/run', { method: 'GET' })
         if (!res.ok) return
         const js = await res.json()
         // Expect your list endpoint shape; adapt as needed

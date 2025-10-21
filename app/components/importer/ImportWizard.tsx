@@ -35,7 +35,7 @@ export function ImportWizard() {
 
   const runJob = async () => {
     const mapping = JSON.parse(mappingJson)
-    const resp = await fetch('/app/api/importer/run', {
+    const resp = await fetch('/api/importer/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, productType, mapping }),
