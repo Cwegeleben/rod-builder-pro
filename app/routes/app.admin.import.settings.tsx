@@ -1,5 +1,6 @@
 // <!-- BEGIN RBP GENERATED: hq-import-settings-v1 -->
 import { json } from '@remix-run/node'
+import { Outlet } from '@remix-run/react'
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node'
 import { requireHQAccess } from '../services/auth/guards.server'
 import { buildCombinedUrlSet, saveRepeatSet } from '../services/importer/repeat.server'
@@ -100,7 +101,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function ImportSettingsPage() {
-  // TODO: minimal UI (form) can be added later; keeping server-only plumbing for now
-  return null
+  // Render nested routes (e.g., settings index UI)
+  return <Outlet />
 }
 // <!-- END RBP GENERATED: hq-import-settings-v1 -->

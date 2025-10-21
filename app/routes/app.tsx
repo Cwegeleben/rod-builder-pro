@@ -29,6 +29,17 @@ export default function App() {
         </Link>
         <Link to="products">Products</Link>
       </NavMenu>
+      {/* BEGIN RBP GENERATED: admin-hq-importer-ux-v2 */}
+      {/* Admin HQ Importer v2 Nav additions: keep links relative to preserve shop/host/embedded */}
+      <NavMenu>
+        <Link to="." rel="home">
+          Dashboard
+        </Link>
+        <Link to="products">Products</Link>
+        <Link to="imports">Import Runs</Link>
+        <Link to="imports/settings">Settings</Link>
+      </NavMenu>
+      {/* END RBP GENERATED: admin-hq-importer-ux-v2 */}
       <AdminLayout>
         <Outlet />
       </AdminLayout>

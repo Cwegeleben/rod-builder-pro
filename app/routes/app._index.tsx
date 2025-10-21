@@ -25,6 +25,10 @@ export default function Index() {
                   Products
                 </Button>
                 <Button url="products/import">Import Products</Button>
+                {/* BEGIN RBP GENERATED: admin-hq-importer-ux-v2 */}
+                <Button url="imports">Import Runs</Button>
+                <Button url="imports/settings">Import Settings</Button>
+                {/* END RBP GENERATED: admin-hq-importer-ux-v2 */}
                 {/* Templates entry lives under Products > Templates; omitting legacy link */}
               </div>
             </div>

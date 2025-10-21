@@ -1,7 +1,7 @@
 // <!-- BEGIN RBP GENERATED: hq-import-runs-list-v1 -->
 import { json, type LoaderFunctionArgs } from '@remix-run/node'
-import { useLoaderData, useSearchParams, useFetcher, useLocation, useNavigate } from '@remix-run/react'
-import { useEffect } from 'react'
+import { useLoaderData, useSearchParams, useFetcher, useLocation, useNavigate, Link } from '@remix-run/react'
+import { useEffect, useState } from 'react'
 import { requireHQAccess } from '../services/auth/guards.server'
 import { prisma } from '../db.server'
 import { authenticate } from '../shopify.server'
@@ -19,6 +19,7 @@ import {
   ButtonGroup,
 } from '@shopify/polaris'
 import { ImportNav } from '../components/importer/ImportNav'
+import { ReRunOptionsModal } from '../components/imports/ReRunOptionsModal'
 
 type RunRow = {
   id: string
@@ -123,6 +124,10 @@ export default function ImportRunsIndex() {
     }
   }, [location.search])
   const fetcher = useFetcher()
+  // BEGIN RBP GENERATED: admin-hq-importer-ux-v2
+  const [rerunOpen, setRerunOpen] = useState(false)
+  const [targetRunId, setTargetRunId] = useState<string | null>(null)
+  // END RBP GENERATED: admin-hq-importer-ux-v2
 
   const headings = useMemo(
     () => [
@@ -320,7 +325,11 @@ export default function ImportRunsIndex() {
             return (
               <IndexTable.Row id={r.id} key={r.id} position={idx}>
                 <IndexTable.Cell>
-                  <code className="text-xs">{r.id}</code>
+                  {/* BEGIN RBP GENERATED: admin-hq-importer-ux-v2 */}
+                  <Link to={`/app/admin/import/runs/${r.id}${location.search}`} prefetch="intent">
+                    <code className="text-xs">{r.id}</code>
+                  </Link>
+                  {/* END RBP GENERATED: admin-hq-importer-ux-v2 */}
                 </IndexTable.Cell>
                 <IndexTable.Cell>{r.supplierId}</IndexTable.Cell>
                 <IndexTable.Cell>{prettyTime(r.startedAt)}</IndexTable.Cell>
@@ -339,7 +348,19 @@ export default function ImportRunsIndex() {
                 <IndexTable.Cell>
                   <InlineStack gap="100">
                     <Button url={`/app/admin/import/runs/${r.id}`}>Review</Button>
-                    <Button onClick={() => navigate(`/app/admin/import/${r.id}/edit`)}>Re-run</Button>
+                    {/* BEGIN RBP GENERATED: importer-extractor-templates-v2 */}
+                    <Button url={`/app/admin/import/preview/${r.id}${location.search}`}>Preview</Button>
+                    {/* END RBP GENERATED: importer-extractor-templates-v2 */}
+                    {/* BEGIN RBP GENERATED: admin-hq-importer-ux-v2 */}
+                    <Button
+                      onClick={() => {
+                        setTargetRunId(r.id)
+                        setRerunOpen(true)
+                      }}
+                    >
+                      Re-run
+                    </Button>
+                    {/* END RBP GENERATED: admin-hq-importer-ux-v2 */}
                     <fetcher.Form method="post" action="/app/admin/import/apply-run">
                       <input type="hidden" name="runId" value={r.id} />
                       <input type="hidden" name="shop" value={shop} />
@@ -354,6 +375,25 @@ export default function ImportRunsIndex() {
           })}
         </IndexTable>
       </BlockStack>
+      {/* BEGIN RBP GENERATED: admin-hq-importer-ux-v2 */}
+      <ReRunOptionsModal
+        open={rerunOpen}
+        onClose={() => {
+          setRerunOpen(false)
+          setTargetRunId(null)
+        }}
+        onConfirm={opts => {
+          if (!targetRunId) return
+          const form = new FormData()
+          form.set('intent', 'save')
+          form.set('includeSeeds', 'on')
+          if (opts.skipSuccessful) form.set('skipSuccessful', 'on')
+          form.set('manualUrls', opts.manualUrls)
+          fetcher.submit(form, { method: 'post', action: `/app/admin/import/${targetRunId}/edit` })
+          setRerunOpen(false)
+        }}
+      />
+      {/* END RBP GENERATED: admin-hq-importer-ux-v2 */}
     </Card>
   )
 }

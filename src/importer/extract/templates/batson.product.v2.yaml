@@ -1,0 +1,41 @@
+# <!-- BEGIN RBP GENERATED: importer-extractor-templates-v2 -->
+# Template: Batson Product v2
+# Notes: JSON-LD -> DOM -> slug -> hash fallback
+# Required fields: externalId, title, images[0]
+
+fields:
+  externalId:
+    required: true
+    from:
+      - jsonld: $.sku
+      - dom: 'meta[itemprop="sku"]@content'
+      - slug: true
+      - hash: true
+  title:
+    required: true
+    from:
+      - jsonld: $.name
+      - dom: 'h1.product-title'
+  images:
+    required: true
+    from:
+      - jsonld: $.image[*]
+      - domAll: '.product-gallery img@src'
+    transforms:
+      - toAbsoluteUrls
+      - dedupe
+  availability:
+    from:
+      - jsonld: $.offers.availability
+      - dom: '.availability'
+    transforms:
+      - toSchemaAvailability
+  priceMsrp:
+    from:
+      - jsonld: $.offers.price
+      - dom: '.price--msrp'
+    transforms:
+      - toNumber
+# Appended selectors (temporary, saved by UI):
+# selectors: []
+# <!-- END RBP GENERATED: importer-extractor-templates-v2 -->
