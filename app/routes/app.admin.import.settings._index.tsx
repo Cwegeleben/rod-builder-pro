@@ -16,6 +16,7 @@ import {
   Select,
   Badge,
 } from '@shopify/polaris'
+import { ImportNav } from '../components/importer/ImportNav'
 
 // We reuse the existing backend action at /app/admin/import/settings
 // This route provides a nicer UI and delegates persistence via fetcher.Form action attribute
@@ -137,9 +138,7 @@ export default function ImportSettingsIndex() {
   return (
     <Card>
       <BlockStack gap="400">
-        <Text as="h2" variant="headingLg">
-          Importer Settings
-        </Text>
+        <ImportNav current="settings" title="Importer Settings" />
 
         {/* Seeds Section */}
         <Card roundedAbove="sm">

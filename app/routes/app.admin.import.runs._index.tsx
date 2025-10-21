@@ -5,7 +5,18 @@ import { requireHQAccess } from '../services/auth/guards.server'
 import { prisma } from '../db.server'
 import { authenticate } from '../shopify.server'
 import { useMemo } from 'react'
-import { Card, BlockStack, InlineStack, Text, Badge, Button, IndexTable, ChoiceList } from '@shopify/polaris'
+import {
+  Card,
+  BlockStack,
+  InlineStack,
+  Text,
+  Badge,
+  Button,
+  IndexTable,
+  ChoiceList,
+  ButtonGroup,
+} from '@shopify/polaris'
+import { ImportNav } from '../components/importer/ImportNav'
 
 type RunRow = {
   id: string
@@ -103,10 +114,55 @@ export default function ImportRunsIndex() {
   return (
     <Card>
       <BlockStack gap="300">
+        <ImportNav current="runs" title="Import Runs" />
         <InlineStack align="space-between">
-          <Text as="h2" variant="headingLg">
-            Import Runs
-          </Text>
+          <InlineStack gap="200" blockAlign="center">
+            <Text as="h3" variant="headingMd">
+              Filters
+            </Text>
+            <ButtonGroup>
+              <Button
+                variant={!status ? 'primary' : undefined}
+                onClick={() => {
+                  const next = new URLSearchParams(params)
+                  next.delete('status')
+                  setParams(next)
+                }}
+              >
+                All
+              </Button>
+              <Button
+                variant={status === 'started' ? 'primary' : undefined}
+                onClick={() => {
+                  const next = new URLSearchParams(params)
+                  next.set('status', 'started')
+                  setParams(next)
+                }}
+              >
+                In progress
+              </Button>
+              <Button
+                variant={status === 'success' ? 'primary' : undefined}
+                onClick={() => {
+                  const next = new URLSearchParams(params)
+                  next.set('status', 'success')
+                  setParams(next)
+                }}
+              >
+                Succeeded
+              </Button>
+              <Button
+                variant={status === 'failed' ? 'primary' : undefined}
+                onClick={() => {
+                  const next = new URLSearchParams(params)
+                  next.set('status', 'failed')
+                  setParams(next)
+                }}
+              >
+                Failed
+              </Button>
+            </ButtonGroup>
+          </InlineStack>
           <InlineStack gap="200">
             {/* Filters */}
             <ChoiceList

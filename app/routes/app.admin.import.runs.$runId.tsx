@@ -6,6 +6,7 @@ import { requireHQAccess } from '../services/auth/guards.server'
 import { prisma } from '../db.server'
 import { authenticate } from '../shopify.server'
 import { Card, BlockStack, InlineStack, Text, Badge, Button, IndexTable, Tabs, Tooltip } from '@shopify/polaris'
+import { ImportNav } from '../components/importer/ImportNav'
 
 type DiffRow = {
   id: string
@@ -338,6 +339,7 @@ export default function RunDetailPage() {
   return (
     <Card>
       <BlockStack gap="300">
+        <ImportNav current="runs" title={`Run ${runId.slice(0, 8)}…`} />
         {!canApply && (
           <div role="alert" className="mb-3 rounded-lg border border-amber-400 bg-amber-50 p-3">
             <strong>{counts.unresolvedAdds}</strong> of <strong>{counts.add}</strong> new products need review before
