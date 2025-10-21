@@ -1,14 +1,13 @@
-// <!-- BEGIN RBP GENERATED: supplier-importer-v1 -->
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { redirect } from '@remix-run/node'
-import { authenticate } from '../shopify.server'
+import { requireHQAccess } from '../services/auth/guards.server'
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request)
-  return redirect('/app/products/import', { status: 302 })
+// DEPRECATED: Supplier Import Wizard v1 (obsolete since RBP HQ Importer v2)
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireHQAccess(request)
+  return redirect('/app/admin/import/runs', { status: 302 })
 }
 
-export default function HQImportRedirect() {
+export default function LegacyHQImportRedirect() {
   return null
 }
-// <!-- END RBP GENERATED: supplier-importer-v1 -->
