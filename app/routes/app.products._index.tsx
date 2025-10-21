@@ -200,7 +200,7 @@ export default function ProductsIndex() {
             {/* <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 --> */}
             {hq && (
               // <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (button) -->
-              <Button variant="primary" disabled={false} url="/hq/import" id="btn-import-products">
+              <Button variant="primary" disabled={false} url="/app/admin/import/runs" id="btn-import-products">
                 Import from Supplier
               </Button>
               // <!-- END RBP GENERATED: hq-products-import-wire-v1 (button) -->
@@ -297,7 +297,12 @@ export default function ProductsIndex() {
                 {/* <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 --> */}
                 {hq && (
                   // <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (button-empty) -->
-                  <Button variant="primary" disabled={false} url="/hq/import" id="btn-import-products-empty">
+                  <Button
+                    variant="primary"
+                    disabled={false}
+                    url="/app/admin/import/runs"
+                    id="btn-import-products-empty"
+                  >
                     Import from Supplier
                   </Button>
                   // <!-- END RBP GENERATED: hq-products-import-wire-v1 (button-empty) -->
