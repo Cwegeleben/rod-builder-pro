@@ -12,6 +12,8 @@ primary_region = 'sjc'
   PORT = '3000'
   SCOPES = 'write_products,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions'
   SHOPIFY_APP_URL = 'https://rbp-app.fly.dev'
+  # Allow any dev HQ shop to access HQ-gated routes; tighten to exact bare if desired via HQ_SHOPS
+  HQ_SHOPS_REGEX = '^rbp-hq.*dev.*$'
   # Cap V8 old space for a 2GB machine (leave ~25% native overhead)
   NODE_OPTIONS = '--max-old-space-size=1536'
 
