@@ -72,6 +72,7 @@ jobs:
     needs: [release]
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
+  if: secrets.SHOPIFY_CLI_PARTNERS_TOKEN != ''
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
@@ -88,6 +89,7 @@ jobs:
         env:
           NODE_ENV: ${{ github.event.inputs.environment }}
       - name: Deploy to Shopify
+        if: ${{ secrets.SHOPIFY_CLI_PARTNERS_TOKEN != '' }}
         env:
           SHOPIFY_CLI_PARTNERS_TOKEN: ${{ secrets.SHOPIFY_CLI_PARTNERS_TOKEN }}
           COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
@@ -100,7 +102,7 @@ jobs:
 
   deploy-fly:
     name: Deploy to Fly
-    needs: [deploy-shopify]
+    needs: [release]
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     concurrency:
@@ -110,11 +112,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Deploy to Fly
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           if [ "${{ github.event.inputs.environment }}" = "production" ]; then
+            export FLY_API_TOKEN='${{ secrets.FLY_API_TOKEN_PROD || secrets.FLY_API_TOKEN }}'
             flyctl deploy --remote-only --config fly.production.toml
           else
+            export FLY_API_TOKEN='${{ secrets.FLY_API_TOKEN_STAGING || secrets.FLY_API_TOKEN }}'
             flyctl deploy --remote-only --config fly.staging.toml
           fi
