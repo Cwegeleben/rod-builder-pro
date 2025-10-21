@@ -13,6 +13,130 @@
       "command": "npm run -s build",
       "problemMatcher": ["$tsc"],
       "group": "build"
+    },
+    {
+      "label": "Prisma generate",
+      "type": "shell",
+      "command": "npm run -s setup"
+    },
+    {
+      "label": "Prisma migrate dev",
+      "type": "shell",
+      "command": "npx prisma migrate dev --name importer-v2-schema --create-only"
+    },
+    {
+      "label": "Typecheck and build",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build",
+      "group": "build"
+    },
+    {
+      "label": "Prisma migrate dev apply",
+      "type": "shell",
+      "command": "npx prisma migrate dev --name importer-v2-schema"
+    },
+    {
+      "label": "Run unit tests (importer version)",
+      "type": "shell",
+      "command": "npm run -s test:unit -- -t ensureImporterVersion"
+    },
+    {
+      "label": "Typecheck and build (final)",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build",
+      "group": "build"
+    },
+    {
+      "label": "Run unit tests ensureImporterVersion",
+      "type": "shell",
+      "command": "npm run -s test:unit -- -t ensureImporterVersion"
+    },
+    {
+      "label": "Generate Prisma client (again)",
+      "type": "shell",
+      "command": "npm run -s setup"
+    },
+    {
+      "label": "Run unit tests ensureImporterVersion",
+      "type": "shell",
+      "command": "npm run -s test:unit -- -t ensureImporterVersion"
+    },
+    {
+      "label": "Install new dependencies",
+      "type": "shell",
+      "command": "npm install",
+      "group": "build"
+    },
+    {
+      "label": "Typecheck new importer code",
+      "type": "shell",
+      "command": "npm run -s typecheck"
+    },
+    {
+      "label": "Prisma migrate deploy after PartStaging unique index",
+      "type": "shell",
+      "command": "npx prisma migrate dev --name partstaging-composite-unique",
+      "group": "build"
+    },
+    {
+      "label": "Run PartStaging dedupe",
+      "type": "shell",
+      "command": "node scripts/migrate/dedupe-partstaging.mjs"
+    },
+    {
+      "label": "Re-run migrate for PartStaging unique",
+      "type": "shell",
+      "command": "npx prisma migrate dev --name partstaging-composite-unique"
+    },
+    {
+      "label": "Run cleanup + migrate checklist",
+      "type": "shell",
+      "command": "npm run -s db:cleanup:partstaging && npm run -s setup && npx prisma migrate deploy"
+    },
+    {
+      "label": "Smoke run 1",
+      "type": "shell",
+      "command": "BATSON_SEEDS=\"https://batsonenterprises.com/collections/blanks\" npm run -s importer:smoke"
+    },
+    {
+      "label": "Smoke run 2",
+      "type": "shell",
+      "command": "BATSON_SEEDS=\"https://batsonenterprises.com/collections/blanks\" npm run -s importer:smoke"
+    },
+    {
+      "label": "Install tsx if missing",
+      "type": "shell",
+      "command": "npm install --no-audit --no-fund --silent"
+    },
+    {
+      "label": "Cleanup + migrate deploy",
+      "type": "shell",
+      "command": "npm run -s db:cleanup:partstaging && npm run -s setup && npx prisma migrate deploy"
+    },
+    {
+      "label": "Smoke run 1 (with tsx)",
+      "type": "shell",
+      "command": "BATSON_SEEDS=\"https://batsonenterprises.com/collections/blanks\" npm run -s importer:smoke"
+    },
+    {
+      "label": "Smoke run 2 (with tsx)",
+      "type": "shell",
+      "command": "BATSON_SEEDS=\"https://batsonenterprises.com/collections/blanks\" npm run -s importer:smoke"
+    },
+    {
+      "label": "Install tools and browsers",
+      "type": "shell",
+      "command": "npm install --no-audit --no-fund --silent && pnpm exec playwright install chromium"
+    },
+    {
+      "label": "One-pass make it green",
+      "type": "shell",
+      "command": "pnpm exec tsx --version && pnpm exec prisma --version && pnpm prisma generate && pnpm db:check:partstaging && pnpm db:cleanup:partstaging && pnpm db:migrate:deploy && BATSON_SEEDS=\"https://batsonenterprises.com/collections/blanks\" pnpm importer:smoke && BATSON_SEEDS=\"https://batsonenterprises.com/collections/blanks\" pnpm importer:smoke"
+    },
+    {
+      "label": "Typecheck importer normalization and diff",
+      "type": "shell",
+      "command": "npm run -s typecheck"
     }
   ]
 }

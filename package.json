@@ -29,7 +29,17 @@
     "test:e2e:ui": "playwright test --ui",
     "prepare": "node .husky/install.mjs",
     "preflight:inventory-auth": "node scripts/preflight/inventory-auth-scan.mjs",
-    "validate:templateversion-json": "node scripts/migrate/validate-templateversion-json.mjs"
+    "validate:templateversion-json": "node scripts/migrate/validate-templateversion-json.mjs",
+    "db:check:partstaging": "node scripts/migrate/check-partstaging.mjs",
+    "db:cleanup:empty-partstaging": "node scripts/migrate/cleanup-empty-partstaging.mjs",
+    "db:cleanup:partstaging": "node scripts/migrate/cleanup-empty-partstaging.mjs && node scripts/migrate/dedupe-partstaging.mjs",
+    "db:migrate:deploy": "pnpm db:cleanup:partstaging && pnpm prisma migrate deploy",
+    "db:migrate:dev": "pnpm db:cleanup:partstaging && pnpm prisma migrate dev",
+    "importer:smoke": "pnpm exec tsx packages/importer/src/cli/smoke.ts",
+    "importer:diff": "pnpm exec tsx packages/importer/src/cli/diff-smoke.ts",
+    "importer:apply": "pnpm exec tsx packages/importer/src/cli/apply-run.ts",
+    "importer:apply:gw": "pnpm exec tsx packages/importer/src/cli/apply-run-via-gateway.ts",
+    "importer:refresh:price": "pnpm exec tsx packages/importer/src/cli/run-price-avail.ts"
   },
   "type": "module",
   "engines": {
@@ -46,10 +56,12 @@
     "@shopify/polaris": "13.9.3",
     "@shopify/shopify-app-remix": "3.7.1",
     "@shopify/shopify-app-session-storage-prisma": "6.0.1",
+    "crawlee": "3.10.2",
     "isbot": "5.1.23",
     "prisma": "6.4.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
+    "shopify-api-node": "^3.15.0",
     "vite-tsconfig-paths": "5.1.4"
   },
   "devDependencies": {
@@ -76,6 +88,7 @@
     "prettier-plugin-tailwindcss": "0.6.11",
     "semantic-release": "24.2.3",
     "tailwindcss": "4.0.7",
+    "tsx": "4.19.2",
     "typescript": "5.7.3",
     "typescript-eslint": "8.24.1",
     "vite": "5.4.14",

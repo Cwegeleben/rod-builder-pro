@@ -6,6 +6,7 @@ export default defineWorkspace([
       include: ['**/*.unit.test.ts'],
       name: 'unit',
       environment: 'node',
+      setupFiles: ['tests/vitest.setup.ts'],
     },
   },
   {

@@ -171,3 +171,100 @@ model SupplierInventorySnapshot {
 }
 // <!-- END RBP GENERATED: supplier-inventory-sync-v1 -->
 // <!-- END RBP GENERATED: supplier-importer-v1 -->
+
+// <!-- BEGIN RBP GENERATED: importer-v2-schema -->
+model ImporterVersion {
+  id        Int      @id @default(1)
+  version   String   @default("2.0-scrape")
+  updatedAt DateTime @updatedAt
+}
+
+model ImportRun {
+  id         String   @id @default(cuid())
+  supplierId String
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+  status     String   // started success failed
+  summary    Json?
+}
+
+model ImportDiff {
+  id          String   @id @default(cuid())
+  importRunId String
+  externalId  String
+  diffType    String   // add change delete conflict
+  before      Json?
+  after       Json?
+  validation  Json?
+  resolution  String?  // approve reject edit
+  resolvedBy  String?
+  resolvedAt  DateTime?
+}
+
+model PartStaging {
+  id          String   @id @default(cuid())
+  supplierId  String
+  externalId  String
+  title       String
+  partType    String
+  description String?
+  images      Json?
+  rawSpecs    Json?
+  normSpecs   Json?
+  priceMsrp   Decimal?
+  priceWh     Decimal?
+  hashContent String   @default("")
+  fetchedAt   DateTime @default(now())
+
+  @@unique([supplierId, externalId])
+}
+// <!-- END RBP GENERATED: importer-v2-schema -->
+
+// <!-- BEGIN RBP GENERATED: importer-seeds-v1 -->
+model ProductSource {
+  id           String   @id @default(cuid())
+  supplierId   String
+  url          String
+  externalId   String?
+  source       String   // 'manual' | 'discovered' | 'forced'
+  notes        String?
+  firstSeenAt  DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+
+  @@unique([supplierId, url], name: "product_source_supplier_url_unique")
+}
+// <!-- END RBP GENERATED: importer-seeds-v1 -->
+
+// <!-- BEGIN RBP GENERATED: hq-import-settings-v1 -->
+model SupplierCredentials {
+  id          String   @id @default(cuid())
+  supplierId  String
+  usernameEnc String
+  passwordEnc String
+  totpEnc     String?
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+
+  @@unique([supplierId], name: "supplier_credentials_unique")
+}
+
+model ImportSchedule {
+  id         String   @id @default(cuid())
+  supplierId String
+  enabled    Boolean  @default(true)
+  cron       String   // e.g. "0 3 * * *"
+  profile    String   // "price_avail"
+  lastRunAt  DateTime?
+  nextDueAt  DateTime?
+}
+// <!-- END RBP GENERATED: hq-import-settings-v1 -->
+
+// <!-- BEGIN RBP GENERATED: importer-price-avail-job-v1 -->
+model SupplierCookieJar {
+  supplierId   String   @id
+  jarEncrypted String
+  lastLoginAt  DateTime
+  expiresAt    DateTime?
+  updatedAt    DateTime @updatedAt
+}
+// <!-- END RBP GENERATED: importer-price-avail-job-v1 -->

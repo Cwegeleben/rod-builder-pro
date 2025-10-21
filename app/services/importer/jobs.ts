@@ -5,6 +5,7 @@ import { normalizeItems } from './mapping'
 import { dedupeItems } from './dedupe'
 import { createDraftProducts } from './shopifyCreate'
 import { prisma } from '../../db.server'
+import { ensureImporterVersion } from './version'
 // throttle imported previously; not yet used for rate limiting (future enhancement)
 import type { AppliedItemRaw } from './selectorApply'
 
@@ -97,6 +98,8 @@ export async function requestCancelImportJob(id: string) {
 
 async function runJob(id: string, params: EnqueueImportParams) {
   inMemoryJobs.set(id, { id, running: true, cancelRequested: false })
+  // Ensure importer version is up-to-date before running any job work
+  await ensureImporterVersion()
   const appendLog = async (line: string) => {
     await prisma.importJob.update({ where: { id }, data: { logJson: { push: line } } })
   }
@@ -180,5 +183,12 @@ async function runJob(id: string, params: EnqueueImportParams) {
   } finally {
     inMemoryJobs.delete(id)
   }
+}
+
+// Minimal helper for manual verification of the version gate in dev
+export async function runImportForSupplier(supplierId: string) {
+  await ensureImporterVersion()
+  // In v2 this would kick off a supplier-specific run; for now it's just the guard.
+  return { ok: true, supplierId }
 }
 // <!-- END RBP GENERATED: supplier-importer-v1 -->

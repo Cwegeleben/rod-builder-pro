@@ -13,7 +13,7 @@ import {
   ChoiceList,
   IndexFiltersMode,
 } from '@shopify/polaris'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { authenticate } from '../shopify.server'
 import { isHqShop } from '../lib/access.server'
 
@@ -181,9 +181,18 @@ export default function ProductsIndex() {
           <InlineStack gap="200">
             {/* <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 --> */}
             {hq && (
-              <Button url="import" variant="primary">
+              // <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (button) -->
+              <Button
+                variant="primary"
+                disabled={false}
+                onClick={() => {
+                  // handled by wired hook below
+                }}
+                id="btn-import-products"
+              >
                 Import from Supplier
               </Button>
+              // <!-- END RBP GENERATED: hq-products-import-wire-v1 (button) -->
             )}
             {/* <!-- END RBP GENERATED: supplier-importer-ui-v1 --> */}
             {hq && <Button url="templates">Templates</Button>}
@@ -276,9 +285,18 @@ export default function ProductsIndex() {
               <InlineStack gap="200">
                 {/* <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 --> */}
                 {hq && (
-                  <Button url="import" variant="primary">
+                  // <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (button-empty) -->
+                  <Button
+                    variant="primary"
+                    disabled={false}
+                    onClick={() => {
+                      // handled by wired hook below
+                    }}
+                    id="btn-import-products-empty"
+                  >
                     Import from Supplier
                   </Button>
+                  // <!-- END RBP GENERATED: hq-products-import-wire-v1 (button-empty) -->
                 )}
                 {/* <!-- END RBP GENERATED: supplier-importer-ui-v1 --> */}
                 {hq && (
@@ -386,6 +404,86 @@ export default function ProductsIndex() {
           </BlockStack>
         )}
       </BlockStack>
+      {/* <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (hook) --> */}
+      <ImportWiring hq={hq} />
+      {/* <!-- END RBP GENERATED: hq-products-import-wire-v1 (hook) --> */}
     </Card>
   )
 }
+
+// <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (component) -->
+function ImportWiring({ hq }: { hq: boolean }) {
+  const fetcher = useFetcher()
+  const [polling, setPolling] = useState(false)
+  // Minimal toast helper with safe access
+  const toast = {
+    success: (msg: string) => {
+      const w = window as unknown as { shopifyToast?: { success?: (m: string) => void } }
+      w.shopifyToast?.success?.(msg)
+    },
+    error: (msg: string) => {
+      const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+      w.shopifyToast?.error?.(msg)
+    },
+  }
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const startRef = useRef<number>(0)
+
+  useEffect(() => {
+    if (!hq) return
+    const btn = document.getElementById('btn-import-products') || document.getElementById('btn-import-products-empty')
+    if (!btn) return
+    const onClick = () => {
+      if (polling) return
+      // reset state
+      // 1) POST to start import (reuse existing endpoint in your app)
+      // If you have a dedicated endpoint, replace below. This uses a generic supplier import preview/run.
+      const form = new FormData()
+      form.append('supplier', 'batson')
+      fetcher.submit(form, { method: 'post', action: '/app/api/importer/run' })
+      // 2) Toast (simple alert for now; replace with Polaris Toast if available globally)
+      toast.success('Import started')
+      // 3) Begin polling newest runs for ready status
+      setPolling(true)
+      startRef.current = Date.now()
+    }
+    btn.addEventListener('click', onClick)
+    return () => btn.removeEventListener('click', onClick)
+  }, [hq, polling, fetcher])
+
+  useEffect(() => {
+    if (!polling) return
+    if (timerRef.current) clearInterval(timerRef.current)
+    timerRef.current = setInterval(async () => {
+      // timeout after 2 minutes
+      const elapsed = Date.now() - startRef.current
+      if (elapsed > 120_000) {
+        setPolling(false)
+        toast.error('Import timed out')
+        if (timerRef.current) clearInterval(timerRef.current)
+        return
+      }
+      try {
+        const res = await fetch('/app/api/importer/run', { method: 'GET' })
+        if (!res.ok) return
+        const js = await res.json()
+        // Expect your list endpoint shape; adapt as needed
+        const newest = js?.runs?.[0]
+        if (newest && (newest.status === 'ready' || newest.status === 'success')) {
+          if (timerRef.current) clearInterval(timerRef.current)
+          setPolling(false)
+          const runId = newest.id
+          window.location.assign(`/app/admin/import/runs/${runId}`)
+        }
+      } catch {
+        // ignore transient errors
+      }
+    }, 2000)
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [polling])
+
+  return null
+}
+// <!-- END RBP GENERATED: hq-products-import-wire-v1 (component) -->

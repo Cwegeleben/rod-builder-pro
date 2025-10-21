@@ -62,4 +62,11 @@ export default defineConfig({
   build: {
     assetsInlineLimit: 0,
   },
+  ssr: {
+    noExternal: [],
+    external: [
+      // Externalize Node-only Shopify client to avoid SSR bundling resolution
+      'shopify-api-node',
+    ],
+  },
 }) satisfies UserConfig
