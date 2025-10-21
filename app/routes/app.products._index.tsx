@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
-import { useLoaderData, useSearchParams, Link, useFetcher } from '@remix-run/react'
+import { useLoaderData, useSearchParams, Link, useFetcher, useNavigate } from '@remix-run/react'
 import {
   Card,
   IndexTable,
@@ -147,6 +147,7 @@ export default function ProductsIndex() {
       resourceIDResolver: item => item.id,
     })
   const fetcher = useFetcher<{ ok?: boolean; runId?: string }>()
+  const navigate = useNavigate()
 
   const onQueryChange = useCallback(
     (value: string) => {
@@ -318,7 +319,7 @@ export default function ProductsIndex() {
                   <Button
                     variant="primary"
                     disabled={false}
-                    url="/app/admin/import/runs"
+                    onClick={() => navigate('/app/admin/import/runs')}
                     id="btn-import-products-empty"
                   >
                     Import from Supplier
@@ -441,6 +442,7 @@ export default function ProductsIndex() {
 // <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (component) -->
 type StartRunFetcher = ReturnType<typeof useFetcher<{ ok?: boolean; runId?: string }>>
 function ImportWiring({ fetcher }: { fetcher: StartRunFetcher }) {
+  const navigate = useNavigate()
   useEffect(() => {
     if (fetcher.state === 'idle' && fetcher.data?.ok && fetcher.data.runId) {
       // Toast and navigate to run detail
@@ -451,7 +453,7 @@ function ImportWiring({ fetcher }: { fetcher: StartRunFetcher }) {
         /* ignore */
       }
       try {
-        window.location.assign(`/app/admin/import/runs/${fetcher.data.runId}`)
+        navigate(`/app/admin/import/runs/${fetcher.data.runId}`)
       } catch {
         /* ignore */
       }
@@ -463,7 +465,7 @@ function ImportWiring({ fetcher }: { fetcher: StartRunFetcher }) {
         /* ignore */
       }
     }
-  }, [fetcher.state, fetcher.data])
+  }, [fetcher.state, fetcher.data, navigate])
   return null
 }
 // <!-- END RBP GENERATED: hq-products-import-wire-v1 (component) -->

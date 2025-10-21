@@ -7,8 +7,11 @@ export default defineWorkspace([
       name: 'unit',
       environment: 'node',
       // Serialize tests to avoid concurrent Prisma DB setup on SQLite
-      maxThreads: 1,
-      minThreads: 1,
+      poolOptions: {
+        threads: {
+          singleThread: true,
+        },
+      },
       setupFiles: ['tests/vitest.setup.ts'],
     },
   },

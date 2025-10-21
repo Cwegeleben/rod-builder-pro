@@ -6,9 +6,7 @@ import { isHqShop } from '../../lib/access.server'
 export async function requireHQAccess(request: Request) {
   const ok = await isHqShop(request)
   if (!ok) {
-    const err = new Error('Forbidden: HQ Access required') as Error & { status?: number }
-    err.status = 403
-    throw err
+    throw new Response('Forbidden', { status: 403 })
   }
 }
 // <!-- END RBP GENERATED: gateway-token-bridge-v1 -->

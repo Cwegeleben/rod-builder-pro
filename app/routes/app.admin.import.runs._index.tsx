@@ -1,6 +1,6 @@
 // <!-- BEGIN RBP GENERATED: hq-import-runs-list-v1 -->
 import { json, type LoaderFunctionArgs } from '@remix-run/node'
-import { useLoaderData, useSearchParams, useFetcher, useLocation } from '@remix-run/react'
+import { useLoaderData, useSearchParams, useFetcher, useLocation, useNavigate } from '@remix-run/react'
 import { useEffect } from 'react'
 import { requireHQAccess } from '../services/auth/guards.server'
 import { prisma } from '../db.server'
@@ -37,6 +37,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const supplier = url.searchParams.get('supplier') || undefined
   const status = url.searchParams.get('status') || undefined
+  const from = url.searchParams.get('from') || undefined
+  const to = url.searchParams.get('to') || undefined
+  const fromDate = from ? new Date(`${from}T00:00:00.000Z`) : undefined
+  const toDate = to ? new Date(`${to}T23:59:59.999Z`) : undefined
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db: any = prisma as any
@@ -44,6 +48,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     where: {
       ...(supplier ? { supplierId: supplier } : {}),
       ...(status ? { status } : {}),
+      ...(fromDate || toDate
+        ? {
+            startedAt: {
+              ...(fromDate ? { gte: fromDate } : {}),
+              ...(toDate ? { lte: toDate } : {}),
+            },
+          }
+        : {}),
     },
     orderBy: { startedAt: 'desc' },
     take: 50,
@@ -83,18 +95,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     unresolvedAdds: countsByRun[r.id].unresolvedAdds,
   }))
 
-  return json({ runs: rows, supplier: supplier || '', status: status || '', shop })
+  return json({ runs: rows, supplier: supplier || '', status: status || '', from: from || '', to: to || '', shop })
 }
 
 export default function ImportRunsIndex() {
-  const { runs, supplier, status, shop } = useLoaderData<typeof loader>() as {
+  const { runs, supplier, status, from, to, shop } = useLoaderData<typeof loader>() as {
     runs: RunRow[]
     supplier: string
     status: string
+    from: string
+    to: string
     shop: string
   }
   const [params, setParams] = useSearchParams()
   const location = useLocation()
+  const navigate = useNavigate()
   // One-time migrated toast
   // One-time migrated toast on mount when redirected from v1
   useEffect(() => {
@@ -151,6 +166,36 @@ export default function ImportRunsIndex() {
       <Card>
         <BlockStack gap="300">
           <ImportNav current="runs" title="Import Runs" />
+          <InlineStack gap="100" blockAlign="center">
+            <Text as="span" variant="bodySm">
+              From
+            </Text>
+            <input
+              type="date"
+              value={from}
+              onChange={e => {
+                const next = new URLSearchParams(params)
+                const v = e.currentTarget.value
+                if (v) next.set('from', v)
+                else next.delete('from')
+                setParams(next)
+              }}
+            />
+            <Text as="span" variant="bodySm">
+              To
+            </Text>
+            <input
+              type="date"
+              value={to}
+              onChange={e => {
+                const next = new URLSearchParams(params)
+                const v = e.currentTarget.value
+                if (v) next.set('to', v)
+                else next.delete('to')
+                setParams(next)
+              }}
+            />
+          </InlineStack>
           <EmptyState
             heading="No import runs yet"
             action={{ content: 'Start Import', url: '/app/products' }}
@@ -168,6 +213,16 @@ export default function ImportRunsIndex() {
     <Card>
       <BlockStack gap="300">
         <ImportNav current="runs" title="Import Runs" />
+        <InlineStack align="space-between">
+          <InlineStack>
+            <Button variant="primary" onClick={() => navigate('/app/admin/import/new')}>
+              New Import
+            </Button>
+          </InlineStack>
+          <InlineStack>
+            <Button onClick={() => navigate('/app/admin/import/settings')}>Settings</Button>
+          </InlineStack>
+        </InlineStack>
         <InlineStack align="space-between">
           <InlineStack gap="200" blockAlign="center">
             <Text as="h3" variant="headingMd">
@@ -284,6 +339,7 @@ export default function ImportRunsIndex() {
                 <IndexTable.Cell>
                   <InlineStack gap="100">
                     <Button url={`/app/admin/import/runs/${r.id}`}>Review</Button>
+                    <Button onClick={() => navigate(`/app/admin/import/${r.id}/edit`)}>Re-run</Button>
                     <fetcher.Form method="post" action="/app/admin/import/apply-run">
                       <input type="hidden" name="runId" value={r.id} />
                       <input type="hidden" name="shop" value={shop} />

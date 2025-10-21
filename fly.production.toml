@@ -10,6 +10,7 @@ primary_region = 'sjc'
 
 [env]
   PORT = '3000'
+  HOST = '0.0.0.0'
   SCOPES = 'write_products,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions'
   SHOPIFY_APP_URL = 'https://rbp-app.fly.dev'
   # Allow any dev HQ shop to access HQ-gated routes; tighten to exact bare if desired via HQ_SHOPS
@@ -18,7 +19,7 @@ primary_region = 'sjc'
   NODE_OPTIONS = '--max-old-space-size=1536'
 
 [processes]
-  app = '/sbin/tini -- scripts/start-production.sh'
+  app = 'scripts/start-production.sh'
 
 [[mounts]]
   source = 'data'

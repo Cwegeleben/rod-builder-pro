@@ -1,7 +1,6 @@
-export async function loader() {
-  return new Response(JSON.stringify({ status: 'ok', time: new Date().toISOString() }), {
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  })
-}
+import { json } from '@remix-run/node'
 
-export const config = { runtime: 'nodejs' } as const
+// Lightweight health endpoint for Fly.io HTTP checks
+export async function loader() {
+  return json({ ok: true, ts: new Date().toISOString() }, { headers: { 'Cache-Control': 'no-store' } })
+}

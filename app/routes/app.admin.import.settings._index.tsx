@@ -252,7 +252,7 @@ export default function ImportSettingsIndex() {
                 <input type="hidden" name="username" value={username} />
                 <input type="hidden" name="password" value={password} />
                 <input type="hidden" name="totp" value={totp} />
-                <Button submit disabled={verifyFetcher.state === 'submitting'}>
+                <Button submit disabled={verifyFetcher.state === 'submitting' || !username || !password}>
                   Verify
                 </Button>
               </verifyFetcher.Form>
@@ -261,7 +261,7 @@ export default function ImportSettingsIndex() {
                 <input type="hidden" name="username" value={username} />
                 <input type="hidden" name="password" value={password} />
                 <input type="hidden" name="totp" value={totp} />
-                <Button submit disabled={credsFetcher.state === 'submitting'}>
+                <Button submit disabled={credsFetcher.state === 'submitting' || !verified}>
                   Save
                 </Button>
               </credsFetcher.Form>

@@ -2,10 +2,9 @@
 set -eu
 
 echo "[startup] NODE_ENV=$NODE_ENV PORT=${PORT:-3000} starting production server" >&2
-# Ensure prisma client is generated (idempotent)
+# Prisma client should be generated at build time in the image; skip runtime generate to avoid startup hangs
 if [ ! -d node_modules/.prisma ]; then
-  echo "[startup] prisma generate (cold)" >&2
-  npx prisma generate
+  echo "[startup] WARNING: Prisma client not found; proceeding without runtime generate" >&2
 fi
 # Run migrations unless skipped
 if [ "${SKIP_MIGRATE:-0}" = "1" ]; then
@@ -24,4 +23,6 @@ fi
 
 # Launch remix server binding to 0.0.0.0:$PORT
 export PORT="${PORT:-3000}"
-exec node --enable-source-maps ./node_modules/.bin/remix-serve ./build/server/index.js
+export HOST="${HOST:-0.0.0.0}"
+# Invoke remix-serve and explicitly bind host and port for Fly proxy
+exec ./node_modules/.bin/remix-serve ./build/server/index.js --host "$HOST" --port "$PORT"

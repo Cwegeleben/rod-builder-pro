@@ -9,9 +9,18 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    // baseURL: 'http://127.0.0.1:3000',
+    // Keep baseURL unset by default; tests may use PW_BASE_URL or relative paths.
     trace: 'on-first-retry',
   },
+  webServer: process.env.PW_BASE_URL
+    ? undefined
+    : {
+        command:
+          'SHOPIFY_APP_URL=http://127.0.0.1:3000 SHOPIFY_API_KEY=dev SHOPIFY_API_SECRET=dev SCOPES=read_products npm run -s build && SHOPIFY_APP_URL=http://127.0.0.1:3000 SHOPIFY_API_KEY=dev SHOPIFY_API_SECRET=dev SCOPES=read_products npm run -s start',
+        url: 'http://127.0.0.1:3000',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+      },
   projects: [
     {
       name: 'chromium',

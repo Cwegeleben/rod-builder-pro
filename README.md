@@ -131,6 +131,17 @@ fly secrets set FOO=bar --config fly.production.toml
 fly secrets set FOO=bar --config fly.staging.toml
 ```
 
+### Credentials encryption secret
+
+If you store supplier credentials or other secrets in the database, set a strong symmetric key in production for AES‑256‑GCM encryption/decryption:
+
+- `SECRET_CREDENTIALS_KEY` → a 32‑byte key (recommend base64 or hex). Example (base64): `u8P8L1BzzS1cS0Jz6r7mXg0t9v0aQ2c3i4n5o6p7q8r=`
+
+Notes:
+
+- Rotate keys during maintenance windows; re-encrypt stored values if needed.
+- Keep this secret out of source control; set via `fly secrets set SECRET_CREDENTIALS_KEY=... --config fly.production.toml`.
+
 ## Tech Stack
 
 This template uses [Remix](https://remix.run). The following Shopify tools are also included to ease app development:
@@ -314,6 +325,31 @@ Troubleshooting:
 - Shopify CLI config selection: if the CLI doesn’t pick up your intended app, ensure you copied the correct `shopify.app.*.toml` to `shopify.app.toml` before running `npm run deploy`.
 - Fly deploy build cache: if builds look stale, add `--build-arg` or run with `--remote-only` depending on your environment.
 
+### Price refresh HTTP hook and scheduling
+
+A lightweight operational route can trigger a price/availability refresh job.
+
+- Endpoint: `POST /app/admin/import/refresh-price`
+- Auth: requires HQ access (logged-in HQ shop) or `Authorization: Bearer <PRICE_REFRESH_TOKEN>`
+- Body: optional `{ "supplierId": "batson" }` (JSON) or form with `supplierId`
+
+Examples:
+
+```bash
+# From a CI runner or maintenance box
+curl -X POST \
+  -H "Authorization: Bearer $PRICE_REFRESH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"supplierId":"batson"}' \
+  https://rbp-app.fly.dev/app/admin/import/refresh-price
+```
+
+Scheduling options:
+
+- External scheduler (GitHub Actions, cron on a management host) calling the HTTPS endpoint with the bearer token.
+- Fly Machines Runner: run a small sidecar/one-off job image via a GitHub Action on a schedule to issue the HTTP POST.
+- Keep schedules conservative to avoid overlapping refreshes.
+
 ## Operations & Database Migrations
 
 ### Overview
@@ -382,3 +418,59 @@ npx prisma migrate deploy
 ```
 
 Document any manual resolve steps in the CHANGELOG for traceability.
+
+## Smoke validation routes (Fly-only)
+
+For simple end-to-end checks in non-embedded contexts (useful on Fly), a set of minimal importer smoke routes exist. They are disabled by default and guarded by a bearer token.
+
+- Enable smokes with an environment flag and set a token:
+  - `ENABLE_SMOKES=1`
+  - `SMOKE_TOKEN=<long-random-secret>`
+- Auth: Provide the token via either `Authorization: Bearer <token>` header or `?token=<token>` query param.
+
+Available routes (GET):
+
+- `/resources/smoke/importer/start` → creates a smoke ImportRun; returns `{ ok, runId }`.
+- `/resources/smoke/importer/seed-diffs?runId=<id>&count=3` → seeds N diffs for the run; returns `{ ok, ids }`.
+- `/resources/smoke/importer/list-diffs?runId=<id>&page=1&pageSize=2` → lists diffs; returns `{ ok, total, rows }`.
+- `/resources/smoke/importer/apply?runId=<id>` → marks run as applied; returns `{ ok }`.
+  - Idempotent: returns `{ changed: 1 }` on first apply and `{ changed: 0 }` on subsequent calls.
+- `/resources/smoke/importer/cleanup[?runId=<id>]` → deletes smoke runs/diffs; returns counts.
+
+Notes:
+
+- If `ENABLE_SMOKES` is not set to a truthy value (`1,true,on,enabled,yes`), these routes return 404.
+- If the token is missing or invalid, they return 403.
+- These routes only touch internal ImportRun/ImportDiff tables; they do not call Shopify.
+
+## Importer Home and Run Options (HQ-only)
+
+- Runs list now includes quick actions:
+
+  - New Import → `/app/admin/import/new`
+  - Re-run → `/app/admin/import/:runId/edit`
+  - Settings → `/app/admin/import/settings`
+
+- Run Options fields:
+
+  - Include saved seeds: include previously saved/discovered product source URLs.
+  - Manual URLs: paste product URLs (newline or comma separated).
+  - Skip previously successful items: recorded with the run for re-run behavior (filtering wiring is planned next).
+  - Notes: stored with manual sources for audit.
+
+- Scrape Preview endpoint:
+  - POST `/app/admin/import/preview` (HQ-gated)
+  - Body: either JSON `{ "urls": string[] }` or form-data with `urls` set to a JSON string.
+  - Response: `{ results: Array<{ url, externalId, title, images: string[], ok, error? }> }`
+  - Side-effect-free: does not write to the database.
+
+Flow:
+
+1. New Import → set options → Preview Scrape to validate URLs.
+2. Save & Continue to Review → crawl + stage + diff, then go to Run detail for review/apply.
+3. Re-run → edit options for an existing run; Save Draft or Save & Continue to Review to refresh diffs in-place.
+
+Notes:
+
+- Delete override policy remains at apply time (on Deletes tab).
+- “Skip previously successful” will compare staging hash against Shopify’s stored `rbp.hash` metafield to omit unchanged items in re-runs in a follow-up.

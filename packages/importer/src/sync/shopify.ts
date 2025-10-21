@@ -4,13 +4,18 @@
 // Note: We use Shopify metafields as the linkage to avoid DB migrations. Handle = rbp-<supplierId>-<externalId>.
 // At update time, we compare rbp.hash metafield against PartStaging.hashContent and skip if unchanged.
 
-// @ts-expect-error - lightweight shim acceptable for runtime usage
 import Shopify from 'shopify-api-node'
 import { prisma } from '../../../../app/db.server'
 
 const NS = 'rbp'
 
-export type ShopCfg = { shopName: string; accessToken: string; apiVersion?: string }
+export type ShopCfg = {
+  shopName: string
+  accessToken: string
+  apiVersion?: string
+  approvedOnly?: boolean
+  deleteOverride?: boolean
+}
 
 function mkClient(cfg: ShopCfg) {
   return new Shopify({
@@ -121,19 +126,50 @@ async function writeImageSourcesMetafield(shopify: any, productId: number, names
 }
 // <!-- END RBP GENERATED: shopify-sync-images-v1 -->
 
-export async function upsertShopifyForRun(runId: string, cfg: ShopCfg) {
+export async function upsertShopifyForRun(
+  runId: string,
+  cfg: ShopCfg,
+): Promise<Array<{ externalId: string; productId: number; handle: string; action: 'created' | 'updated' }>> {
   const shopify = mkClient(cfg)
   const db: any = prisma as any
-  const diffs = await db.importDiff.findMany({
-    where: {
-      importRunId: runId,
-      diffType: { in: ['add', 'change'] },
-      OR: [{ resolution: 'approve' }, { resolution: null }],
-    },
-  })
+  const where: any = {
+    importRunId: runId,
+    diffType: { in: cfg.deleteOverride ? ['add', 'change', 'delete'] : ['add', 'change'] },
+  }
+  if (cfg.approvedOnly) {
+    where.resolution = 'approve'
+  } else {
+    where.OR = [{ resolution: 'approve' }, { resolution: null }]
+  }
+  const diffs = await db.importDiff.findMany({ where })
+  const results: Array<{ externalId: string; productId: number; handle: string; action: 'created' | 'updated' }> = []
 
   for (const d of diffs) {
     const after: any = d.after
+    // Handle delete overrides separately using `before`
+    if (d.diffType === 'delete' && cfg.deleteOverride) {
+      const before: any = d.before
+      if (!before) continue
+      const supplierId = String(before.supplierId || 'batson')
+      const externalId = String(before.externalId)
+      const handle = buildHandle(supplierId, externalId)
+      const product = await findProductByHandle(shopify, handle)
+      if (!product) continue
+      const pid = Number(product.id)
+      // Skip if already archived or already marked for deletion
+      const mfs = await listProductMetafields(shopify, pid)
+      const delMark = mfs.find((m: any) => m.namespace === NS && m.key === 'delete_mark')
+      const alreadyMarked = delMark?.value === '1'
+      const alreadyArchived = product.status === 'archived'
+      if (alreadyMarked && alreadyArchived) {
+        continue
+      }
+      // Archive product and set delete_mark metafield
+      await withRetry(() => shopify.product.update(pid, { status: 'archived' }))
+      await upsertProductMetafield(shopify, pid, NS, 'delete_mark', 'single_line_text_field', '1')
+      results.push({ externalId, productId: pid, handle, action: 'updated' })
+      continue
+    }
     if (!after) continue
 
     const supplierId = String(after.supplierId || 'batson')
@@ -151,6 +187,8 @@ export async function upsertShopifyForRun(runId: string, cfg: ShopCfg) {
 
     if (!product) {
       product = await withRetry(() => shopify.product.create({ title, body_html, vendor, product_type, handle, tags }))
+      const pid = Number(product.id)
+      results.push({ externalId, productId: pid, handle, action: 'created' })
     } else {
       // Check rbp.hash metafield; skip if unchanged
       const mfs = await listProductMetafields(shopify, Number(product.id))
@@ -162,6 +200,8 @@ export async function upsertShopifyForRun(runId: string, cfg: ShopCfg) {
       await withRetry(() =>
         shopify.product.update(Number(product.id), { title, body_html, vendor, product_type, tags }),
       )
+      const pid = Number(product.id)
+      results.push({ externalId, productId: pid, handle, action: 'updated' })
     }
 
     const pid = Number(product.id)
@@ -198,5 +238,6 @@ export async function upsertShopifyForRun(runId: string, cfg: ShopCfg) {
     }
     // <!-- END RBP GENERATED: shopify-sync-images-v1 -->
   }
+  return results
 }
 // <!-- END RBP GENERATED: shopify-sync-v1 -->
