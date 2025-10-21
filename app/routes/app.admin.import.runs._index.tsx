@@ -1,10 +1,12 @@
 // <!-- BEGIN RBP GENERATED: hq-import-runs-list-v1 -->
 import { json, type LoaderFunctionArgs } from '@remix-run/node'
-import { useLoaderData, useSearchParams, useFetcher } from '@remix-run/react'
+import { useLoaderData, useSearchParams, useFetcher, useLocation } from '@remix-run/react'
+import { useEffect } from 'react'
 import { requireHQAccess } from '../services/auth/guards.server'
 import { prisma } from '../db.server'
 import { authenticate } from '../shopify.server'
 import { useMemo } from 'react'
+import { EmptyState } from '@shopify/polaris'
 import {
   Card,
   BlockStack,
@@ -92,6 +94,19 @@ export default function ImportRunsIndex() {
     shop: string
   }
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
+  // One-time migrated toast
+  // One-time migrated toast on mount when redirected from v1
+  useEffect(() => {
+    if (location.search.includes('migrated=1')) {
+      try {
+        const w = window as unknown as { shopifyToast?: { info?: (m: string) => void } }
+        w.shopifyToast?.info?.('Supplier Import Wizard (v1) has been retired.')
+      } catch {
+        // ignore toast errors in SSR/loader context
+      }
+    }
+  }, [location.search])
   const fetcher = useFetcher()
 
   const headings = useMemo(
@@ -110,6 +125,44 @@ export default function ImportRunsIndex() {
     ],
     [],
   ) as unknown as [{ title: string }, ...{ title: string }[]]
+
+  const prettyTime = (iso: string | null) => {
+    if (!iso) return '-'
+    const d = new Date(iso)
+    const abs = d.toISOString().replace('T', ' ').replace('Z', ' UTC')
+    const ms = Date.now() - d.getTime()
+    const mins = Math.max(0, Math.floor(ms / 60000))
+    const rel = mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`
+    return `${rel} (${abs})`
+  }
+
+  const prettyStatus = (r: RunRow): { label: string; tone: 'success' | 'critical' | 'attention' | 'info' } => {
+    // naive applied detection: finishedAt + no unresolved adds + status=success -> applied; refine when backend adds flag
+    if (r.status === 'failed') return { label: 'failed', tone: 'critical' }
+    if (r.status === 'started') return { label: 'started', tone: 'attention' }
+    if (r.unresolvedAdds > 0) return { label: 'needs review', tone: 'attention' }
+    // If finished and success with no unresolved adds, consider approved/applied
+    if (r.finishedAt && r.status === 'success') return { label: 'approved', tone: 'success' }
+    return { label: r.status, tone: 'info' }
+  }
+
+  if (runs.length === 0) {
+    return (
+      <Card>
+        <BlockStack gap="300">
+          <ImportNav current="runs" title="Import Runs" />
+          <EmptyState
+            heading="No import runs yet"
+            action={{ content: 'Start Import', url: '/app/products' }}
+            secondaryAction={{ content: 'Importer Settings', url: '/app/admin/import/settings' }}
+            image="https://cdn.shopify.com/s/files/1/0533/2089/files/placeholder-images/empty-state.svg"
+          >
+            <p>Start an import from the Products page to ingest supplier products and review diffs here.</p>
+          </EmptyState>
+        </BlockStack>
+      </Card>
+    )
+  }
 
   return (
     <Card>
@@ -215,12 +268,13 @@ export default function ImportRunsIndex() {
                   <code className="text-xs">{r.id}</code>
                 </IndexTable.Cell>
                 <IndexTable.Cell>{r.supplierId}</IndexTable.Cell>
-                <IndexTable.Cell>{new Date(r.startedAt).toLocaleString()}</IndexTable.Cell>
-                <IndexTable.Cell>{r.finishedAt ? new Date(r.finishedAt).toLocaleString() : '-'}</IndexTable.Cell>
+                <IndexTable.Cell>{prettyTime(r.startedAt)}</IndexTable.Cell>
+                <IndexTable.Cell>{prettyTime(r.finishedAt)}</IndexTable.Cell>
                 <IndexTable.Cell>
-                  <Badge tone={r.status === 'success' ? 'success' : r.status === 'failed' ? 'critical' : 'attention'}>
-                    {r.status}
-                  </Badge>
+                  {(() => {
+                    const s = prettyStatus(r)
+                    return <Badge tone={s.tone}>{s.label}</Badge>
+                  })()}
                 </IndexTable.Cell>
                 <IndexTable.Cell>{r.counts.add}</IndexTable.Cell>
                 <IndexTable.Cell>{r.counts.change}</IndexTable.Cell>

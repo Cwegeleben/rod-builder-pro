@@ -5,7 +5,7 @@ import { requireHQAccess } from '../services/auth/guards.server'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireHQAccess(request)
-  return redirect('/app/admin/import/runs', { status: 302 })
+  return redirect('/app/admin/import/runs?migrated=1', { status: 302 })
 }
 
 export default function LegacyProductsImportRedirect() {

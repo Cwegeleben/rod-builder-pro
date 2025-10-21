@@ -340,6 +340,19 @@ export default function RunDetailPage() {
     <Card>
       <BlockStack gap="300">
         <ImportNav current="runs" title={`Run ${runId.slice(0, 8)}…`} />
+        <InlineStack align="space-between" blockAlign="center">
+          <InlineStack gap="200" blockAlign="center">
+            <Badge tone="success">{`Adds ${counts.add}`}</Badge>
+            <Badge tone="info">{`Changes ${counts.change}`}</Badge>
+            <Badge tone="warning">{`Conflicts ${counts.conflict}`}</Badge>
+            <Badge tone="critical">{`Deletes ${counts.delete}`}</Badge>
+          </InlineStack>
+          <InlineStack gap="200" blockAlign="center">
+            <Text as="span" tone="subdued">
+              Run {runId.slice(0, 8)}…
+            </Text>
+          </InlineStack>
+        </InlineStack>
         {!canApply && (
           <div role="alert" className="mb-3 rounded-lg border border-amber-400 bg-amber-50 p-3">
             <strong>{counts.unresolvedAdds}</strong> of <strong>{counts.add}</strong> new products need review before
@@ -363,6 +376,11 @@ export default function RunDetailPage() {
             <applyFetcher.Form method="post" action="/app/admin/import/apply-run">
               <input type="hidden" name="runId" value={runId} />
               <input type="hidden" name="shop" value={shop} />
+              {/* Future: wire this to backend to apply only approved diffs */}
+              <label className="mr-2 inline-flex items-center gap-2 text-sm">
+                <input type="checkbox" name="approvedOnly" defaultChecked />
+                Apply approved only
+              </label>
               {canApply ? (
                 <Button submit loading={applyFetcher.state === 'submitting'}>
                   Apply Run
