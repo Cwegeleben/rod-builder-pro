@@ -19,17 +19,22 @@ COPY package.json package-lock.json* ./
 ENV NODE_ENV=development
 RUN npm ci --ignore-scripts
 
+# Optional: Install Playwright earlier to leverage layer cache across source changes
+# Toggle via build arg INSTALL_PLAYWRIGHT (default true)
+ARG INSTALL_PLAYWRIGHT=true
+RUN if [ "$INSTALL_PLAYWRIGHT" = "true" ]; then npx playwright install --with-deps chromium; else echo "[build] Skipping Playwright install"; fi
+
+# Cache Prisma client generation when schema doesn't change
+COPY prisma ./prisma
+RUN npx prisma generate
+
 COPY . .
 RUN chmod +x scripts/start-production.sh
 
 # Build the Remix app
 RUN npm run build
 
-# Ensure Prisma client is generated in the final image to avoid runtime generation
-RUN npx prisma generate
-
-# Install Playwright chromium and required system deps for runtime preview endpoint
-RUN npx playwright install --with-deps chromium
+# (Playwright already installed earlier if enabled)
 
 # Optionally prune devDependencies to slim the final image (default true)
 ARG PRUNE_DEV=true
