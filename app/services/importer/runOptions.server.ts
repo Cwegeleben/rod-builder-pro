@@ -15,6 +15,9 @@ export type RunOptions = {
   // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
   templateKey?: string
   // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
+  // hq-importer-new-import-v2
+  variantTemplateId?: string
+  scraperId?: string
 }
 
 type ImportRunSummary = { counts?: Record<string, number>; options?: RunOptions }
@@ -34,12 +37,24 @@ export function parseRunOptions(formData: FormData): RunOptions {
   // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
   const templateKey = String(formData.get('templateKey') || '').trim() || undefined
   // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
+  // hq-importer-new-import-v2
+  const variantTemplateId = String(formData.get('variantTemplateId') || '').trim() || undefined
+  const scraperId = String(formData.get('scraperId') || '').trim() || undefined
   const manualStr = String(formData.get('manualUrls') || '')
   const manualUrls = manualStr
     .split(/\r?\n|,/) // allow CSV or newline list
     .map(s => s.trim())
     .filter(Boolean)
-  return { ...DEFAULT_OPTIONS, includeSeeds, manualUrls, skipSuccessful, notes, templateKey }
+  return {
+    ...DEFAULT_OPTIONS,
+    includeSeeds,
+    manualUrls,
+    skipSuccessful,
+    notes,
+    templateKey,
+    variantTemplateId,
+    scraperId,
+  }
 }
 
 export async function loadRunOptions(runId: string | null | undefined): Promise<RunOptions> {
