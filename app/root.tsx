@@ -18,6 +18,12 @@ export default function App() {
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <Meta />
         <Links />
+        {/* Preemptively silence Shopify OTLP beacons before any client scripts run */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(()=>{try{const BLOCK=["https://otlp-http-production.shopifysvc.com/v1/traces","https://otlp-http-production.shopifysvc.com/v1/metrics"];const ORIG_BEACON=navigator.sendBeacon?.bind(navigator);if(ORIG_BEACON){navigator.sendBeacon=function(u,d){try{if(typeof u==="string"&&BLOCK.some(b=>u.startsWith(b))){return true;}}catch{}return ORIG_BEACON(u,d);};}const ORIG_FETCH=window.fetch?.bind(window);if(ORIG_FETCH){window.fetch=function(input,init){try{const url=typeof input==="string"?input:input?.url;if(url&&BLOCK.some(b=>url.startsWith(b))){return Promise.resolve(new Response(null,{status:204,statusText:"No Content"}));}}catch{}return ORIG_FETCH(input,init);};}const ORIG_ERR=console.error?.bind(console);if(ORIG_ERR){console.error=function(...args){try{const s=(args&&args[0]?String(args[0]):"")||"";const msg=s.toLowerCase();if(msg.includes('sendbeacon failed')||msg.includes('otlp-http-production.shopifysvc.com/v1/')){return;} }catch{}return ORIG_ERR(...args);};}}catch(e){}})();`,
+          }}
+        />
       </head>
       {/* Shopify and Vite may inject <link> tags during client boot (metrics, modulepreload).
           Suppress hydration warnings and normalize DOM by relocating any stray <link> tags from body -> head
@@ -30,12 +36,7 @@ export default function App() {
         />
         <Outlet />
         <ScrollRestoration />
-        {/* Suppress noisy OTLP beacon errors from Shopify metrics when queue saturates. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(()=>{try{const BLOCK=["https://otlp-http-production.shopifysvc.com/v1/traces","https://otlp-http-production.shopifysvc.com/v1/metrics"];const ORIG_BEACON=navigator.sendBeacon?.bind(navigator);if(ORIG_BEACON){navigator.sendBeacon=function(u,d){try{if(typeof u==="string"&&BLOCK.some(b=>u.startsWith(b))){return true;}}catch{}return ORIG_BEACON(u,d);};}const ORIG_FETCH=window.fetch?.bind(window);if(ORIG_FETCH){window.fetch=function(input, init){try{const url=typeof input==="string"?input:input?.url;if(url&&BLOCK.some(b=>url.startsWith(b))){return Promise.resolve(new Response(null,{status:204,statusText:"No Content"}));}}catch{}return ORIG_FETCH(input,init);};}}catch(e){}})();`,
-          }}
-        />
+        {/* (moved) Shopify OTLP suppression is injected in <head> */}
         <Scripts />
       </body>
     </html>

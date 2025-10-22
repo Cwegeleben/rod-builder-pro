@@ -33,7 +33,11 @@ export function ImportNav({ current, title, actions }: Props) {
           {/* END RBP GENERATED: admin-link-integrity-v1 */}
         </ButtonGroup>
       </InlineStack>
-      {actions}
+      <InlineStack gap="200" blockAlign="center">
+        {actions}
+        {/* Contextual help, modeled after Shopify Admin's learn-more patterns */}
+        <Button url={`admin/import/help${loc.search}`}>Help</Button>
+      </InlineStack>
     </InlineStack>
   )
 }

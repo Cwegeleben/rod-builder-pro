@@ -96,6 +96,7 @@ export default function ImportPreviewPage() {
           <Link to={`/app/admin/import/runs/${runId}${params.toString() ? `?${params.toString()}` : ''}`}>
             ← Back to Run
           </Link>
+          <Button url={`/app/admin/import/help${params.toString() ? `?${params.toString()}` : ''}`}>Help</Button>
         </InlineStack>
         {/* END RBP GENERATED: admin-link-integrity-v1 */}
         <InlineStack align="space-between" blockAlign="center">

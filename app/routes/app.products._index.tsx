@@ -201,34 +201,7 @@ export default function ProductsIndex() {
             Products
           </Text>
           <InlineStack gap="200">
-            {/* <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 --> */}
-            {hq && (
-              // <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (button) -->
-              <Button
-                variant="primary"
-                disabled={fetcher.state === 'submitting'}
-                onClick={async () => {
-                  try {
-                    const fd = new FormData()
-                    fd.append('_action', 'start')
-                    fetcher.submit(fd, { method: 'post', action: '/app/admin/import/start-run' })
-                  } catch {
-                    try {
-                      const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
-                      w.shopifyToast?.error?.('Failed to start import')
-                    } catch {
-                      /* ignore */
-                    }
-                  }
-                }}
-                id="btn-import-products"
-              >
-                Start Import
-              </Button>
-              // <!-- END RBP GENERATED: hq-products-import-wire-v1 (button) -->
-            )}
-            {/* <!-- END RBP GENERATED: supplier-importer-ui-v1 --> */}
-            {hq && <Button url={`templates${location.search}`}>Templates</Button>}
+            {/* Sole importer entry: Import button links to Import Runs */}
             {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
             {/* Direct link to Import Runs index from Products; preserve current params */}
             {hq && (
@@ -326,11 +299,8 @@ export default function ProductsIndex() {
                 No products yet.
               </Text>
               <InlineStack gap="200">
-                {/* <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 --> */}
                 {hq && (
-                  // <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (button-empty) -->
-                  // <!-- BEGIN RBP GENERATED: admin-link-integrity-v1 -->
-                  // <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
+                  // Direct importer entry in empty state
                   <Button
                     variant="primary"
                     disabled={false}
@@ -339,15 +309,6 @@ export default function ProductsIndex() {
                     data-testid={TEST_IDS.btnProductsImport}
                   >
                     Import from Supplier
-                  </Button>
-                  // <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
-                  // <!-- END RBP GENERATED: admin-link-integrity-v1 -->
-                  // <!-- END RBP GENERATED: hq-products-import-wire-v1 (button-empty) -->
-                )}
-                {/* <!-- END RBP GENERATED: supplier-importer-ui-v1 --> */}
-                {hq && (
-                  <Button url={`templates${location.search}`} variant="secondary">
-                    Templates
                   </Button>
                 )}
               </InlineStack>
