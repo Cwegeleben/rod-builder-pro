@@ -1,7 +1,7 @@
 // <!-- BEGIN RBP GENERATED: hq-import-settings-ui-v1 -->
 import { json, type LoaderFunctionArgs } from '@remix-run/node'
 import { useEffect, useMemo, useState } from 'react'
-import { useFetcher, useLoaderData } from '@remix-run/react'
+import { useFetcher, useLoaderData, Link, useLocation } from '@remix-run/react'
 import { requireHQAccess } from '../services/auth/guards.server'
 import { listManualSeeds, getSchedule } from '../services/importer/settings.server'
 import {
@@ -37,6 +37,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export default function ImportSettingsIndex() {
   const { seeds, schedule } = useLoaderData<typeof loader>() as LoaderData
+  const location = useLocation()
 
   // Seeds state
   const [seedUrl, setSeedUrl] = useState('')
@@ -138,6 +139,10 @@ export default function ImportSettingsIndex() {
   return (
     <Card>
       <BlockStack gap="400">
+        {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+        {/* Breadcrumb back to Import Runs; relative link preserves embedded params */}
+        <Link to={`/app/admin/import/runs${location.search}`}>← Back to Import Runs</Link>
+        {/* END RBP GENERATED: admin-link-integrity-v1 */}
         <ImportNav current="settings" title="Importer Settings" />
 
         {/* Seeds Section */}

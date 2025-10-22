@@ -28,6 +28,9 @@ database.sqlite
 /blob-report/
 /playwright/.cache/
 
+# Auth state (contains session cookies) – do not commit
+/tests/.auth/
+
 # Local debug routes (do not commit)
 /app/routes/resources.metaobjects.debug.tsx
 app/routes/resources.debug-scopes.ts

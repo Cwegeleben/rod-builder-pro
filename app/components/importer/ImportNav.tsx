@@ -22,12 +22,15 @@ export function ImportNav({ current, title, actions }: Props) {
           </Text>
         ) : null}
         <ButtonGroup>
-          <Button url="/app/admin/import/runs" variant={isRuns ? 'primary' : undefined}>
+          {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+          {/* Use relative links and preserve query params for embedded App Bridge */}
+          <Button url={`admin/import/runs${loc.search}`} variant={isRuns ? 'primary' : undefined}>
             Runs
           </Button>
-          <Button url="/app/admin/import/settings" variant={isSettings ? 'primary' : undefined}>
+          <Button url={`admin/import/settings${loc.search}`} variant={isSettings ? 'primary' : undefined}>
             Settings
           </Button>
+          {/* END RBP GENERATED: admin-link-integrity-v1 */}
         </ButtonGroup>
       </InlineStack>
       {actions}

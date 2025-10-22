@@ -4,6 +4,7 @@ import { boundary } from '@shopify/shopify-app-remix/server'
 import { AppProvider } from '@shopify/shopify-app-remix/react'
 import { NavMenu } from '@shopify/app-bridge-react'
 import polarisStyles from '@shopify/polaris/build/esm/styles.css?url'
+import { useEffect, useState, type PropsWithChildren } from 'react'
 
 import { authenticate } from '../shopify.server'
 import AdminLayout from '../components/AdminLayout'
@@ -23,22 +24,22 @@ export default function App() {
     <AppProvider isEmbeddedApp apiKey={apiKey}>
       {/* SENTINEL: products-workspace-v3-0 (Sidebar nav flattening -> AdminLayout) */}
       {/* BEGIN products-workspace-v3-0 */}
-      <NavMenu>
-        <Link to="." rel="home">
-          Home
-        </Link>
-        <Link to="products">Products</Link>
-      </NavMenu>
       {/* BEGIN RBP GENERATED: admin-hq-importer-ux-v2 */}
       {/* Admin HQ Importer v2 Nav additions: keep links relative to preserve shop/host/embedded */}
-      <NavMenu>
+      {/* Guard against duplicate App Bridge nav mounts (Shopify warns if more than one exists). */}
+      <SafeNavMenu>
         <Link to="." rel="home">
           Dashboard
         </Link>
         <Link to="products">Products</Link>
         <Link to="imports">Import Runs</Link>
         <Link to="imports/settings">Settings</Link>
-      </NavMenu>
+        {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+        {/* Canonical importer entries (append-only; do not remove existing to avoid breakage) */}
+        <Link to="admin/import/runs">Import Runs</Link>
+        <Link to="admin/import/settings">Settings</Link>
+        {/* END RBP GENERATED: admin-link-integrity-v1 */}
+      </SafeNavMenu>
       {/* END RBP GENERATED: admin-hq-importer-ux-v2 */}
       <AdminLayout>
         <Outlet />
@@ -55,4 +56,26 @@ export function ErrorBoundary() {
 
 export const headers: HeadersFunction = headersArgs => {
   return boundary.headers(headersArgs)
+}
+
+// Ensures only a single App Bridge NavMenu exists at a time.
+function SafeNavMenu({ children }: PropsWithChildren) {
+  const [render, setRender] = useState(true)
+  useEffect(() => {
+    try {
+      const w = window as unknown as { __RBP_NAV_MENU_MOUNTED?: boolean }
+      if (w.__RBP_NAV_MENU_MOUNTED) {
+        setRender(false)
+        return
+      }
+      w.__RBP_NAV_MENU_MOUNTED = true
+      return () => {
+        w.__RBP_NAV_MENU_MOUNTED = false
+      }
+    } catch {
+      // SSR environment: window is not defined
+    }
+  }, [])
+  if (!render) return null
+  return <NavMenu>{children}</NavMenu>
 }

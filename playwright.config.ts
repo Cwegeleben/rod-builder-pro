@@ -1,5 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
+import fs from 'node:fs'
 import 'dotenv/config'
+
+const STORAGE_STATE = process.env.PW_STORAGE_STATE || 'tests/.auth/state.json'
+const maybeStorageState = fs.existsSync(STORAGE_STATE) ? STORAGE_STATE : undefined
 
 export default defineConfig({
   testDir: './tests',
@@ -11,6 +15,7 @@ export default defineConfig({
   use: {
     // Keep baseURL unset by default; tests may use PW_BASE_URL or relative paths.
     trace: 'on-first-retry',
+    storageState: maybeStorageState,
   },
   webServer: process.env.PW_BASE_URL
     ? undefined

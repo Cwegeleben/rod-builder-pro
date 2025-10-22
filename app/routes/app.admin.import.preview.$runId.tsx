@@ -1,8 +1,11 @@
 // <!-- BEGIN RBP GENERATED: importer-extractor-templates-v2 -->
 import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from '@remix-run/node'
 import { useEffect, useMemo, useState } from 'react'
-import { useFetcher, useLoaderData, useSearchParams } from '@remix-run/react'
+import { useFetcher, useLoaderData, useSearchParams, Link } from '@remix-run/react'
 import { Card, BlockStack, InlineStack, Text, TextField, Button, Banner, Badge } from '@shopify/polaris'
+// <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
+import { TEST_IDS } from '../../src/config/testIds'
+// <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
 import { requireHQAccess } from '../services/auth/guards.server'
 import { PreviewPane, type FieldRow } from '../components/imports/PreviewPane'
 import { slugFromPath, hash as hashUrl } from '../../src/importer/extract/fallbacks'
@@ -59,6 +62,7 @@ export default function ImportPreviewPage() {
       images: string[]
       ok: boolean
       error?: string
+      usedTemplateKey?: string
     }>
   }>()
   const saveFetcher = useFetcher<{ ok?: boolean; error?: string }>()
@@ -86,13 +90,27 @@ export default function ImportPreviewPage() {
   return (
     <Card>
       <BlockStack gap="300">
+        {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+        {/* Breadcrumb back to run detail; use relative link and preserve params */}
+        <InlineStack align="space-between" blockAlign="center">
+          <Link to={`/app/admin/import/runs/${runId}${params.toString() ? `?${params.toString()}` : ''}`}>
+            ← Back to Run
+          </Link>
+        </InlineStack>
+        {/* END RBP GENERATED: admin-link-integrity-v1 */}
         <InlineStack align="space-between" blockAlign="center">
           <Text as="h2" variant="headingLg">
             Scrape Preview — Run {runId.slice(0, 8)}…
           </Text>
           <InlineStack gap="200">
             {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
-            {templateKey ? <Badge>{`Template: ${templateKey}`}</Badge> : null}
+            {/* <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 --> */}
+            {(() => {
+              const used = fetcher.data?.results?.[0]?.usedTemplateKey
+              const label = used || templateKey || ''
+              return label ? <Badge data-testid={TEST_IDS.chipTemplate}>{`Template: ${label}`}</Badge> : null
+            })()}
+            {/* <!-- END RBP GENERATED: scrape-template-wiring-v2 --> */}
             {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
             <div style={{ minWidth: 420 }}>
               <TextField
@@ -104,12 +122,16 @@ export default function ImportPreviewPage() {
                 placeholder="https://www.batson.com/product/…"
               />
             </div>
+            {/* <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 --> */}
             <Button
               variant="primary"
               onClick={() => {
                 const form = new FormData()
                 form.set('urls', JSON.stringify([url]))
+                if (templateKey) form.set('templateKey', templateKey)
+                // BEGIN RBP GENERATED: admin-link-integrity-v1
                 fetcher.submit(form, { method: 'post', action: '/app/admin/import/preview' })
+                // END RBP GENERATED: admin-link-integrity-v1
                 const next = new URLSearchParams(params)
                 if (url) next.set('url', url)
                 else next.delete('url')
@@ -118,6 +140,7 @@ export default function ImportPreviewPage() {
             >
               Preview
             </Button>
+            {/* <!-- END RBP GENERATED: scrape-template-wiring-v2 --> */}
           </InlineStack>
         </InlineStack>
         {requiredMissing.length > 0 && (

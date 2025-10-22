@@ -1,6 +1,6 @@
 // <!-- BEGIN RBP GENERATED: hq-import-runs-list-v1 -->
 import { json, type LoaderFunctionArgs } from '@remix-run/node'
-import { useLoaderData, useSearchParams, useFetcher, useLocation, useNavigate, Link } from '@remix-run/react'
+import { useLoaderData, useSearchParams, useFetcher, useLocation, Link } from '@remix-run/react'
 import { useEffect, useState } from 'react'
 import { requireHQAccess } from '../services/auth/guards.server'
 import { prisma } from '../db.server'
@@ -19,6 +19,9 @@ import {
   ButtonGroup,
 } from '@shopify/polaris'
 import { ImportNav } from '../components/importer/ImportNav'
+// <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
+import { TEST_IDS } from '../../src/config/testIds'
+// <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
 import { ReRunOptionsModal } from '../components/imports/ReRunOptionsModal'
 // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
 import { listTemplates } from '../loaders/templates.server'
@@ -146,7 +149,7 @@ export default function ImportRunsIndex() {
   }
   const [params, setParams] = useSearchParams()
   const location = useLocation()
-  const navigate = useNavigate()
+
   // One-time migrated toast
   // One-time migrated toast on mount when redirected from v1
   useEffect(() => {
@@ -246,7 +249,7 @@ export default function ImportRunsIndex() {
             heading="No import runs yet"
             action={{ content: 'Start Import', url: '/app/products' }}
             secondaryAction={{ content: 'Importer Settings', url: '/app/admin/import/settings' }}
-            image="https://cdn.shopify.com/s/files/1/0533/2089/files/placeholder-images/empty-state.svg"
+            image="/empty-state.svg"
           >
             <p>Start an import from the Products page to ingest supplier products and review diffs here.</p>
           </EmptyState>
@@ -261,15 +264,30 @@ export default function ImportRunsIndex() {
         <ImportNav current="runs" title="Import Runs" />
         <InlineStack align="space-between">
           <InlineStack>
-            <Button variant="primary" onClick={() => navigate('/app/admin/import/new')}>
+            {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+            {/* Use relative link and preserve query params */}
+            {/* <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 --> */}
+            <Button
+              variant="primary"
+              url={`/app/admin/import/new${location.search}`}
+              data-testid={TEST_IDS.btnNewImport}
+            >
               New Import
             </Button>
+            {/* <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 --> */}
+            {/* END RBP GENERATED: admin-link-integrity-v1 */}
           </InlineStack>
           <InlineStack>
             {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
-            <Button url={`/app/products/templates${location.search}`}>Manage templates</Button>
+            {/* <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 --> */}
+            <Button url={`/app/products/templates${location.search}`} data-testid={TEST_IDS.btnManageTemplates}>
+              Manage templates
+            </Button>
+            {/* <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 --> */}
             {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
-            <Button onClick={() => navigate('/app/admin/import/settings')}>Settings</Button>
+            {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+            <Button url={`/app/admin/import/settings${location.search}`}>Settings</Button>
+            {/* END RBP GENERATED: admin-link-integrity-v1 */}
           </InlineStack>
         </InlineStack>
         <InlineStack align="space-between">
@@ -370,9 +388,11 @@ export default function ImportRunsIndex() {
               <IndexTable.Row id={r.id} key={r.id} position={idx}>
                 <IndexTable.Cell>
                   {/* BEGIN RBP GENERATED: admin-hq-importer-ux-v2 */}
+                  {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
                   <Link to={`/app/admin/import/runs/${r.id}${location.search}`} prefetch="intent">
                     <code className="text-xs">{r.id}</code>
                   </Link>
+                  {/* END RBP GENERATED: admin-link-integrity-v1 */}
                   {/* END RBP GENERATED: admin-hq-importer-ux-v2 */}
                 </IndexTable.Cell>
                 <IndexTable.Cell>{r.supplierId}</IndexTable.Cell>
@@ -391,13 +411,17 @@ export default function ImportRunsIndex() {
                 <IndexTable.Cell>{r.unresolvedAdds}</IndexTable.Cell>
                 <IndexTable.Cell>
                   <InlineStack gap="100">
-                    <Button url={`/app/admin/import/runs/${r.id}`}>Review</Button>
+                    {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+                    <Button url={`/app/admin/import/runs/${r.id}${location.search}`}>Review</Button>
+                    {/* END RBP GENERATED: admin-link-integrity-v1 */}
                     {/* BEGIN RBP GENERATED: importer-extractor-templates-v2 */}
                     {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
                     {(() => {
                       const q = new URLSearchParams(location.search)
                       if (r.templateKey) q.set('templateKey', r.templateKey)
+                      // BEGIN RBP GENERATED: admin-link-integrity-v1
                       const href = `/app/admin/import/preview/${r.id}${q.toString() ? `?${q.toString()}` : ''}`
+                      // END RBP GENERATED: admin-link-integrity-v1
                       return <Button url={href}>Preview</Button>
                     })()}
                     {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}

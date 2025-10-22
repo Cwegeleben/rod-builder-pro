@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
-import { useLoaderData, useSearchParams, Link, useFetcher, useNavigate } from '@remix-run/react'
+import { useLoaderData, useSearchParams, Link, useFetcher, useNavigate, useLocation } from '@remix-run/react'
 import {
   Card,
   IndexTable,
@@ -16,6 +16,9 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { authenticate } from '../shopify.server'
 import { isHqShop } from '../lib/access.server'
+// <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
+import { TEST_IDS } from '../../src/config/testIds'
+// <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
 
 type ProductRow = {
   id: string
@@ -126,6 +129,7 @@ export default function ProductsIndex() {
     hq: boolean
   }
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
   const [mode, setMode] = useState<IndexFiltersMode>(IndexFiltersMode.Default)
   const tabs = useMemo(
     () => [
@@ -147,7 +151,6 @@ export default function ProductsIndex() {
       resourceIDResolver: item => item.id,
     })
   const fetcher = useFetcher<{ ok?: boolean; runId?: string }>()
-  const navigate = useNavigate()
 
   const onQueryChange = useCallback(
     (value: string) => {
@@ -225,7 +228,17 @@ export default function ProductsIndex() {
               // <!-- END RBP GENERATED: hq-products-import-wire-v1 (button) -->
             )}
             {/* <!-- END RBP GENERATED: supplier-importer-ui-v1 --> */}
-            {hq && <Button url="templates">Templates</Button>}
+            {hq && <Button url={`templates${location.search}`}>Templates</Button>}
+            {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+            {/* Direct link to Import Runs index from Products; preserve current params */}
+            {hq && (
+              // <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
+              <Button url={`/app/admin/import/runs${location.search}`} data-testid={TEST_IDS.btnProductsImport}>
+                Import
+              </Button>
+              // <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
+            )}
+            {/* END RBP GENERATED: admin-link-integrity-v1 */}
           </InlineStack>
         </InlineStack>
 
@@ -316,19 +329,24 @@ export default function ProductsIndex() {
                 {/* <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 --> */}
                 {hq && (
                   // <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (button-empty) -->
+                  // <!-- BEGIN RBP GENERATED: admin-link-integrity-v1 -->
+                  // <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
                   <Button
                     variant="primary"
                     disabled={false}
-                    onClick={() => navigate('/app/admin/import/runs')}
+                    url={`/app/admin/import/runs${location.search}`}
                     id="btn-import-products-empty"
+                    data-testid={TEST_IDS.btnProductsImport}
                   >
                     Import from Supplier
                   </Button>
+                  // <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
+                  // <!-- END RBP GENERATED: admin-link-integrity-v1 -->
                   // <!-- END RBP GENERATED: hq-products-import-wire-v1 (button-empty) -->
                 )}
                 {/* <!-- END RBP GENERATED: supplier-importer-ui-v1 --> */}
                 {hq && (
-                  <Button url="templates" variant="secondary">
+                  <Button url={`templates${location.search}`} variant="secondary">
                     Templates
                   </Button>
                 )}

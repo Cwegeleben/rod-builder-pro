@@ -9,7 +9,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const search = url.search
   const runId = String(params.runId)
-  return redirect(`admin/import/runs/${runId}${search}`)
+  return redirect(`/app/admin/import/runs/${runId}${search}`)
 }
 
 export default function ImportRunDetailAlias() {

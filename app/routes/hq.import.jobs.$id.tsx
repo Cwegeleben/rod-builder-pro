@@ -1,23 +1,16 @@
-// <!-- BEGIN RBP GENERATED: supplier-importer-v1 -->
+// <!-- BEGIN RBP GENERATED: admin-link-integrity-v1 -->
 import type { LoaderFunctionArgs } from '@remix-run/node'
-import { json } from '@remix-run/node'
-import { useLoaderData } from '@remix-run/react'
-import { authenticate } from '../shopify.server'
+import { redirect } from '@remix-run/node'
+import { requireHQAccess } from '../services/auth/guards.server'
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request)
-  if (!session?.shop) return json({}, { status: 401 })
-  const id = params.id
-  return json({ id })
+// REMOVE LATER: Legacy job page shim. Redirect to Import Runs (no UI).
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireHQAccess(request)
+  const url = new URL(request.url)
+  return redirect(`/app/admin/import/runs${url.search}`)
 }
 
-export default function ImportJobPage() {
-  const { id } = useLoaderData<typeof loader>() as { id: string }
-  return (
-    <div className="p-m space-y-m">
-      <h2>Import Job {id}</h2>
-      <p>Job status UI coming soon.</p>
-    </div>
-  )
+export default function LegacyJobRedirect() {
+  return null
 }
-// <!-- END RBP GENERATED: supplier-importer-v1 -->
+// <!-- END RBP GENERATED: admin-link-integrity-v1 -->

@@ -110,6 +110,7 @@ export default function NewImportPage() {
               />
               <TextField label="Notes" value={notes} onChange={setNotes} autoComplete="off" />
               <InlineStack gap="200">
+                {/* <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 --> */}
                 <Button
                   onClick={() => {
                     const urls = manualUrls
@@ -118,7 +119,11 @@ export default function NewImportPage() {
                       .filter(Boolean)
                     const form = new FormData()
                     form.set('urls', JSON.stringify(urls))
+                    // Pass template for preview so extractor can honor it
+                    if (templateKey) form.set('templateKey', templateKey)
+                    // BEGIN RBP GENERATED: admin-link-integrity-v1
                     previewFetcher.submit(form, { method: 'post', action: '/app/admin/import/preview' })
+                    // END RBP GENERATED: admin-link-integrity-v1
                   }}
                 >
                   Preview Scrape
@@ -132,10 +137,12 @@ export default function NewImportPage() {
                   {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
                   <input type="hidden" name="templateKey" value={templateKey || ''} />
                   {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
-                  <Button variant="primary" submit>
+                  {/* Primary action ID for test automation */}
+                  <Button variant="primary" submit data-testid="btn-new-import">
                     Save & Continue to Review
                   </Button>
                 </previewFetcher.Form>
+                {/* <!-- END RBP GENERATED: scrape-template-wiring-v2 --> */}
               </InlineStack>
             </BlockStack>
           </div>

@@ -120,6 +120,7 @@ export default function EditImportRunPage() {
               />
               <TextField label="Notes" value={notes} onChange={setNotes} autoComplete="off" />
               <InlineStack gap="200">
+                {/* <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 --> */}
                 <Button
                   onClick={() => {
                     const urls = manualUrls
@@ -128,11 +129,16 @@ export default function EditImportRunPage() {
                       .filter(Boolean)
                     const form = new FormData()
                     form.set('urls', JSON.stringify(urls))
+                    // Ensure template is respected during preview
+                    if (templateKey) form.set('templateKey', templateKey)
+                    // BEGIN RBP GENERATED: admin-link-integrity-v1
                     previewFetcher.submit(form, { method: 'post', action: '/app/admin/import/preview' })
+                    // END RBP GENERATED: admin-link-integrity-v1
                   }}
                 >
                   Preview Scrape
                 </Button>
+                {/* <!-- END RBP GENERATED: scrape-template-wiring-v2 --> */}
                 <saveFetcher.Form method="post">
                   <input type="hidden" name="intent" value="save-options" />
                   <input type="hidden" name="includeSeeds" value={includeSeeds ? 'on' : ''} />

@@ -19,13 +19,21 @@ export default function App() {
         <Meta />
         <Links />
       </head>
-      <body>
+      {/* Shopify and Vite may inject <link> tags during client boot (metrics, modulepreload).
+          Suppress hydration warnings and normalize DOM by relocating any stray <link> tags from body -> head
+          before React hydrates. */}
+      <body suppressHydrationWarning>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(() => { try { const h = document.head; const list = Array.prototype.slice.call(document.body.querySelectorAll('link[rel]')); for (let i = 0; i < list.length; i++) { const el = list[i]; if (el.parentElement !== document.body) continue; const rel = el.getAttribute('rel') || ''; const href = el.getAttribute('href') || ''; if (!href) continue; const dup = h.querySelector('link[rel="' + rel + '"][href="' + href + '"]'); if (dup) { el.parentElement && el.parentElement.removeChild(el); } else { h.appendChild(el); } } } catch (e) {} })();`,
+          }}
+        />
         <Outlet />
         <ScrollRestoration />
         {/* Suppress noisy OTLP beacon errors from Shopify metrics when queue saturates. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(()=>{try{const ORIG=navigator.sendBeacon?.bind(navigator);if(!ORIG)return;const BLOCK=["https://otlp-http-production.shopifysvc.com/v1/traces","https://otlp-http-production.shopifysvc.com/v1/metrics"];navigator.sendBeacon=function(u,d){try{if(typeof u==="string"&&BLOCK.some(b=>u.startsWith(b))){return true;} }catch{} return ORIG(u,d);};}catch(e){}})();`,
+            __html: `(()=>{try{const BLOCK=["https://otlp-http-production.shopifysvc.com/v1/traces","https://otlp-http-production.shopifysvc.com/v1/metrics"];const ORIG_BEACON=navigator.sendBeacon?.bind(navigator);if(ORIG_BEACON){navigator.sendBeacon=function(u,d){try{if(typeof u==="string"&&BLOCK.some(b=>u.startsWith(b))){return true;}}catch{}return ORIG_BEACON(u,d);};}const ORIG_FETCH=window.fetch?.bind(window);if(ORIG_FETCH){window.fetch=function(input, init){try{const url=typeof input==="string"?input:input?.url;if(url&&BLOCK.some(b=>url.startsWith(b))){return Promise.resolve(new Response(null,{status:204,statusText:"No Content"}));}}catch{}return ORIG_FETCH(input,init);};}}catch(e){}})();`,
           }}
         />
         <Scripts />
@@ -65,7 +73,12 @@ export function ErrorBoundary() {
         <Links />
         <title>{message}</title>
       </head>
-      <body>
+      <body suppressHydrationWarning>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(() => { try { const h = document.head; const list = Array.prototype.slice.call(document.body.querySelectorAll('link[rel]')); for (let i = 0; i < list.length; i++) { const el = list[i]; if (el.parentElement !== document.body) continue; const rel = el.getAttribute('rel') || ''; const href = el.getAttribute('href') || ''; if (!href) continue; const dup = h.querySelector('link[rel="' + rel + '"][href="' + href + '"]'); if (dup) { el.parentElement && el.parentElement.removeChild(el); } else { h.appendChild(el); } } } catch (e) {} })();`,
+          }}
+        />
         {status === 403 ? (
           <div
             style={{

@@ -1,6 +1,9 @@
 // <!-- BEGIN RBP GENERATED: batson-extractor-v1 -->
+// <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 -->
 import type { Page } from 'playwright'
 import { extractJsonLd, mapProductFromJsonLd } from './jsonld'
+import { applyTemplate } from '../../../../src/importer/extract/applyTemplate'
+import { slugFromPath, hash as hashUrl } from '../../../../src/importer/extract/fallbacks'
 
 type Extracted = {
   externalId: string
@@ -11,7 +14,10 @@ type Extracted = {
   rawSpecs: Record<string, unknown>
 }
 
-export async function extractProduct(page: Page): Promise<Extracted | null> {
+export async function extractProduct(
+  page: Page,
+  opts?: { templateKey?: string },
+): Promise<(Extracted & { usedTemplateKey?: string }) | null> {
   await page.waitForLoadState('domcontentloaded')
   // <!-- BEGIN RBP GENERATED: importer-normalize-diff-v1 -->
   const html = await page.content()
@@ -27,7 +33,8 @@ export async function extractProduct(page: Page): Promise<Extracted | null> {
     return null
   }
   // <!-- END RBP GENERATED: batson-extractor-id-v1 (utility-page-guard) -->
-  const jld = mapProductFromJsonLd(extractJsonLd(html))
+  const jldAll = extractJsonLd(html)
+  const jld = mapProductFromJsonLd(jldAll)
   // <!-- END RBP GENERATED: importer-normalize-diff-v1 -->
   const title =
     (
@@ -42,32 +49,7 @@ export async function extractProduct(page: Page): Promise<Extracted | null> {
   const currentUrl = page.url()
   // <!-- BEGIN RBP GENERATED: batson-extractor-id-v1 (code-extraction-and-normalization) -->
   // Prefer on-page Code: value; fallback to normalized last slug segment
-  async function findCodeOnPage(): Promise<string | null> {
-    try {
-      const val = await page.evaluate(() => {
-        const RE_LABEL = /code\s*[:-]?\s*([A-Za-z0-9-]{2,})/i
-        const els = Array.from(document.querySelectorAll('body *'))
-        for (const el of els) {
-          const t = (el.textContent || '').trim()
-          if (!/code/i.test(t)) continue
-          const cont = (el.closest('tr,li,p,div,section') as HTMLElement | null) || (el as HTMLElement)
-          const txt = (cont.textContent || '').trim()
-          const m = txt.match(RE_LABEL)
-          if (m) return m[1]
-          const sib = el.nextElementSibling as HTMLElement | null
-          if (sib) {
-            const s = (sib.textContent || '').trim()
-            const ms = s.match(/([A-Za-z0-9-]{2,})/)
-            if (ms) return ms[1]
-          }
-        }
-        return null
-      })
-      return val
-    } catch {
-      return null
-    }
-  }
+  // removed legacy on-page code finder; relying on standardized fallbacks instead
 
   function normalizeExternalId(raw: string): string {
     return raw
@@ -76,19 +58,45 @@ export async function extractProduct(page: Page): Promise<Extracted | null> {
       .toUpperCase()
   }
 
-  function lastSlugSegment(u: string): string {
+  // prefer robust fallbacks from shared helpers
+
+  // External ID cascade:
+  // 1) JSON-LD sku/mpn/productID/identifier (already in jld.externalId)
+  // 2) JSON-LD @id
+  // 3) DOM selectors (.sku | [itemprop=sku] | [data-sku]@content)
+  // 4) slugFromPath(url)
+  // 5) hash(url)
+  let ext: string | null = (jld?.externalId as string | undefined)?.toString()?.trim() || null
+  if (!ext) {
+    const idFromAt = (() => {
+      try {
+        const prod = jldAll.find(o => !!(o as Record<string, unknown>)['@id']) as Record<string, unknown> | undefined
+        return (prod?.['@id'] as string) || null
+      } catch {
+        return null
+      }
+    })()
+    ext = idFromAt || null
+  }
+  if (!ext) {
     try {
-      const url = new URL(u)
-      const parts = url.pathname.split('/').filter(Boolean)
-      return parts[parts.length - 1] || ''
+      const domSku = await page.evaluate(() => {
+        const el = document.querySelector('.sku, [itemprop="sku"]') as HTMLElement | null
+        if (el) return (el.textContent || '').trim() || (el.getAttribute('content') || '').trim()
+        const data = document.querySelector('[data-sku]') as HTMLElement | null
+        if (data) return (data.getAttribute('data-sku') || '').trim()
+        const meta = document.querySelector('[content][itemprop="sku"][content]') as HTMLElement | null
+        if (meta) return (meta.getAttribute('content') || '').trim()
+        return ''
+      })
+      ext = domSku || null
     } catch {
-      return ''
+      /* ignore */
     }
   }
-
-  const codeVal = await findCodeOnPage()
-  const fallbackSlug = lastSlugSegment(currentUrl) || title
-  const externalId = normalizeExternalId(codeVal || fallbackSlug)
+  if (!ext) ext = slugFromPath(currentUrl) || null
+  if (!ext) ext = hashUrl(currentUrl)
+  const externalId = normalizeExternalId((ext || '').toString())
   // <!-- END RBP GENERATED: batson-extractor-id-v1 (code-extraction-and-normalization) -->
 
   const description = await page
@@ -96,14 +104,39 @@ export async function extractProduct(page: Page): Promise<Extracted | null> {
     .first()
     .innerHTML()
     .catch(() => '')
-  const images = (
+  const rawImages = (
     jld?.images && jld.images.length
       ? jld.images
       : await page.locator('img').evaluateAll(ns => ns.map(n => n.getAttribute('src') || '').filter(Boolean))
   ) as string[]
+  // Normalize to absolute URLs and dedupe
+  const images = Array.from(
+    new Set(
+      rawImages
+        .map(src => {
+          try {
+            return new URL(src, currentUrl).toString()
+          } catch {
+            return src
+          }
+        })
+        .filter(Boolean),
+    ),
+  )
 
   const partType = guessPartType(`${title} ${description}`)
   const rawSpecs: Record<string, unknown> = {}
+
+  // If a template is provided, compute usedTemplateKey via applier (extraction is still primarily fallback-based)
+  let usedTemplateKey: string | undefined
+  try {
+    if (opts?.templateKey) {
+      const res = applyTemplate({ url: currentUrl, html }, { templateKey: opts.templateKey })
+      usedTemplateKey = res.usedTemplateKey
+    }
+  } catch {
+    /* ignore template errors */
+  }
 
   return {
     externalId,
@@ -112,8 +145,10 @@ export async function extractProduct(page: Page): Promise<Extracted | null> {
     description: description || '',
     images: dedupe(images),
     rawSpecs: jld?.rawSpecs || rawSpecs,
+    usedTemplateKey,
   }
 }
+// <!-- END RBP GENERATED: scrape-template-wiring-v2 -->
 
 // <!-- BEGIN RBP GENERATED: batson-extractor-id-v1 (normalizer) -->
 // normalizeExternalId integrated above to restrict to A–Z, 0–9 and hyphen only, and strip literal 'Code:'

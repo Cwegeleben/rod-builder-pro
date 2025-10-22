@@ -6,8 +6,8 @@ export function ImportRunsEmpty() {
     <EmptyState
       heading="No import runs yet"
       action={{ content: 'Start Import', url: '/app/products' }}
-      secondaryAction={{ content: 'Importer Settings', url: '/app/imports/settings' }}
-      image="https://cdn.shopify.com/s/files/1/0533/2089/files/placeholder-images/empty-state.svg"
+      secondaryAction={{ content: 'Importer Settings', url: '/app/admin/import/settings' }}
+      image="/empty-state.svg"
     >
       <p>Start an import from the Products page to ingest supplier products and review diffs here.</p>
     </EmptyState>

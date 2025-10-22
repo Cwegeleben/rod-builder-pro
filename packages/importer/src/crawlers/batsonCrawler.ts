@@ -1,4 +1,5 @@
 // <!-- BEGIN RBP GENERATED: batson-crawler-ecom-v1 -->
+// <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 -->
 import { PlaywrightCrawler, log } from 'crawlee'
 import { extractProduct } from '../extractors/batson.parse'
 import { upsertStaging } from '../staging/upsert'
@@ -31,7 +32,8 @@ async function sitemapProducts(page: { evaluate: (fn: () => Promise<string>) => 
   }
 }
 
-export async function crawlBatson(seedUrls: string[]) {
+type Politeness = { jitterMs?: [number, number]; maxConcurrency?: number; blockAssetsOnLists?: boolean }
+export async function crawlBatson(seedUrls: string[], options?: { templateKey?: string; politeness?: Politeness }) {
   const seen = new Set<string>()
   try {
     log.setLevel(log.LEVELS.DEBUG)
@@ -52,8 +54,13 @@ export async function crawlBatson(seedUrls: string[]) {
   if (forcedEnv.length) log.info(`batson: forcing ${forcedEnv.length} URLs from BATSON_FORCE_URLS`)
   // Record seeds in DB as 'forced' (env or manual); discovery writes will use 'discovered'
   for (const u of initial) await upsertProductSource('batson', u, 'forced')
+  const jitter: [number, number] = options?.politeness?.jitterMs || [250, 600]
+  const maxConc = options?.politeness?.maxConcurrency || 2
+  const blockAssets = options?.politeness?.blockAssetsOnLists !== false
+
   const crawler = new PlaywrightCrawler({
     maxRequestsPerMinute: 90,
+    maxConcurrency: maxConc,
     requestHandlerTimeoutSecs: 120,
     navigationTimeoutSecs: 60,
     launchContext: {
@@ -67,6 +74,11 @@ export async function crawlBatson(seedUrls: string[]) {
         const u = route.request().url()
         if (/google|doubleclick|linkedin|bing|clarity|hubspot|facebook|k-ecommerce\.com/i.test(u)) return route.abort()
         if (!isOnDomain(u)) return route.abort()
+        // On list/collection pages, optionally block heavy assets to be polite
+        if (blockAssets && (/\/collections\//i.test(currentUrl) || /\/ecom\/purchaselistsearch/i.test(currentUrl))) {
+          const rt = route.request().resourceType()
+          if (rt === 'image' || rt === 'font') return route.abort()
+        }
         return route.continue()
       })
 
@@ -173,13 +185,18 @@ export async function crawlBatson(seedUrls: string[]) {
       }
 
       // 7) Treat product-detail pages (including /ecom/ detail) as detail and stage
-      const rec = await extractProduct(page)
+      const rec = await extractProduct(page, { templateKey: options?.templateKey })
       if (rec?.externalId && !seen.has(rec.externalId)) {
         seen.add(rec.externalId)
         await upsertStaging('batson', rec)
         await linkExternalIdForSource('batson', currentUrl, rec.externalId)
         log.info(`staged ${rec.externalId}`)
       }
+
+      // Jitter delay between requests to reduce server load
+      const [lo, hi] = jitter
+      const delay = Math.max(0, Math.floor(lo + Math.random() * (hi - lo)))
+      if (delay > 0) await new Promise(res => setTimeout(res, delay))
     },
     failedRequestHandler({ request }) {
       log.warning(`batson failed ${request.url}`)
@@ -189,4 +206,5 @@ export async function crawlBatson(seedUrls: string[]) {
   await crawler.run(initial)
   return seen.size
 }
+// <!-- END RBP GENERATED: scrape-template-wiring-v2 -->
 // <!-- END RBP GENERATED: batson-crawler-ecom-v1 -->

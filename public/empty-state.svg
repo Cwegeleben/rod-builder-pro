@@ -1,0 +1,15 @@
+<!-- BEGIN RBP GENERATED: admin-link-integrity-v1 -->
+<svg width="360" height="200" viewBox="0 0 360 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="1" y="1" width="358" height="198" rx="12" fill="#F8FAFC" stroke="#E2E8F0"/>
+  <g opacity="0.9">
+    <rect x="40" y="48" width="140" height="14" rx="7" fill="#E2E8F0"/>
+    <rect x="40" y="70" width="200" height="10" rx="5" fill="#EDF2F7"/>
+    <rect x="40" y="86" width="180" height="10" rx="5" fill="#EDF2F7"/>
+  </g>
+  <rect x="260" y="48" width="60" height="60" rx="8" fill="#E5E7EB"/>
+  <circle cx="290" cy="78" r="16" fill="#F1F5F9"/>
+  <path d="M284 78h12M290 72v12" stroke="#CBD5E1" stroke-width="2" stroke-linecap="round"/>
+  <rect x="40" y="124" width="96" height="28" rx="6" fill="#D1FAE5"/>
+  <text x="56" y="143" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial" font-size="12" fill="#065F46">Get started</text>
+</svg>
+<!-- END RBP GENERATED: admin-link-integrity-v1 -->

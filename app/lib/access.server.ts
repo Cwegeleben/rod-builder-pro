@@ -42,6 +42,20 @@ export function isHqShopDomain(shop: string | null | undefined): boolean {
 }
 
 export async function isHqShop(request: Request): Promise<boolean> {
+  // Optional test-only override: allow forcing HQ in smoke environments
+  const allowOverride = process.env.ALLOW_HQ_OVERRIDE === '1'
+  if (allowOverride) {
+    try {
+      const url = new URL(request.url)
+      const force = url.searchParams.get('hq') === '1'
+      const cookie = request.headers.get('cookie') || ''
+      const hasCookie = /(?:^|;\s*)rbp_hq=1(?:;|$)/.test(cookie)
+      const header = request.headers.get('x-hq-override') === '1'
+      if (force || hasCookie || header) return true
+    } catch {
+      // ignore URL parse errors
+    }
+  }
   try {
     const { session } = await authenticate.admin(request)
     const rawShop = (session as unknown as { shop?: string }).shop

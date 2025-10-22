@@ -2,6 +2,7 @@
 import { prisma } from '../../db.server'
 import type { Prisma } from '@prisma/client'
 import { markSkipSuccessfulForRun } from '../../../packages/importer/src/pipelines/diffWithSkip'
+// <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 -->
 import { crawlBatson } from '../../../packages/importer/src/crawlers/batsonCrawler'
 import { fetchActiveSources, upsertProductSource } from '../../../packages/importer/src/seeds/sources'
 
@@ -75,8 +76,11 @@ export async function startImportFromOptions(
   // Compose seeds
   const saved = options.includeSeeds ? (await fetchActiveSources(supplierId)).map((s: { url: string }) => s.url) : []
   const seeds = Array.from(new Set([...saved, ...options.manualUrls]))
-  // Crawl and stage
-  await crawlBatson(seeds)
+  // Crawl and stage (honor template + polite defaults)
+  await crawlBatson(seeds, {
+    templateKey: options.templateKey,
+    politeness: { jitterMs: [250, 600], maxConcurrency: 3, blockAssetsOnLists: true },
+  })
   // Generate diffs
   if (runId) {
     await prisma.importDiff.deleteMany({ where: { importRunId: runId } })
@@ -108,6 +112,7 @@ export async function startImportFromOptions(
     return newRunId
   }
 }
+// <!-- END RBP GENERATED: scrape-template-wiring-v2 -->
 
 async function createRunFromStaging(supplierId: string): Promise<string> {
   // Mirror packages/importer/src/pipelines/diff.ts but return id and keep summary counts

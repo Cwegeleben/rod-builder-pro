@@ -9,7 +9,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const search = url.search
   // Redirect to existing runs index under admin/import
-  return redirect(`admin/import/runs${search}`)
+  return redirect(`/app/admin/import/runs${search}`)
 }
 
 export default function ImportsIndexAlias() {

@@ -10,7 +10,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requireHQAccess(request)
   const url = new URL(request.url)
   const search = url.search
-  return redirect(`admin/import/settings${search}`)
+  return redirect(`/app/admin/import/settings${search}`)
 }
 
 export default function ImportSettingsAlias() {

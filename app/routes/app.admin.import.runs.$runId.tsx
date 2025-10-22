@@ -1,7 +1,7 @@
 // <!-- BEGIN RBP GENERATED: hq-run-detail-tabs-v1 -->
 import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from '@remix-run/node'
 import { useEffect, useMemo, useState } from 'react'
-import { useLoaderData, useFetcher, useSearchParams, useNavigation } from '@remix-run/react'
+import { useLoaderData, useFetcher, useSearchParams, useNavigation, Link, useLocation } from '@remix-run/react'
 import { requireHQAccess } from '../services/auth/guards.server'
 import { prisma } from '../db.server'
 import { authenticate } from '../shopify.server'
@@ -20,6 +20,9 @@ import {
   TextField,
 } from '@shopify/polaris'
 import { ImportNav } from '../components/importer/ImportNav'
+// <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
+import { TEST_IDS } from '../../src/config/testIds'
+// <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
 
 type DiffRow = {
   id: string
@@ -211,7 +214,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
           where: { id: diffId },
           data: { after: nextAfter, resolution, resolvedAt: new Date() },
         })
-      } catch (e) {
+      } catch {
         return json({ ok: false, error: 'Invalid edits payload' }, { status: 400 })
       }
     } else {
@@ -226,6 +229,7 @@ export default function RunDetailPage() {
   const data = useLoaderData<typeof loader>() as LoaderData
   const { runId, shop, counts, supplierId } = data
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
   const navigation = useNavigation()
   const canApply = counts.unresolvedAdds === 0
 
@@ -427,6 +431,13 @@ export default function RunDetailPage() {
       <Card>
         <BlockStack gap="300">
           <ImportNav current="runs" title={`Run ${runId.slice(0, 8)}…${supplierId ? ` — ${supplierId}` : ''}`} />
+          {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+          {/* <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 --> */}
+          <Link to={`/app/admin/import/runs${location.search}`} data-testid={TEST_IDS.crumbBackToRuns}>
+            ← Back to Import Runs
+          </Link>
+          {/* <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 --> */}
+          {/* END RBP GENERATED: admin-link-integrity-v1 */}
           <div className="flex flex-col items-center justify-center rounded-lg border border-emerald-300 bg-emerald-50 p-8 text-center">
             <div style={{ fontSize: 36 }}>🎉</div>
             <Text as="h2" variant="headingLg">
@@ -436,9 +447,17 @@ export default function RunDetailPage() {
               This run has no adds, changes, conflicts, or deletes.
             </Text>
             <InlineStack gap="300" align="center">
-              <a className="underline" href="/app/admin/import/runs">
+              {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+              {/* <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 --> */}
+              <a
+                className="underline"
+                href={`/app/admin/import/runs${location.search}`}
+                data-testid={TEST_IDS.crumbBackToRuns}
+              >
                 Back to Runs
               </a>
+              {/* <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 --> */}
+              {/* END RBP GENERATED: admin-link-integrity-v1 */}
               <a className="underline" href="/app/products">
                 Go to Products
               </a>
@@ -453,6 +472,13 @@ export default function RunDetailPage() {
     <Card>
       <BlockStack gap="300">
         <ImportNav current="runs" title={`Run ${runId.slice(0, 8)}…${supplierId ? ` — ${supplierId}` : ''}`} />
+        {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+        {/* <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 --> */}
+        <Link to={`/app/admin/import/runs${location.search}`} data-testid={TEST_IDS.crumbBackToRuns}>
+          ← Back to Import Runs
+        </Link>
+        {/* <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 --> */}
+        {/* END RBP GENERATED: admin-link-integrity-v1 */}
         <InlineStack align="space-between" blockAlign="center">
           <InlineStack gap="200" blockAlign="center">
             <Badge tone="success">{`Adds ${counts.add}`}</Badge>
