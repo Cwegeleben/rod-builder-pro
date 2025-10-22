@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useFetcher, useLoaderData } from '@remix-run/react'
 import { requireHqShopOr404 } from '../lib/access.server'
 import { ImportNav } from '../components/importer/ImportNav'
-import { Card, BlockStack, InlineStack, Text, TextField, Button, Checkbox, Badge } from '@shopify/polaris'
+import { Card, BlockStack, InlineStack, Text, TextField, Button, Checkbox, Badge, Select } from '@shopify/polaris'
 import {
   loadRunOptions,
   parseRunOptions,
@@ -13,14 +13,20 @@ import {
   writeOptionsToRun,
 } from '../services/importer/runOptions.server'
 import { authenticate } from '../shopify.server'
+// <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+import { listTemplates, type ImporterTemplate } from '../loaders/templates.server'
+// <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 
-type LoaderData = { options: RunOptions; runId: string }
+type LoaderData = { options: RunOptions; runId: string; templates: ImporterTemplate[] }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireHqShopOr404(request)
   const runId = String(params.runId)
   const options = await loadRunOptions(runId)
-  return json<LoaderData>({ options, runId })
+  // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+  const templates = await listTemplates()
+  return json<LoaderData>({ options, runId, templates })
+  // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -43,11 +49,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function EditImportRunPage() {
-  const { options: initial, runId } = useLoaderData<typeof loader>() as LoaderData
+  const { options: initial, runId, templates } = useLoaderData<typeof loader>() as LoaderData
   const [includeSeeds, setIncludeSeeds] = useState(initial.includeSeeds)
   const [manualUrls, setManualUrls] = useState((initial.manualUrls || []).join('\n'))
   const [skipSuccessful, setSkipSuccessful] = useState(initial.skipSuccessful)
   const [notes, setNotes] = useState(initial.notes || '')
+  // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+  const defaultTpl = templates.find(t => t.isDefault) || templates[0]
+  const [templateKey, setTemplateKey] = useState<string | undefined>(initial.templateKey || defaultTpl?.key)
+  useEffect(() => {
+    if (!templateKey && typeof window !== 'undefined') {
+      const saved = window.localStorage.getItem('importer.defaultTemplateKey') || ''
+      if (saved) setTemplateKey(saved)
+    }
+  }, [])
+  // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
   const previewFetcher = useFetcher<{
     results: Array<{
       url: string
@@ -71,6 +87,18 @@ export default function EditImportRunPage() {
         <div className="grid grid-cols-2 gap-6">
           <div>
             <BlockStack gap="200">
+              {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+              <Select
+                label="Template"
+                placeholder="Select a template"
+                options={templates.map(t => ({ label: `${t.name}${t.site ? ` (${t.site})` : ''}`, value: t.key }))}
+                value={templateKey || ''}
+                onChange={v => setTemplateKey(v || undefined)}
+              />
+              <Text as="p" tone="subdued" variant="bodySm">
+                Templates define how fields are extracted (JSON-LD → DOM → slug → hash)
+              </Text>
+              {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
               <Checkbox
                 label="Include saved seeds"
                 checked={includeSeeds}
@@ -111,6 +139,9 @@ export default function EditImportRunPage() {
                   <input type="hidden" name="skipSuccessful" value={skipSuccessful ? 'on' : ''} />
                   <input type="hidden" name="manualUrls" value={manualUrls} />
                   <input type="hidden" name="notes" value={notes} />
+                  {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+                  <input type="hidden" name="templateKey" value={templateKey || ''} />
+                  {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
                   <Button submit disabled={saveFetcher.state === 'submitting'}>
                     Save Draft
                   </Button>
@@ -121,6 +152,9 @@ export default function EditImportRunPage() {
                   <input type="hidden" name="skipSuccessful" value={skipSuccessful ? 'on' : ''} />
                   <input type="hidden" name="manualUrls" value={manualUrls} />
                   <input type="hidden" name="notes" value={notes} />
+                  {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+                  <input type="hidden" name="templateKey" value={templateKey || ''} />
+                  {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
                   <Button variant="primary" submit>
                     Save & Continue to Review
                   </Button>
@@ -134,6 +168,9 @@ export default function EditImportRunPage() {
                 <Text as="h3" variant="headingMd">
                   Preview
                 </Text>
+                {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+                {templateKey ? <Badge>{`Template: ${templateKey}`}</Badge> : null}
+                {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
                 {previewFetcher.state === 'submitting' && <Badge tone="attention">Fetching…</Badge>}
               </InlineStack>
               <div className="rounded-md border border-slate-200 p-3 text-sm">

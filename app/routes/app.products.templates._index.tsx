@@ -13,7 +13,7 @@ import {
   Badge,
 } from '@shopify/polaris'
 import { HelpBanner } from '../components/HelpBanner'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { authenticate } from '../shopify.server'
 import { requireHqShopOr404 } from '../lib/access.server'
 // prisma imported indirectly via listTemplatesSummary
@@ -188,6 +188,27 @@ export default function TemplatesIndex() {
     resourceIDResolver: (item: { id: string }) => item.id,
   })
   const actionPending = fetcher.state === 'submitting'
+  // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+  const [defaultKey, setDefaultKey] = useState<string | null>(null)
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('importer.defaultTemplateKey')
+      setDefaultKey(saved || null)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+  function setDefault(id: string) {
+    try {
+      window.localStorage.setItem('importer.defaultTemplateKey', id)
+      setDefaultKey(id)
+      const w = window as unknown as { shopifyToast?: { show?: (m: string) => void; info?: (m: string) => void } }
+      w.shopifyToast?.info?.('Default template updated')
+    } catch {
+      /* ignore */
+    }
+  }
+  // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 
   const bulkDelete = () => {
     if (selectedResources.length === 0) return
@@ -226,6 +247,11 @@ export default function TemplatesIndex() {
           Create templates that define the fields your products should capture. Publish to sync with Shopify. Assign a
           template to a product from the product row.
         </HelpBanner>
+        {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+        <Banner tone="info" title="Importer integration">
+          Templates can now be selected directly from Run Import and Re-run dialogs.
+        </Banner>
+        {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
         <InlineStack align="space-between">
           <Text as="h2" variant="headingLg">
             Templates
@@ -299,6 +325,14 @@ export default function TemplatesIndex() {
                     (orphan)
                   </Text>
                 )}
+                {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+                {defaultKey === item.id ? (
+                  <>
+                    {' '}
+                    <Badge tone="success">Default</Badge>
+                  </>
+                ) : null}
+                {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
               </IndexTable.Cell>
               <IndexTable.Cell>
                 <Text as="span">{item.fieldsCount}</Text>
@@ -328,6 +362,11 @@ export default function TemplatesIndex() {
                     <Button url={`/app/products/templates/${item.id}`} variant="plain">
                       Edit
                     </Button>
+                    {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+                    <Button onClick={() => setDefault(item.id)} variant="plain">
+                      Set default
+                    </Button>
+                    {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
                   </InlineStack>
                 ) : item.orphan ? (
                   <InlineStack gap="200">
@@ -386,6 +425,15 @@ export default function TemplatesIndex() {
                     Edit
                   </Button>
                 )}
+                {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+                <InlineStack>
+                  {defaultKey !== item.id ? (
+                    <Button onClick={() => setDefault(item.id)} variant="plain">
+                      Set default
+                    </Button>
+                  ) : null}
+                </InlineStack>
+                {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
               </IndexTable.Cell>
             </IndexTable.Row>
           ))}

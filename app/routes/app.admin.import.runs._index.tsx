@@ -20,6 +20,10 @@ import {
 } from '@shopify/polaris'
 import { ImportNav } from '../components/importer/ImportNav'
 import { ReRunOptionsModal } from '../components/imports/ReRunOptionsModal'
+// <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+import { listTemplates } from '../loaders/templates.server'
+import type { ImporterTemplate } from '../loaders/templates.server'
+// <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 
 type RunRow = {
   id: string
@@ -29,6 +33,9 @@ type RunRow = {
   status: string
   counts: { add: number; change: number; delete: number; conflict: number }
   unresolvedAdds: number
+  // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+  templateKey?: string
+  // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -60,7 +67,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     orderBy: { startedAt: 'desc' },
     take: 50,
-  })) as Array<{ id: string; supplierId: string; startedAt: Date; finishedAt: Date | null; status: string }>
+    // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+    select: { id: true, supplierId: true, startedAt: true, finishedAt: true, status: true, summary: true },
+    // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
+  })) as Array<{
+    id: string
+    supplierId: string
+    startedAt: Date
+    finishedAt: Date | null
+    status: string
+    summary?: unknown
+  }>
 
   const ids = runs.map(r => r.id)
   const diffs = (await db.importDiff.findMany({
@@ -81,32 +98,51 @@ export async function loader({ request }: LoaderFunctionArgs) {
     else if (d.diffType === 'conflict') c.conflict++
   }
 
-  const rows: RunRow[] = runs.map(r => ({
-    id: r.id,
-    supplierId: r.supplierId,
-    startedAt: r.startedAt.toISOString(),
-    finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
-    status: r.status,
-    counts: {
-      add: countsByRun[r.id].add,
-      change: countsByRun[r.id].change,
-      delete: countsByRun[r.id].delete,
-      conflict: countsByRun[r.id].conflict,
-    },
-    unresolvedAdds: countsByRun[r.id].unresolvedAdds,
-  }))
+  const rows: RunRow[] = runs.map(r => {
+    const summary = (r.summary || {}) as { options?: { templateKey?: string } }
+    const templateKey = summary?.options?.templateKey || undefined
+    return {
+      id: r.id,
+      supplierId: r.supplierId,
+      startedAt: r.startedAt.toISOString(),
+      finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
+      status: r.status,
+      counts: {
+        add: countsByRun[r.id].add,
+        change: countsByRun[r.id].change,
+        delete: countsByRun[r.id].delete,
+        conflict: countsByRun[r.id].conflict,
+      },
+      unresolvedAdds: countsByRun[r.id].unresolvedAdds,
+      templateKey,
+    }
+  })
 
-  return json({ runs: rows, supplier: supplier || '', status: status || '', from: from || '', to: to || '', shop })
+  // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+  const templates = await listTemplates()
+  return json({
+    runs: rows,
+    supplier: supplier || '',
+    status: status || '',
+    from: from || '',
+    to: to || '',
+    shop,
+    templates,
+  })
+  // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 }
 
 export default function ImportRunsIndex() {
-  const { runs, supplier, status, from, to, shop } = useLoaderData<typeof loader>() as {
+  const { runs, supplier, status, from, to, shop, templates } = useLoaderData<typeof loader>() as {
     runs: RunRow[]
     supplier: string
     status: string
     from: string
     to: string
     shop: string
+    // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+    templates: ImporterTemplate[]
+    // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
   }
   const [params, setParams] = useSearchParams()
   const location = useLocation()
@@ -171,6 +207,11 @@ export default function ImportRunsIndex() {
       <Card>
         <BlockStack gap="300">
           <ImportNav current="runs" title="Import Runs" />
+          {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+          <InlineStack align="end">
+            <Button url={`/app/products/templates${location.search}`}>Manage templates</Button>
+          </InlineStack>
+          {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
           <InlineStack gap="100" blockAlign="center">
             <Text as="span" variant="bodySm">
               From
@@ -225,6 +266,9 @@ export default function ImportRunsIndex() {
             </Button>
           </InlineStack>
           <InlineStack>
+            {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+            <Button url={`/app/products/templates${location.search}`}>Manage templates</Button>
+            {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
             <Button onClick={() => navigate('/app/admin/import/settings')}>Settings</Button>
           </InlineStack>
         </InlineStack>
@@ -349,8 +393,14 @@ export default function ImportRunsIndex() {
                   <InlineStack gap="100">
                     <Button url={`/app/admin/import/runs/${r.id}`}>Review</Button>
                     {/* BEGIN RBP GENERATED: importer-extractor-templates-v2 */}
-                    <Button url={`/app/admin/import/preview/${r.id}${location.search}`}>Preview</Button>
-                    {/* END RBP GENERATED: importer-extractor-templates-v2 */}
+                    {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+                    {(() => {
+                      const q = new URLSearchParams(location.search)
+                      if (r.templateKey) q.set('templateKey', r.templateKey)
+                      const href = `/app/admin/import/preview/${r.id}${q.toString() ? `?${q.toString()}` : ''}`
+                      return <Button url={href}>Preview</Button>
+                    })()}
+                    {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
                     {/* BEGIN RBP GENERATED: admin-hq-importer-ux-v2 */}
                     <Button
                       onClick={() => {
@@ -377,6 +427,9 @@ export default function ImportRunsIndex() {
       </BlockStack>
       {/* BEGIN RBP GENERATED: admin-hq-importer-ux-v2 */}
       <ReRunOptionsModal
+        // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+        templates={templates}
+        // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
         open={rerunOpen}
         onClose={() => {
           setRerunOpen(false)
@@ -389,6 +442,9 @@ export default function ImportRunsIndex() {
           form.set('includeSeeds', 'on')
           if (opts.skipSuccessful) form.set('skipSuccessful', 'on')
           form.set('manualUrls', opts.manualUrls)
+          // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+          if (opts.templateKey) form.set('templateKey', opts.templateKey)
+          // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
           fetcher.submit(form, { method: 'post', action: `/app/admin/import/${targetRunId}/edit` })
           setRerunOpen(false)
         }}

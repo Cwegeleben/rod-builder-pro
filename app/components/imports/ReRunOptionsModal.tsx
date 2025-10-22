@@ -1,19 +1,39 @@
 // <!-- BEGIN RBP GENERATED: admin-hq-importer-ux-v2 -->
-import { Modal, TextField, Checkbox, Text, BlockStack } from '@shopify/polaris'
+import { Modal, TextField, Checkbox, Text, BlockStack, Select } from '@shopify/polaris'
 import { useState } from 'react'
+// <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+import type { ImporterTemplate } from '../../loaders/templates.server'
+// <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 
 export function ReRunOptionsModal({
   open,
   onClose,
   onConfirm,
+  // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+  templates = [],
+  // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 }: {
   open: boolean
   onClose: () => void
-  onConfirm: (opts: { skipSuccessful: boolean; manualUrls: string; schedule: 'once' | 'next' }) => void
+  onConfirm: (opts: {
+    skipSuccessful: boolean
+    manualUrls: string
+    schedule: 'once' | 'next'
+    // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+    templateKey?: string
+    // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
+  }) => void
+  // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+  templates?: ImporterTemplate[]
+  // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 }) {
   const [skipSuccessful, setSkipSuccessful] = useState(true)
   const [manualUrls, setManualUrls] = useState('')
   const [schedule, setSchedule] = useState<'once' | 'next'>('once')
+  // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+  const defaultTpl = templates.find(t => t.isDefault) || templates[0]
+  const [templateKey, setTemplateKey] = useState<string | undefined>(defaultTpl?.key)
+  // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 
   return (
     <Modal
@@ -22,12 +42,28 @@ export function ReRunOptionsModal({
       title="Re-run Options"
       primaryAction={{
         content: 'Confirm',
-        onAction: () => onConfirm({ skipSuccessful, manualUrls, schedule }),
+        // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+        onAction: () => onConfirm({ skipSuccessful, manualUrls, schedule, templateKey }),
+        // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
       }}
       secondaryActions={[{ content: 'Cancel', onAction: onClose }]}
     >
       <Modal.Section>
         <BlockStack gap="200">
+          {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+          <div>
+            <Select
+              label="Template"
+              placeholder="Select a template"
+              options={templates.map(t => ({ label: `${t.name}${t.site ? ` (${t.site})` : ''}`, value: t.key }))}
+              value={templateKey || ''}
+              onChange={v => setTemplateKey(v || undefined)}
+            />
+            <Text as="p" variant="bodySm" tone="subdued">
+              Defines how fields are extracted (JSON-LD → DOM → slug → hash)
+            </Text>
+          </div>
+          {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
           <Checkbox
             label="Skip previously successful products"
             checked={skipSuccessful}

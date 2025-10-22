@@ -2,7 +2,7 @@
 import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from '@remix-run/node'
 import { useEffect, useMemo, useState } from 'react'
 import { useFetcher, useLoaderData, useSearchParams } from '@remix-run/react'
-import { Card, BlockStack, InlineStack, Text, TextField, Button, Banner } from '@shopify/polaris'
+import { Card, BlockStack, InlineStack, Text, TextField, Button, Banner, Badge } from '@shopify/polaris'
 import { requireHQAccess } from '../services/auth/guards.server'
 import { PreviewPane, type FieldRow } from '../components/imports/PreviewPane'
 import { slugFromPath, hash as hashUrl } from '../../src/importer/extract/fallbacks'
@@ -16,7 +16,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const runId = String(params.runId)
   const url = new URL(request.url)
   const productUrl = url.searchParams.get('url') || ''
-  return json({ runId, productUrl, templatePath: TEMPLATE_PATH })
+  // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+  const templateKey = url.searchParams.get('templateKey') || ''
+  return json({ runId, productUrl, templatePath: TEMPLATE_PATH, templateKey })
+  // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -41,7 +44,11 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function ImportPreviewPage() {
-  const { runId, productUrl } = useLoaderData<typeof loader>() as { runId: string; productUrl: string }
+  const { runId, productUrl, templateKey } = useLoaderData<typeof loader>() as {
+    runId: string
+    productUrl: string
+    templateKey?: string
+  }
   const [params, setParams] = useSearchParams()
   const [url, setUrl] = useState(productUrl)
   const fetcher = useFetcher<{
@@ -84,6 +91,9 @@ export default function ImportPreviewPage() {
             Scrape Preview — Run {runId.slice(0, 8)}…
           </Text>
           <InlineStack gap="200">
+            {/* <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 --> */}
+            {templateKey ? <Badge>{`Template: ${templateKey}`}</Badge> : null}
+            {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
             <div style={{ minWidth: 420 }}>
               <TextField
                 label="URL"
