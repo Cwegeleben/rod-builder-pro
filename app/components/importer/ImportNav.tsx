@@ -24,10 +24,10 @@ export function ImportNav({ current, title, actions }: Props) {
         <ButtonGroup>
           {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
           {/* Use relative links and preserve query params for embedded App Bridge */}
-          <Button url={`admin/import/runs${loc.search}`} variant={isRuns ? 'primary' : undefined}>
+          <Button url={`/app/admin/import/runs${loc.search}`} variant={isRuns ? 'primary' : undefined}>
             Runs
           </Button>
-          <Button url={`admin/import/settings${loc.search}`} variant={isSettings ? 'primary' : undefined}>
+          <Button url={`/app/admin/import/settings${loc.search}`} variant={isSettings ? 'primary' : undefined}>
             Settings
           </Button>
           {/* END RBP GENERATED: admin-link-integrity-v1 */}
@@ -36,7 +36,7 @@ export function ImportNav({ current, title, actions }: Props) {
       <InlineStack gap="200" blockAlign="center">
         {actions}
         {/* Contextual help, modeled after Shopify Admin's learn-more patterns */}
-        <Button url={`admin/import/help${loc.search}`}>Help</Button>
+        <Button url={`/app/admin/import/help${loc.search}`}>Help</Button>
       </InlineStack>
     </InlineStack>
   )

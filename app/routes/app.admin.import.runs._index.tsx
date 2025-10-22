@@ -247,7 +247,7 @@ export default function ImportRunsIndex() {
           </InlineStack>
           <EmptyState
             heading="No import runs yet"
-            action={{ content: 'Start Import', url: '/app/products' }}
+            action={{ content: 'Start Import', url: `/app/admin/import/new${location.search}` }}
             secondaryAction={{ content: 'Importer Settings', url: '/app/admin/import/settings' }}
             image="/empty-state.svg"
           >
