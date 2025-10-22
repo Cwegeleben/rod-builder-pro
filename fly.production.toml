@@ -8,8 +8,8 @@ primary_region = 'sjc'
 
 [build]
   [build.args]
-    # Keep Playwright install enabled for preview tooling; set to "false" to speed up deploys when not needed
-    INSTALL_PLAYWRIGHT = "true"
+    # Disable Playwright install for faster deploys (enable on-demand via --build-arg)
+    INSTALL_PLAYWRIGHT = "false"
 
 [env]
   PORT = '3000'
