@@ -28,6 +28,45 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const form = await request.formData()
     const actionType = String(form.get('_action') || '')
 
+    // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+    // Minimal helpers (scope-safe) for metaobject definition and update without exporting internals
+    async function getDefinitionKeys(): Promise<Set<string>> {
+      const q = `#graphql
+        query GetDefinition($type: String!) {
+          metaobjectDefinitionByType(type: $type) {
+            fieldDefinitions { key }
+          }
+        }
+      `
+      try {
+        const resp = await admin.graphql(q, { variables: { type: 'rbp_template' } })
+        if (!resp.ok) return new Set()
+        const jr = (await resp.json()) as {
+          data?: { metaobjectDefinitionByType?: { fieldDefinitions?: Array<{ key: string }> } | null }
+        }
+        const defs = jr?.data?.metaobjectDefinitionByType?.fieldDefinitions || []
+        return new Set(defs.map(d => d.key))
+      } catch {
+        return new Set()
+      }
+    }
+    async function setMetaobjectFields(moId: string, fields: Array<{ key: string; value: string }>): Promise<void> {
+      const mut = `#graphql
+        mutation Update($id: ID!, $fields: [MetaobjectFieldInput!]!) {
+          metaobjectUpdate(id: $id, metaobject: { fields: $fields }) {
+            metaobject { id }
+            userErrors { message }
+          }
+        }
+      `
+      const r = await admin.graphql(mut, { variables: { id: moId, fields } })
+      if (!r.ok) throw new Error(`metaobjectUpdate ${r.status}`)
+      const jr = (await r.json()) as { data?: { metaobjectUpdate?: { userErrors?: Array<{ message: string }> } } }
+      const errs = jr?.data?.metaobjectUpdate?.userErrors || []
+      if (errs.length) throw new Error(errs.map(e => e.message).join('; '))
+    }
+    // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
+
     switch (actionType) {
       case 'publishTemplates': {
         const templateId = form.get('templateId') ? String(form.get('templateId')) : undefined
@@ -97,8 +136,208 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }),
           ),
         )
-        return redirect(`/app/products/templates/${t.id}`)
+        // Mark this navigation as a fresh creation so the edit page can adapt initial UI
+        return redirect(`/app/products/templates/${t.id}?new=1`)
       }
+      // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+      case 'updateProductImageUrl': {
+        const id = String(form.get('id'))
+        const raw = String(form.get('productImageUrl') || '').trim()
+        const value = raw === '' ? null : raw
+        if (value && !/^https?:\/\//i.test(value)) {
+          return json({ ok: false, error: 'Invalid URL (must start with http/https)' }, { status: 400 })
+        }
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (prisma as any).specTemplate.update({ where: { id }, data: { productImageUrl: value } })
+        } catch {
+          /* ignore until migration applied */
+        }
+        return json({ ok: true, id, productImageUrl: value })
+      }
+      // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
+      case 'updateSupplierAvailability': {
+        // Internal hook for importer job to update supplier availability metadata
+        const id = String(form.get('id'))
+        const raw = String(form.get('supplierAvailability') || '').trim()
+        const value = raw === '' ? null : raw.slice(0, 500)
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (prisma as any).specTemplate.update({ where: { id }, data: { supplierAvailability: value } })
+        } catch {
+          /* ignore until migration applied */
+        }
+        return json({ ok: true, id, supplierAvailability: value })
+      }
+      // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+      // Removed updatePrimaryVariantCost: cost default eliminated; cost is a core field
+      case 'migrateCostTopLevelToField': {
+        // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+        // Backfill: for any template with a legacy top-level 'cost' in DB or metaobject, set 'primary_variant_cost'
+        const TYPE = 'rbp_template'
+        const first = 50
+        let after: string | null = null
+        const definedKeys = await getDefinitionKeys()
+        const hasPVC = definedKeys.has('primary_variant_cost')
+        // Build local cost map
+        const locals = await prisma.specTemplate.findMany({ select: { id: true, name: true } })
+        const localCost = new Map<string, number>()
+        for (const t of locals) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const row = (await (prisma as any).specTemplate.findUnique({
+            where: { id: t.id },
+            select: { cost: true },
+          })) as {
+            cost?: number | null
+          }
+          if (row?.cost != null && Number.isFinite(row.cost)) localCost.set(t.id, Number(row.cost))
+        }
+        let updated = 0
+        // Walk remote metaobjects; write primary_variant_cost when possible
+        while (true) {
+          const GQL = `#graphql
+            query List($type: String!, $first: Int!, $after: String) {
+              metaobjects(type: $type, first: $first, after: $after) {
+                edges { cursor node { id handle
+                  costField: field(key:"cost"){ value }
+                } }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          `
+          const resp = await admin.graphql(GQL, { variables: { type: TYPE, first, after } })
+          if (!resp.ok) break
+          const jr = (await resp.json()) as {
+            data?: {
+              metaobjects?: {
+                edges: Array<{
+                  cursor: string
+                  node: { id: string; handle?: string; costField?: { value?: string | null } | null }
+                }>
+                pageInfo: { hasNextPage: boolean; endCursor?: string | null }
+              }
+            }
+          }
+          const edges = jr?.data?.metaobjects?.edges || []
+          for (const e of edges) {
+            const handle = e?.node?.handle
+            if (!handle) continue
+            const local = localCost.get(handle)
+            const legacy = (() => {
+              const raw = e?.node?.costField?.value
+              const n = raw == null ? NaN : Number(raw)
+              return Number.isFinite(n) ? (n as number) : undefined
+            })()
+            const value = local ?? legacy
+            if (value == null) continue
+            if (!hasPVC) continue
+            try {
+              await setMetaobjectFields(e.node.id, [{ key: 'primary_variant_cost', value: String(value) }])
+              updated += 1
+            } catch {
+              // ignore per-object failure
+            }
+          }
+          const pi = jr?.data?.metaobjects?.pageInfo
+          if (pi?.hasNextPage && pi?.endCursor) after = pi.endCursor
+          else break
+        }
+        return json({ ok: true, updated })
+        // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
+      }
+      case 'syncAllOrphans': {
+        if (isRemoteHybridEnabled()) return json({ ok: false, error: 'Hybrid mode hides orphans' }, { status: 400 })
+        const { admin } = await authenticate.admin(request)
+        const TYPE = 'rbp_template'
+        const first = 100
+        let after: string | null = null
+        const GQL = `#graphql
+          query List($type: String!, $first: Int!, $after: String) {
+            metaobjects(type: $type, first: $first, after: $after) {
+              edges { cursor node { handle templateId: field(key: "template_id") { value } nameField: field(key:"name"){ value } fieldsJsonField: field(key:"fields_json"){ value } } }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        `
+        const existing = await prisma.specTemplate.findMany({ select: { id: true } })
+        const local = new Set(existing.map(r => r.id))
+        let adopted = 0
+        while (true) {
+          const resp = await admin.graphql(GQL, { variables: { type: TYPE, first, after } })
+          if (!resp.ok) break
+          const jr = (await resp.json()) as {
+            data?: {
+              metaobjects?: {
+                edges: Array<{
+                  cursor: string
+                  node: {
+                    handle?: string
+                    templateId?: { value?: string | null } | null
+                    nameField?: { value?: string | null } | null
+                    fieldsJsonField?: { value?: string | null } | null
+                  }
+                }>
+                pageInfo: { hasNextPage: boolean; endCursor?: string | null }
+              }
+            }
+          }
+          const edges = jr?.data?.metaobjects?.edges || []
+          for (const e of edges) {
+            const node = e.node
+            const id = node?.templateId?.value || node?.handle
+            if (!id || local.has(id)) continue
+            const nameVal = node?.nameField?.value || id
+            let fields: Array<Record<string, unknown>> = []
+            try {
+              const raw = node?.fieldsJsonField?.value
+              const arr = raw ? JSON.parse(raw) : []
+              if (Array.isArray(arr)) fields = arr as Array<Record<string, unknown>>
+            } catch {
+              /* ignore */
+            }
+            try {
+              await prisma.specTemplate.create({ data: { id, name: nameVal } })
+              for (const [idx, f] of fields.entries()) {
+                await prisma.specField.create({
+                  data: {
+                    id: (f.id as string) || undefined,
+                    templateId: id,
+                    key: String(f.key || `field_${idx + 1}`),
+                    label: String(f.label || f.key || `Field ${idx + 1}`),
+                    type: ((): 'text' | 'number' | 'boolean' | 'select' => {
+                      const vt = f.type
+                      return vt === 'number' || vt === 'boolean' || vt === 'select' ? vt : 'text'
+                    })(),
+                    required: Boolean(f.required),
+                    position: typeof f.position === 'number' ? (f.position as number) : idx + 1,
+                    storage: (f.storage as string) === 'METAFIELD' ? 'METAFIELD' : 'CORE',
+                    coreFieldPath:
+                      ((f as { mapping?: { coreFieldPath?: string | null } }).mapping?.coreFieldPath as string) || null,
+                    metafieldNamespace:
+                      ((f as { mapping?: { metafield?: { namespace?: string | null } } }).mapping?.metafield
+                        ?.namespace as string) || null,
+                    metafieldKey:
+                      ((f as { mapping?: { metafield?: { key?: string | null } } }).mapping?.metafield
+                        ?.key as string) || null,
+                    metafieldType:
+                      ((f as { mapping?: { metafield?: { type?: string | null } } }).mapping?.metafield
+                        ?.type as string) || null,
+                  },
+                })
+              }
+              local.add(id)
+              adopted += 1
+            } catch {
+              /* ignore per-orphan errors */
+            }
+          }
+          const pi = jr?.data?.metaobjects?.pageInfo
+          if (pi?.hasNextPage && pi?.endCursor) after = pi.endCursor
+          else break
+        }
+        return json({ ok: true, updatedCount: adopted })
+      }
+      // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
       case 'publishHybridTemplate': {
         if (!isRemoteHybridEnabled()) return json({ ok: false, error: 'Hybrid mode disabled' }, { status: 400 })
         const templateId = String(form.get('id'))

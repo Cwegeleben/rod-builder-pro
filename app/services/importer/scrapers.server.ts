@@ -1,9 +1,9 @@
 // hq-importer-new-import-v2
 export type Scraper = {
-  id: string
+  id: 'jsonld-basic' | 'dom-selectors-v1' | 'list-page-follow-v1' | 'table-grid-v1'
   name: string
   kind: 'scraper'
-  strategy: 'jsonld' | 'dom' | 'list'
+  strategy: 'jsonld-basic' | 'dom-selectors-v1' | 'list-page-follow-v1' | 'table-grid-v1'
   // Optional DOM field selectors for 'dom' strategy
   fields?: {
     title?: string
@@ -21,13 +21,13 @@ const PRELOADED_SCRAPERS: Scraper[] = [
     id: 'jsonld-basic',
     name: 'JSON-LD Scraper',
     kind: 'scraper',
-    strategy: 'jsonld',
+    strategy: 'jsonld-basic',
   },
   {
     id: 'dom-selectors-v1',
     name: 'DOM Selector Scraper',
     kind: 'scraper',
-    strategy: 'dom',
+    strategy: 'dom-selectors-v1',
     fields: {
       title: 'h1, .product__title, [itemprop="name"]',
       price: '[itemprop="price"], .price__regular, .price .amount',
@@ -42,7 +42,13 @@ const PRELOADED_SCRAPERS: Scraper[] = [
     id: 'list-page-follow-v1',
     name: 'List Page Scraper (follow links)',
     kind: 'scraper',
-    strategy: 'list',
+    strategy: 'list-page-follow-v1',
+  },
+  {
+    id: 'table-grid-v1',
+    name: 'Table Grid (per-row)',
+    kind: 'scraper',
+    strategy: 'table-grid-v1',
   },
 ]
 

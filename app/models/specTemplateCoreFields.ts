@@ -20,6 +20,14 @@ export const CORE_SPEC_FIELD_DEFS: Array<{
     coreFieldPath: 'variants[0].price',
     required: true,
   },
+  {
+    key: 'primary_variant_cost',
+    label: 'Primary Variant Cost',
+    type: 'number',
+    // Shopify stores cost on the InventoryItem for a variant; model that path explicitly
+    coreFieldPath: 'variants[0].inventoryItem.cost',
+    required: false,
+  },
 ]
 
 export const CORE_FIELD_PATH_SET = new Set(CORE_SPEC_FIELD_DEFS.map(f => f.coreFieldPath))

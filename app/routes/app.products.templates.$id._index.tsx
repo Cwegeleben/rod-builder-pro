@@ -32,6 +32,10 @@ type LoaderData = {
   name: string
   lastPublishedAt?: string | null
   orphan: boolean
+  // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+  productImageUrl?: string | null
+  supplierAvailability?: string | null
+  // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
   fields: Array<{
     id: string
     key: string
@@ -58,6 +62,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request)
   await requireHqShopOr404(request)
   const id = String(params.id)
+  const url = new URL(request.url)
+  const isNew = url.searchParams.get('new') === '1'
   const tpl = await getTemplateWithFields(id)
   if (!tpl) {
     // Try to load remote metaobject to detect orphan
@@ -170,7 +176,29 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   } catch {
     /* ignore diff errors */
   }
-  return json<LoaderData>({ status: 'ok', id: tpl.id, name: tpl.name, fields, lastPublishedAt, orphan: false, diff })
+  // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+  // Removed template-level cost default; cost is now a core field like price
+  // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
+  // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+  const productImageUrl = (tpl as unknown as { productImageUrl?: string | null }).productImageUrl ?? null
+  const supplierAvailability = (tpl as unknown as { supplierAvailability?: string | null }).supplierAvailability ?? null
+  // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
+  return json<LoaderData>(
+    {
+      status: 'ok',
+      id: tpl.id,
+      name: tpl.name,
+      // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+      productImageUrl,
+      supplierAvailability,
+      // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
+      fields,
+      lastPublishedAt,
+      orphan: false,
+      diff,
+    },
+    { headers: isNew ? { 'X-Tpl-New': '1' } : undefined },
+  )
 }
 
 const coreFieldOptions = [
@@ -181,10 +209,13 @@ const coreFieldOptions = [
   { label: 'tags', value: 'tags' },
   { label: 'variants[0].sku', value: 'variants[0].sku' },
   { label: 'variants[0].price', value: 'variants[0].price' },
+  { label: 'variants[0].inventoryItem.cost', value: 'variants[0].inventoryItem.cost' },
 ]
 
 export default function TemplateDetail() {
   const data = useLoaderData<LoaderData>()
+  // Detect if this is a freshly created template via query param (not persisted in state)
+  const isNew = typeof window !== 'undefined' ? new URL(window.location.href).searchParams.get('new') === '1' : false
   if (data.status === 'orphan') {
     return (
       <Frame>
@@ -208,6 +239,21 @@ export default function TemplateDetail() {
   const [name, setName] = useState(data.name)
   const [editing, setEditing] = useState<LoaderData['fields'][number] | null>(null)
   const [dirty, setDirty] = useState(false)
+  // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+  const [productImageUrl, setProductImageUrl] = useState<string>(data.productImageUrl || '')
+  const imageUrlFetcher = useFetcher()
+  const onProductImageUrlChange = (v: string) => {
+    setProductImageUrl(v)
+    const trimmed = v.trim()
+    if (trimmed && !/^https?:\/\//i.test(trimmed)) return
+    const form = new FormData()
+    form.append('_action', 'updateProductImageUrl')
+    form.append('id', data.id)
+    form.append('productImageUrl', trimmed)
+    imageUrlFetcher.submit(form, { method: 'post', action: '/resources/spec-templates' })
+    setDirty(true)
+  }
+  // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
   const publishFetcher = useFetcher()
   type PublishResult = { ok: boolean; error?: string }
   const publishData = publishFetcher.data as PublishResult | undefined
@@ -323,6 +369,9 @@ export default function TemplateDetail() {
             }}
             autoComplete="off"
           />
+          {/* <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 --> */}
+          {/* Moved Product Image URL and Supplier Availability into the Fields table below Cost */}
+          {/* <!-- END RBP GENERATED: importer-templates-orphans-v1 --> */}
         </BlockStack>
       </Card>
       <div style={{ height: 12 }} />
@@ -426,6 +475,90 @@ export default function TemplateDetail() {
                 </IndexTable.Row>
               )
             })}
+            {/* <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 --> */}
+            {/* Insert core-default rows (Product Image URL, Supplier Availability) directly after Primary Variant Cost */}
+            {(() => {
+              const costIdx = unified.findIndex(
+                ff => ff.storage === 'CORE' && ff.coreFieldPath === 'variants[0].inventoryItem.cost',
+              )
+              if (costIdx < 0) return null
+              const posBase = costIdx + 0.1
+              const urlInvalid = productImageUrl && !/^https?:\/\//i.test(productImageUrl)
+              // Hide Product Image URL input for brand new templates on initial add page
+              const showImgUrl = !isNew
+              return (
+                <>
+                  {showImgUrl ? (
+                    <IndexTable.Row id="__tpl_img_url__" key="__tpl_img_url__" position={posBase}>
+                      <IndexTable.Cell>
+                        <Text as="span">Product Image URL</Text>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        <Text as="span" tone="subdued">
+                          product_image_url
+                        </Text>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        <Text as="span">text</Text>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        <Text as="span">No</Text>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        <Text as="span" tone="subdued">
+                          Core
+                        </Text>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        <TextField
+                          label=""
+                          labelHidden
+                          value={productImageUrl}
+                          onChange={onProductImageUrlChange}
+                          autoComplete="off"
+                          type="text"
+                          helpText="Optional default image used by importer (http/https)."
+                          error={urlInvalid ? 'Use http:// or https:// URL' : undefined}
+                        />
+                      </IndexTable.Cell>
+                    </IndexTable.Row>
+                  ) : null}
+                  <IndexTable.Row id="__tpl_supplier_avail__" key="__tpl_supplier_avail__" position={posBase + 0.1}>
+                    <IndexTable.Cell>
+                      <Text as="span">Supplier Availability</Text>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <Text as="span" tone="subdued">
+                        supplier_availability
+                      </Text>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <Text as="span">text</Text>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <Text as="span">No</Text>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <Text as="span" tone="subdued">
+                        Core
+                      </Text>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <TextField
+                        label=""
+                        labelHidden
+                        value={data.supplierAvailability || ''}
+                        onChange={() => {}}
+                        autoComplete="off"
+                        disabled
+                        helpText="Auto-updated from supplier feed"
+                      />
+                    </IndexTable.Cell>
+                  </IndexTable.Row>
+                </>
+              )
+            })()}
+            {/* <!-- END RBP GENERATED: importer-templates-orphans-v1 --> */}
           </IndexTable>
         </BlockStack>
       </Card>

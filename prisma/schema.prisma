@@ -48,6 +48,17 @@ enum FieldStorage {
 model SpecTemplate {
   id        String      @id @default(cuid())
   name      String      @unique
+  // <!-- BEGIN RBP GENERATED: importer-templates-zero-orphan-v1 -->
+  status    TemplateStatus @default(ACTIVE)
+  // <!-- END RBP GENERATED: importer-templates-zero-orphan-v1 -->
+  // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+  // Optional template-level cost used by importer defaults and UI. No default; managed via core cost field instead.
+  cost      Float?
+  // Product image URL (optional) for importer to attach a default product image
+  productImageUrl String?
+  // Supplier availability metadata (read-only in UI, updated by importer)
+  supplierAvailability String?
+  // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
   fields    SpecField[]
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
@@ -59,6 +70,14 @@ model SpecTemplate {
 
   @@index([remoteTemplateId])
 }
+
+// <!-- BEGIN RBP GENERATED: importer-templates-zero-orphan-v1 -->
+enum TemplateStatus {
+  PENDING
+  ACTIVE
+  ARCHIVED
+}
+// <!-- END RBP GENERATED: importer-templates-zero-orphan-v1 -->
 
 model SpecField {
   id                 String        @id @default(cuid())
@@ -219,6 +238,49 @@ model PartStaging {
   @@unique([supplierId, externalId])
 }
 // <!-- END RBP GENERATED: importer-v2-schema -->
+
+// <!-- BEGIN RBP GENERATED: hq-importer-new-import-v2 (mapping-snapshot-schema) -->
+/// Global template-level alias memory: maps a normalized source label to a template field key.
+model TemplateAlias {
+  id          String   @id @default(cuid())
+  templateId  String
+  // Normalized source label (e.g., "item_length_in")
+  labelNorm   String
+  fieldKey    String
+  source      String   @default("manual") // manual | auto
+  confidence  Float    @default(1.0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([templateId, labelNorm], name: "template_alias_unique")
+}
+
+/// Per-run mapping snapshot capturing applied alias choices and axes mapping
+model RunMappingSnapshot {
+  id         String   @id @default(cuid())
+  runId      String
+  templateId String
+  scraperId  String
+  // JSON blob: { aliases: [{ label, fieldKey, source, confidence }], axes: { o1, o2, o3 } }
+  mapping    Json
+  createdAt  DateTime @default(now())
+
+  @@unique([runId])
+}
+
+/// Optional per-item applied mapping materialization for diagnostics
+model RunItemMapping {
+  id         String   @id @default(cuid())
+  runId      String
+  itemKey    String
+  applied    Json     // { fieldKey: value }
+  diagnostics Json    // { missing:[], sources:{} }
+  createdAt  DateTime @default(now())
+
+  @@index([runId])
+  @@unique([runId, itemKey], name: "run_item_mapping_unique")
+}
+// <!-- END RBP GENERATED: hq-importer-new-import-v2 (mapping-snapshot-schema) -->
 
 // <!-- BEGIN RBP GENERATED: importer-seeds-v1 -->
 model ProductSource {

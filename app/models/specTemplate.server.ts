@@ -4,16 +4,35 @@ import { prisma } from '../db.server'
 import { buildCoreFieldDefsForTemplate } from './specTemplateCoreFields'
 
 export async function listTemplatesSummary() {
-  const templates = await prisma.specTemplate.findMany({
-    orderBy: { updatedAt: 'desc' },
-    include: { _count: { select: { fields: true } } },
-  })
-  return templates.map((t: { id: string; name: string; updatedAt: Date; _count: { fields: number } }) => ({
-    id: t.id,
-    name: t.name,
-    fieldsCount: t._count.fields,
-    updatedAt: new Date(t.updatedAt).toISOString(),
+  // Robust against missing 'cost' column in production by avoiding Prisma's implicit column list.
+  // 1) Detect if 'cost' column exists via PRAGMA (SQLite only).
+  let hasCost = false
+  try {
+    const cols = await prisma.$queryRawUnsafe<Array<{ name: string }>>("PRAGMA table_info('SpecTemplate')")
+    hasCost = Array.isArray(cols) && cols.some(c => c.name === 'cost')
+  } catch {
+    hasCost = false
+  }
+  // 2) Read templates via raw SQL selecting only existing columns
+  type Row = { id: string; name: string; updatedAt: string; cost?: number | null }
+  const baseSql = hasCost
+    ? `SELECT id, name, updatedAt, cost FROM SpecTemplate ORDER BY updatedAt DESC`
+    : `SELECT id, name, updatedAt FROM SpecTemplate ORDER BY updatedAt DESC`
+  const rows = await prisma.$queryRawUnsafe<Row[]>(baseSql)
+  // 3) Compute fields count per template
+  const counts = await prisma.$queryRawUnsafe<Array<{ templateId: string; fieldsCount: number }>>(
+    `SELECT templateId, COUNT(*) as fieldsCount FROM SpecField GROUP BY templateId`,
+  )
+  const countByTpl = new Map(counts.map(c => [c.templateId, Number(c.fieldsCount || 0)]))
+  // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+  return rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    fieldsCount: countByTpl.get(r.id) || 0,
+    updatedAt: new Date(r.updatedAt).toISOString(),
+    cost: hasCost ? (typeof r.cost === 'number' ? r.cost : (r.cost ?? null)) : null,
   }))
+  // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
 }
 
 async function nextUniqueName(base: string) {

@@ -26,21 +26,45 @@ import { authenticate } from '../shopify.server'
 // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
 import { listTemplatesSummary } from '../models/specTemplate.server'
 import { listScrapers, type Scraper } from '../services/importer/scrapers.server'
+import { shouldRunAutoSync, markAutoSyncRun, syncOrphanTemplates } from '../models/orphanSync.server'
 // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 
 type LoaderData = {
   options: RunOptions
   variantTemplates: { id: string; name: string }[]
   scrapers: Scraper[]
+  syncSummary?: { adopted: number; at: string }
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireHqShopOr404(request)
   const options = await loadRunOptions(null)
+  const { admin, session } = await authenticate.admin(request)
+  // Optional auto-sync: keep template list fresh when user opens New Import
+  let syncSummary: { adopted: number; at: string } | undefined
+  try {
+    const shop = (session as unknown as { shop?: string }).shop || ''
+    if (shouldRunAutoSync(shop)) {
+      const { adopted } = await syncOrphanTemplates(
+        admin as unknown as {
+          graphql: (q: string, init?: { variables?: Record<string, unknown> }) => Promise<Response>
+        },
+      )
+      markAutoSyncRun(shop)
+      if (adopted > 0) syncSummary = { adopted, at: new Date().toISOString() }
+    }
+  } catch {
+    // ignore auto-sync errors; non-blocking
+  }
   // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
   const vtpls = await listTemplatesSummary()
   const scrapers = await listScrapers()
-  return json<LoaderData>({ options, variantTemplates: vtpls.map(t => ({ id: t.id, name: t.name })), scrapers })
+  return json<LoaderData>({
+    options,
+    variantTemplates: vtpls.map(t => ({ id: t.id, name: t.name })),
+    scrapers,
+    syncSummary,
+  })
   // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 }
 
@@ -56,7 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function NewImportPage() {
-  const { options: initial, variantTemplates, scrapers } = useLoaderData<typeof loader>() as LoaderData
+  const { options: initial, variantTemplates, scrapers, syncSummary } = useLoaderData<typeof loader>() as LoaderData
   const [includeSeeds, setIncludeSeeds] = useState(initial.includeSeeds)
   const [manualUrls, setManualUrls] = useState((initial.manualUrls || []).join('\n'))
   const [skipSuccessful, setSkipSuccessful] = useState(initial.skipSuccessful)
@@ -69,22 +93,46 @@ export default function NewImportPage() {
       title?: string | null
       sku?: string | null
       price?: number | null
-      options?: Record<string, string | null>
+      currency?: string | null
+      msrp?: number | null
+      availability?: string | null
+      options?: { o1?: string | null; o2?: string | null; o3?: string | null }
+      images?: string[]
+      attributes?: Record<string, string | string[]>
+      externalId?: string | null
       url: string
-      status: string
+      status: 'ok' | 'partial' | 'error'
+      diagnostics: {
+        strategy: string
+        sources?: Record<string, string>
+        missing?: string[]
+        notes?: string[]
+        mappedKeys?: Record<string, string>
+      }
+      raw?: { jsonld?: unknown; microdata?: unknown; domSample?: string }
+      fieldValues?: Record<string, string | number | null>
     }>
     errors?: Array<{ url: string; message: string }>
+    templateFields?: Array<{ id: string; label: string; required: boolean }>
   }>()
 
   useEffect(() => {
-    // no-op
-  }, [])
+    if (syncSummary && syncSummary.adopted > 0) {
+      try {
+        const w = window as unknown as { shopifyToast?: { info?: (m: string) => void } }
+        w.shopifyToast?.info?.(`Adopted ${syncSummary.adopted} orphan template${syncSummary.adopted === 1 ? '' : 's'}.`)
+      } catch {
+        // ignore toast errors
+      }
+    }
+  }, [syncSummary])
 
   return (
     <Card>
       <BlockStack gap="300">
         <ImportNav current="runs" title="New Import" />
         <div className="grid grid-cols-2 gap-6">
+          {/* Left: selectors */}
           <div>
             <BlockStack gap="200">
               {/* hq-importer-new-import-v2: Selectors */}
@@ -159,6 +207,7 @@ export default function NewImportPage() {
               </InlineStack>
             </BlockStack>
           </div>
+          {/* Right: preview table */}
           <div>
             <BlockStack gap="200">
               <InlineStack gap="200" blockAlign="center">
@@ -171,34 +220,93 @@ export default function NewImportPage() {
               </InlineStack>
               <div className="rounded-md border border-slate-200 p-3 text-sm">
                 {!previewFetcher.data?.items?.length ? (
-                  <Text as="p" tone="subdued">
-                    Enter some URLs and click Preview Scrape to see parsed products.
-                  </Text>
+                  <BlockStack gap="150">
+                    <Text as="p" tone="subdued">
+                      Enter some URLs and click Preview Scrape to see parsed products. If you get zero results, try a
+                      different scraper or view raw signals.
+                    </Text>
+                    <InlineStack gap="150">
+                      <Button
+                        onClick={() => {
+                          setScraperId('dom-selectors-v1')
+                          const urls = manualUrls
+                            .split(/\r?\n|,/)
+                            .map(s => s.trim())
+                            .filter(Boolean)
+                          const form = new FormData()
+                          form.set('urls', JSON.stringify(urls))
+                          form.set('includeDiscovered', includeSeeds ? 'on' : '')
+                          if (variantTemplateId) form.set('variantTemplateId', variantTemplateId)
+                          form.set('scraperId', 'dom-selectors-v1')
+                          previewFetcher.submit(form, { method: 'post', action: '/api/importer/preview' })
+                        }}
+                      >
+                        Try DOM selectors
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          setScraperId('list-page-follow-v1')
+                          const urls = manualUrls
+                            .split(/\r?\n|,/)
+                            .map(s => s.trim())
+                            .filter(Boolean)
+                          const form = new FormData()
+                          form.set('urls', JSON.stringify(urls))
+                          form.set('includeDiscovered', includeSeeds ? 'on' : '')
+                          if (variantTemplateId) form.set('variantTemplateId', variantTemplateId)
+                          form.set('scraperId', 'list-page-follow-v1')
+                          previewFetcher.submit(form, { method: 'post', action: '/api/importer/preview' })
+                        }}
+                      >
+                        Try List-page
+                      </Button>
+                    </InlineStack>
+                  </BlockStack>
                 ) : (
-                  <DataTable
-                    stickyHeader
-                    columnContentTypes={[
-                      'text', // title
-                      'text', // sku
-                      'numeric', // price
-                      'text', // option1
-                      'text', // option2
-                      'text', // status
-                      'text', // url
-                    ]}
-                    headings={['Product Title', 'SKU', 'Price', 'Option1', 'Option2', 'Status', 'Source URL']}
-                    rows={
-                      previewFetcher.data.items.map(it => [
-                        it.title || '—',
-                        it.sku || '—',
-                        it.price ?? null,
-                        it.options?.o1 || '—',
-                        it.options?.o2 || '—',
-                        it.status || '—',
-                        it.url,
-                      ]) as unknown as (string | number | JSX.Element)[][]
-                    }
-                  />
+                  <>
+                    <div className="mb-2 text-xs text-slate-600">
+                      Parsed {previewFetcher.data.items.length} products using {scraperId}.
+                    </div>
+                    {(() => {
+                      const dynamic = previewFetcher.data?.templateFields || []
+                      const baseHeadings = ['Product Title', 'SKU', 'Price']
+                      const dynamicHeadings = dynamic.map(f => f.label + (f.required ? ' *' : ''))
+                      const tailHeadings = ['Status', 'Source URL', 'Info']
+                      const headings = [...baseHeadings, ...dynamicHeadings, ...tailHeadings]
+
+                      const columnContentTypes: ('text' | 'numeric')[] = [
+                        'text', // title
+                        'text', // sku
+                        'numeric', // price
+                        ...(dynamic.map(() => 'text') as Array<'text'>),
+                        'text', // status
+                        'text', // url
+                        'text', // info
+                      ]
+
+                      const rows = (previewFetcher.data?.items || []).map(it => {
+                        const dynVals = dynamic.map(df => {
+                          const v = it.fieldValues?.[df.id]
+                          if (v == null || v === '') return '—'
+                          return typeof v === 'number' ? v : String(v)
+                        })
+                        const info = it.diagnostics
+                          ? `${it.diagnostics.strategy}; missing: ${(it.diagnostics.missing || []).join(', ') || '—'}${it.availability ? `; availability: ${it.availability}` : ''}`
+                          : '—'
+                        const priceCell = it.price == null ? <span className="text-red-600">—</span> : it.price
+                        return [it.title || '—', it.sku || '—', priceCell, ...dynVals, it.status || '—', it.url, info]
+                      }) as unknown as (string | number | JSX.Element)[][]
+
+                      return (
+                        <DataTable
+                          stickyHeader
+                          columnContentTypes={columnContentTypes}
+                          headings={headings}
+                          rows={rows}
+                        />
+                      )
+                    })()}
+                  </>
                 )}
               </div>
             </BlockStack>

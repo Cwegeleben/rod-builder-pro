@@ -19,16 +19,21 @@ import { requireHqShopOr404 } from '../lib/access.server'
 // prisma imported indirectly via listTemplatesSummary
 import { listTemplatesSummary } from '../models/specTemplate.server'
 import { isRemoteHybridEnabled, listPublishedRemoteTemplates } from '../models/remoteTemplates.server'
+import { shouldRunAutoSync, markAutoSyncRun, syncOrphanTemplates } from '../models/orphanSync.server'
 // NOTE: Sourcing directly from Shopify metaobjects (rbp_template) instead of local DB (Route A)
 
 // HQ gating via shared util
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const hybrid = isRemoteHybridEnabled()
-  const { admin } = await authenticate.admin(request)
+  const { admin, session } = await authenticate.admin(request)
   await requireHqShopOr404(request)
   const url = new URL(request.url)
-  const showOrphans = !hybrid && url.searchParams.get('showOrphans') === '1'
+  // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+  // Switch to view=orphans flag; remain backward-compatible with legacy showOrphans=1
+  const showOrphans =
+    !hybrid && (url.searchParams.get('view') === 'orphans' || url.searchParams.get('showOrphans') === '1')
+  // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
   const items: Array<{
     id: string
     name: string
@@ -36,8 +41,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     updatedAt: string
     orphan?: boolean
     status: 'draft' | 'published' | 'orphan'
+    // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+    cost?: number | null
+    // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
   }> = []
   let error: string | null = null
+  let syncSummary: { adopted: number; at: string } | undefined
   let orphanCount = 0
   const localSummaries = await listTemplatesSummary()
   const localIds = new Set(localSummaries.map(r => r.id))
@@ -66,6 +75,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             fieldsCount: draft.fieldsCount,
             updatedAt: draft.updatedAt,
             status: 'draft',
+            // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+            cost: (draft as unknown as { cost?: number | null }).cost ?? null,
+            // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
           })
         }
       }
@@ -91,6 +103,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             templateId: field(key: "template_id") { value }
             nameField: field(key: "name") { value }
             fieldsJson: field(key: "fields_json") { value }
+            costField: field(key: "cost") { value }
           }
         }
         pageInfo { hasNextPage endCursor }
@@ -136,6 +149,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             /* ignore parse error */
           }
         }
+        // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+        const costVal = (() => {
+          const raw = (node as unknown as { costField?: { value?: string | null } | null })?.costField?.value
+          if (raw == null) return null
+          const n = Number(raw)
+          return Number.isFinite(n) ? n : null
+        })()
+        // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
         const orphan = !localIds.has(id)
         if (orphan) orphanCount += 1
         if (orphan && !showOrphans) continue
@@ -146,11 +167,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           updatedAt: node?.updatedAt || new Date().toISOString(),
           orphan,
           status: orphan ? 'orphan' : 'published',
+          // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+          cost: costVal,
+          // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
         })
       }
       const pageInfo = data?.data?.metaobjects?.pageInfo
       if (pageInfo?.hasNextPage && pageInfo?.endCursor) after = pageInfo.endCursor
       else break
+    }
+    // Optional auto-sync: if orphans exist, run once per 10 minutes per shop (best-effort)
+    const shop = (session as unknown as { shop?: string }).shop || ''
+    if (orphanCount > 0 && shouldRunAutoSync(shop)) {
+      try {
+        const { adopted } = await syncOrphanTemplates(
+          admin as unknown as {
+            graphql: (q: string, init?: { variables?: Record<string, unknown> }) => Promise<Response>
+          },
+        )
+        markAutoSyncRun(shop)
+        if (adopted > 0) {
+          syncSummary = { adopted, at: new Date().toISOString() }
+        }
+      } catch {
+        // Swallow auto-sync errors; non-blocking
+      }
     }
     // Add local drafts not present in published remote list
     const publishedOrIds = new Set(items.map(i => i.id))
@@ -162,6 +203,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           fieldsCount: local.fieldsCount,
           updatedAt: local.updatedAt,
           status: 'draft',
+          // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+          cost: (local as unknown as { cost?: number | null }).cost ?? null,
+          // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
         })
       }
     }
@@ -169,16 +213,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } catch (e) {
     error = e instanceof Error ? e.message : 'Unknown error listing templates'
   }
-  return json({ items, error, orphanCount, showOrphans, hybrid })
+  return json({ items, error, orphanCount, showOrphans, hybrid, syncSummary })
 }
 
 export default function TemplatesIndex() {
-  const { items, error, orphanCount, showOrphans, hybrid } = useLoaderData<typeof loader>() as {
-    items: Array<{ id: string; name: string; fieldsCount: number; updatedAt: string; orphan?: boolean; status: string }>
+  const { items, error, orphanCount, showOrphans, hybrid, syncSummary } = useLoaderData<typeof loader>() as {
+    items: Array<{
+      id: string
+      name: string
+      fieldsCount: number
+      updatedAt: string
+      orphan?: boolean
+      status: string
+      // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+      cost?: number | null
+      // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
+    }>
     error?: string | null
     orphanCount?: number
     showOrphans?: boolean
     hybrid?: boolean
+    syncSummary?: { adopted: number; at: string }
   }
   const fetcher = useFetcher()
   const revalidator = useRevalidator()
@@ -256,9 +311,16 @@ export default function TemplatesIndex() {
           <Text as="h2" variant="headingLg">
             Templates
           </Text>
-          <Button onClick={createTemplate} variant="primary">
-            Add template
-          </Button>
+          {/* <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 --> */}
+          <InlineStack gap="200">
+            <Button url="/app/admin/import/runs" variant="secondary">
+              Back to Imports
+            </Button>
+            <Button onClick={createTemplate} variant="primary">
+              Add template
+            </Button>
+          </InlineStack>
+          {/* <!-- END RBP GENERATED: importer-templates-orphans-v1 --> */}
         </InlineStack>
         {error && (
           <Banner tone="critical" title="Unable to load templates">
@@ -270,30 +332,73 @@ export default function TemplatesIndex() {
             </div>
           </Banner>
         )}
+        {!error && syncSummary && syncSummary.adopted > 0 ? (
+          <Banner tone="info" title="Templates auto-synced">
+            <p>
+              Adopted {syncSummary.adopted} orphan{syncSummary.adopted === 1 ? '' : 's'} from Shopify just now.
+            </p>
+          </Banner>
+        ) : null}
+        {/* <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 --> */}
+        {!error && items.length === 0 && (
+          <Banner tone="info" title="No templates found">
+            <p>Try creating one or syncing orphans.</p>
+            <div style={{ marginTop: 8 }}>
+              <InlineStack gap="200">
+                <Button onClick={createTemplate} variant="primary">
+                  Add template
+                </Button>
+                {!hybrid ? (
+                  <Button
+                    onClick={() => {
+                      const fd = new FormData()
+                      fd.append('_action', 'syncAllOrphans')
+                      fetcher.submit(fd, { method: 'post', action: '/resources/spec-templates' })
+                    }}
+                  >
+                    Sync orphans
+                  </Button>
+                ) : null}
+              </InlineStack>
+            </div>
+          </Banner>
+        )}
+        {/* <!-- END RBP GENERATED: importer-templates-orphans-v1 --> */}
         {!error && !hybrid && orphanCount ? (
           <Banner
             tone={showOrphans ? 'info' : 'warning'}
+            // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
             title={showOrphans ? 'Showing orphan templates' : 'Some published templates are hidden'}
           >
             <p>
-              {orphanCount} metaobject{orphanCount === 1 ? '' : 's'} exist in Shopify without a corresponding local
-              template record.
-              {showOrphans
-                ? ' You can restore them into the local DB or delete them in Shopify.'
-                : ' They were hidden to avoid 404 errors.'}
+              Some published templates are hidden. {orphanCount} orphan{orphanCount === 1 ? '' : 's'} exist in Shopify
+              without a local record.
             </p>
             <div style={{ marginTop: 8 }}>
-              <Button
-                onClick={() => {
-                  const next = new URL(window.location.href)
-                  if (showOrphans) next.searchParams.delete('showOrphans')
-                  else next.searchParams.set('showOrphans', '1')
-                  window.location.assign(next.toString())
-                }}
-                variant="secondary"
-              >
-                {showOrphans ? 'Hide orphans' : 'Show orphans'}
-              </Button>
+              <InlineStack gap="200">
+                <Button
+                  onClick={() => {
+                    const next = new URL(window.location.href)
+                    if (showOrphans) next.searchParams.delete('view')
+                    else next.searchParams.set('view', 'orphans')
+                    // Back-compat: strip legacy flag
+                    next.searchParams.delete('showOrphans')
+                    window.location.assign(next.toString())
+                  }}
+                  variant="secondary"
+                >
+                  {showOrphans ? 'Hide orphans' : 'Show orphans'}
+                </Button>
+                <Button
+                  onClick={() => {
+                    const fd = new FormData()
+                    fd.append('_action', 'syncAllOrphans')
+                    fetcher.submit(fd, { method: 'post', action: '/resources/spec-templates' })
+                  }}
+                >
+                  Sync orphans
+                </Button>
+              </InlineStack>
             </div>
           </Banner>
         ) : null}
@@ -305,6 +410,9 @@ export default function TemplatesIndex() {
           headings={[
             { title: 'Template' },
             { title: 'Fields' },
+            // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+            { title: 'Cost' },
+            // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
             { title: 'Updated' },
             { title: 'Status' },
             { title: 'Actions' },
@@ -337,6 +445,15 @@ export default function TemplatesIndex() {
               <IndexTable.Cell>
                 <Text as="span">{item.fieldsCount}</Text>
               </IndexTable.Cell>
+              {/* <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 --> */}
+              <IndexTable.Cell>
+                <Text as="span" tone="subdued">
+                  {typeof item.cost === 'number'
+                    ? new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(item.cost)
+                    : '—'}
+                </Text>
+              </IndexTable.Cell>
+              {/* <!-- END RBP GENERATED: importer-templates-orphans-v1 --> */}
               <IndexTable.Cell>
                 <Text as="span">{new Date(item.updatedAt).toISOString().replace('T', ' ').replace(/Z$/, '')}</Text>
               </IndexTable.Cell>

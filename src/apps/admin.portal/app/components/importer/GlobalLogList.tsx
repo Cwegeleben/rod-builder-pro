@@ -3,7 +3,7 @@ type LogRow = {
   at: string
   templateId: string
   runId: string
-  type: 'discovery' | 'scrape' | 'drafts' | 'approve' | 'abort' | 'schedule' | 'error'
+  type: 'discovery' | 'scrape' | 'drafts' | 'approve' | 'abort' | 'schedule' | 'recrawl' | 'error'
   payload?: unknown
 }
 
@@ -23,6 +23,8 @@ export default function GlobalLogList({ items = [] }: { items?: LogRow[] }) {
         return <span className={`${base} bg-red-100 text-red-700`}>abort</span>
       case 'schedule':
         return <span className={`${base} bg-purple-100 text-purple-700`}>schedule</span>
+      case 'recrawl':
+        return <span className={`${base} bg-lime-100 text-lime-700`}>recrawl</span>
       case 'error':
         return <span className={`${base} bg-rose-200 text-rose-800`}>error</span>
     }
@@ -52,6 +54,12 @@ export default function GlobalLogList({ items = [] }: { items?: LogRow[] }) {
                 <span className="text-slate-500">run</span>
                 <span>{r.runId}</span>
                 {nextRunSnippet ? <span className="ml-2 text-slate-600">next: {nextRunSnippet}</span> : null}
+                {(() => {
+                  if (r.type !== 'recrawl') return null
+                  const payload = r.payload as { failed?: unknown[] } | undefined
+                  const failCount = Array.isArray(payload?.failed) ? payload!.failed!.length : 0
+                  return failCount > 0 ? <span className="ml-2 text-amber-700">fails: {failCount}</span> : null
+                })()}
               </li>
             )
           })}

@@ -15,9 +15,19 @@ import {
 import { authenticate } from '../shopify.server'
 // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
 import { listTemplates, type ImporterTemplate } from '../loaders/templates.server'
+import { listTemplatesSummary } from '../models/specTemplate.server'
+import { listScrapers, type Scraper } from '../services/importer/scrapers.server'
+import { MatchFieldsPanel } from '../components/imports/MatchFieldsPanel'
+import { saveRunMappingSnapshot, loadTemplateAliases } from '../models/importerMappingSnapshot.server'
 // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 
-type LoaderData = { options: RunOptions; runId: string; templates: ImporterTemplate[] }
+type LoaderData = {
+  options: RunOptions
+  runId: string
+  templates: ImporterTemplate[]
+  dbTemplates: Array<{ id: string; name: string }>
+  scrapers: Scraper[]
+}
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireHqShopOr404(request)
@@ -25,7 +35,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const options = await loadRunOptions(runId)
   // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
   const templates = await listTemplates()
-  return json<LoaderData>({ options, runId, templates })
+  const dbTplSumm = await listTemplatesSummary()
+  const dbTemplates = dbTplSumm.map(t => ({ id: t.id, name: t.name }))
+  const scrapers = await listScrapers()
+  return json<LoaderData>({ options, runId, templates, dbTemplates, scrapers })
   // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 }
 
@@ -42,6 +55,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (intent === 'save') {
     const options = parseRunOptions(fd)
     const { admin } = await authenticate.admin(request)
+    if (options.variantTemplateId) {
+      try {
+        const aliases = await loadTemplateAliases(options.variantTemplateId)
+        await saveRunMappingSnapshot({
+          runId,
+          templateId: options.variantTemplateId,
+          scraperId: options.scraperId || 'jsonld-basic',
+          aliases,
+          axes: { o1: undefined, o2: undefined, o3: undefined },
+        })
+      } catch {
+        // ignore snapshot errors on save
+      }
+    }
     const id = await startImportFromOptions(options, runId, admin)
     return redirect(`/app/admin/import/runs/${id}`)
   }
@@ -49,7 +76,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function EditImportRunPage() {
-  const { options: initial, runId, templates } = useLoaderData<typeof loader>() as LoaderData
+  const { options: initial, runId, templates, dbTemplates, scrapers } = useLoaderData<typeof loader>() as LoaderData
   const [includeSeeds, setIncludeSeeds] = useState(initial.includeSeeds)
   const [manualUrls, setManualUrls] = useState((initial.manualUrls || []).join('\n'))
   const [skipSuccessful, setSkipSuccessful] = useState(initial.skipSuccessful)
@@ -63,6 +90,9 @@ export default function EditImportRunPage() {
       if (saved) setTemplateKey(saved)
     }
   }, [])
+  // Mapper + scraper selections (v2)
+  const [variantTemplateId, setVariantTemplateId] = useState<string | undefined>(initial.variantTemplateId)
+  const [scraperId, setScraperId] = useState<string>(initial.scraperId || 'table-grid-v1')
   // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
   const previewFetcher = useFetcher<{
     results: Array<{
@@ -73,6 +103,22 @@ export default function EditImportRunPage() {
       ok: boolean
       error?: string
     }>
+  }>()
+  // Mapping preview fetcher (new API)
+  const mapFetcher = useFetcher<{
+    items: Array<{
+      title?: string | null
+      sku?: string | null
+      price?: number | null
+      availability?: string | null
+      options?: { o1?: string | null; o2?: string | null; o3?: string | null }
+      attributes?: Record<string, string | string[]>
+      fieldValues?: Record<string, string | number | null>
+      unmatched?: Array<{ label: string; sample: string | null }>
+      url: string
+    }>
+    templateFields?: Array<{ id: string; label: string; required: boolean }>
+    errors?: Array<{ url: string; message: string }>
   }>()
   const saveFetcher = useFetcher<{ ok?: boolean }>()
 
@@ -99,6 +145,24 @@ export default function EditImportRunPage() {
                 Templates define how fields are extracted (JSON-LD → DOM → slug → hash)
               </Text>
               {/* <!-- END RBP GENERATED: importer-templates-integration-v2-1 --> */}
+              {/* Mapping Template (DB SpecTemplate) */}
+              <Select
+                label="Mapping Template (DB)"
+                placeholder="Select a mapping template"
+                options={[
+                  { label: '— Select —', value: '' },
+                  ...dbTemplates.map(t => ({ label: t.name, value: t.id })),
+                ]}
+                value={variantTemplateId || ''}
+                onChange={v => setVariantTemplateId(v || undefined)}
+              />
+              {/* Scraper Strategy */}
+              <Select
+                label="Scraper Strategy"
+                options={scrapers.map(s => ({ label: s.name, value: s.id }))}
+                value={scraperId}
+                onChange={v => setScraperId(v || 'table-grid-v1')}
+              />
               <Checkbox
                 label="Include saved seeds"
                 checked={includeSeeds}
@@ -137,6 +201,26 @@ export default function EditImportRunPage() {
                   }}
                 >
                   Preview Scrape
+                </Button>
+                {/* New: Preview Mapping (v2) using zero-config mapper */}
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    const urls = manualUrls
+                      .split(/\r?\n|,/) // CSV or newline
+                      .map(s => s.trim())
+                      .filter(Boolean)
+                    const form = new FormData()
+                    form.set('urls', JSON.stringify(urls))
+                    form.set('scraperId', scraperId)
+                    if (variantTemplateId) form.set('variantTemplateId', variantTemplateId)
+                    if (includeSeeds) form.set('includeDiscovered', 'on')
+                    form.set('skipSuccessful', skipSuccessful ? 'on' : '')
+                    form.set('runId', runId)
+                    mapFetcher.submit(form, { method: 'post', action: '/api/importer/preview' })
+                  }}
+                >
+                  Preview Mapping (v2)
                 </Button>
                 {/* <!-- END RBP GENERATED: scrape-template-wiring-v2 --> */}
                 <saveFetcher.Form method="post">
@@ -205,6 +289,71 @@ export default function EditImportRunPage() {
                       </li>
                     ))}
                   </ul>
+                )}
+              </div>
+              {/* Mapping Preview (v2) results */}
+              <div className="rounded-md border border-indigo-200 p-3 text-sm">
+                {!mapFetcher.data?.items?.length ? (
+                  <Text as="p" tone="subdued">
+                    Use Preview Mapping (v2) to see auto-mapped fields and unmatched labels.
+                  </Text>
+                ) : (
+                  <div className="space-y-3">
+                    <Text as="h3" variant="headingSm">
+                      Mapped Preview
+                    </Text>
+                    <table className="min-w-full border text-xs">
+                      <thead>
+                        <tr>
+                          <th className="border px-1">Title</th>
+                          <th className="border px-1">SKU</th>
+                          <th className="border px-1">Price</th>
+                          <th className="border px-1">Length</th>
+                          <th className="border px-1">Power</th>
+                          <th className="border px-1">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mapFetcher.data.items.slice(0, 10).map((it, idx) => (
+                          <tr key={`${it.url}-${idx}`} className="border-t">
+                            <td className="border-r px-1">{it.title || '—'}</td>
+                            <td className="border-r px-1">{it.sku || '—'}</td>
+                            <td className="border-r px-1">{it.price ?? '—'}</td>
+                            <td className="border-r px-1">{it.options?.o1 || '—'}</td>
+                            <td className="border-r px-1">{it.options?.o2 || '—'}</td>
+                            <td className="px-1">{it.options?.o3 || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {/* Match Fields Panel for unmatched labels (first item sample) */}
+                    {(() => {
+                      const first = mapFetcher.data.items[0]
+                      const tmps = mapFetcher.data.templateFields || []
+                      if (!first?.unmatched?.length || !tmps.length) return null
+                      return (
+                        <MatchFieldsPanel
+                          unmatched={first.unmatched}
+                          templateFields={tmps.map(f => ({ key: f.id, label: f.label, required: f.required }))}
+                          onApply={({ label, fieldKey, remember }) => {
+                            // Re-submit with manualMappings + rememberAliases
+                            const urls = manualUrls
+                              .split(/\r?\n|,/) // CSV or newline
+                              .map(s => s.trim())
+                              .filter(Boolean)
+                            const form = new FormData()
+                            form.set('urls', JSON.stringify(urls))
+                            form.set('scraperId', scraperId)
+                            if (variantTemplateId) form.set('variantTemplateId', variantTemplateId)
+                            form.set('manualMappings', JSON.stringify([{ label, fieldKey }]))
+                            if (remember) form.set('rememberAliases', 'on')
+                            form.set('runId', runId)
+                            mapFetcher.submit(form, { method: 'post', action: '/api/importer/preview' })
+                          }}
+                        />
+                      )
+                    })()}
+                  </div>
                 )}
               </div>
             </BlockStack>

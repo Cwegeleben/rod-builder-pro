@@ -10,6 +10,7 @@ type Row = {
   state: ImportState
   runId?: string
   nextRunAt?: string
+  hadFailures?: boolean
 }
 
 // NOTE: For Logic Pass 1 we simulate a single row pulled from adapters
@@ -22,7 +23,14 @@ export default function ImportList() {
       const tpl = 'DEMO-TEMPLATE'
       const [cfg, sched] = await Promise.all([importerAdapters.getImportConfig(tpl), importerAdapters.getSchedule(tpl)])
       setRows([
-        { templateId: tpl, name: 'Demo Import', state: cfg.state, runId: cfg.runId, nextRunAt: sched.nextRunAt },
+        {
+          templateId: tpl,
+          name: 'Demo Import',
+          state: cfg.state,
+          runId: cfg.runId,
+          nextRunAt: sched.nextRunAt,
+          hadFailures: (cfg as { hadFailures?: boolean }).hadFailures,
+        },
       ])
     })()
   }, [])
@@ -79,6 +87,31 @@ export default function ImportList() {
     )
   }
 
+  async function doRunNow(r: Row) {
+    setBusy(r.templateId)
+    try {
+      await importerActions.recrawlRunNow(r.templateId)
+    } finally {
+      setBusy(null)
+    }
+    const [cfg, sched] = await Promise.all([
+      importerAdapters.getImportConfig(r.templateId),
+      importerAdapters.getSchedule(r.templateId),
+    ])
+    setRows(cur =>
+      cur.map(x =>
+        x.templateId === r.templateId
+          ? {
+              ...x,
+              state: cfg.state,
+              hadFailures: (cfg as { hadFailures?: boolean }).hadFailures,
+              nextRunAt: sched.nextRunAt,
+            }
+          : x,
+      ),
+    )
+  }
+
   return (
     <div className="space-y-2">
       {rows.map(r => {
@@ -116,9 +149,17 @@ export default function ImportList() {
                 <a href={`/app/imports/${r.templateId}/schedule`} className="rounded border px-2 py-1">
                   Schedule
                 </a>
+                <button disabled={isBusy} onClick={() => doRunNow(r)} className="rounded border px-2 py-1">
+                  Run Now
+                </button>
                 <button disabled={isBusy} onClick={() => doReset(r)} className="rounded border px-2 py-1">
                   Delete/Reset
                 </button>
+                {r.hadFailures ? (
+                  <span className="ml-2 text-amber-700" title="Last run had failures">
+                    ⚠︎
+                  </span>
+                ) : null}
               </>
             )}
             {r.state === ImportState.SCHEDULED && (
@@ -126,9 +167,17 @@ export default function ImportList() {
                 <a href={`/app/imports/${r.templateId}/schedule`} className="rounded border px-2 py-1">
                   Schedule
                 </a>
+                <button disabled={isBusy} onClick={() => doRunNow(r)} className="rounded border px-2 py-1">
+                  Run Now
+                </button>
                 <div className="text-xs text-slate-600">
                   Next run: {r.nextRunAt ? new Date(r.nextRunAt).toLocaleString?.() || r.nextRunAt : '—'}
                 </div>
+                {r.hadFailures ? (
+                  <span className="ml-2 text-amber-700" title="Last run had failures">
+                    ⚠︎
+                  </span>
+                ) : null}
               </>
             )}
             {r.state !== ImportState.APPROVED && r.state !== ImportState.SCHEDULED && (

@@ -27,6 +27,7 @@ import { ReRunOptionsModal } from '../components/imports/ReRunOptionsModal'
 import { listTemplates } from '../loaders/templates.server'
 import type { ImporterTemplate } from '../loaders/templates.server'
 // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
+import { shouldRunAutoSync, markAutoSyncRun, syncOrphanTemplates } from '../models/orphanSync.server'
 
 type RunRow = {
   id: string
@@ -122,6 +123,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   })
 
   // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
+  // Best-effort auto-sync of orphan templates to keep template pickers fresh
+  try {
+    if (shouldRunAutoSync(shop)) {
+      const { admin } = await authenticate.admin(request)
+      await syncOrphanTemplates(
+        admin as unknown as {
+          graphql: (q: string, init?: { variables?: Record<string, unknown> }) => Promise<Response>
+        },
+      )
+      markAutoSyncRun(shop)
+    }
+  } catch {
+    // ignore non-critical auto-sync failures
+  }
   const templates = await listTemplates()
   return json({
     runs: rows,

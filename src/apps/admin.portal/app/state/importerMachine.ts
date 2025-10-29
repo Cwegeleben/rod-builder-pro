@@ -36,6 +36,7 @@ type StoredConfig = {
   productUrls?: string[]
   counts?: ImportCounts
   schedule?: ScheduleConfig
+  hadFailures?: boolean
 }
 
 const _configs = new Map<TemplateId, StoredConfig>()
@@ -45,7 +46,7 @@ const _logs: Array<{
   at: string
   templateId: string
   runId: string
-  type: 'discovery' | 'scrape' | 'drafts' | 'approve' | 'abort' | 'schedule' | 'error'
+  type: 'discovery' | 'scrape' | 'drafts' | 'approve' | 'abort' | 'schedule' | 'recrawl' | 'error'
   payload: unknown
 }> = []
 
@@ -84,6 +85,19 @@ export const importerAdapters = {
   saveSchedule: async (templateId: TemplateId, schedule: ScheduleConfig) => {
     const cfg = await importerAdapters.getImportConfig(templateId)
     await importerAdapters.saveImportConfig(templateId, { ...cfg, schedule })
+  },
+
+  // Recrawl helpers
+  updateExistingProducts: async (_templateId: string, items: unknown[]) => {
+    // simulate update counts; return { updatedIds, skippedIds, failed }
+    const updatedIds = items.map((_: unknown, i: number) => `upd_${i + 1}`)
+    const skippedIds: string[] = []
+    const failed: Array<{ sourceUrl?: string; error: string }> = []
+    return { updatedIds, skippedIds, failed }
+  },
+  getFlags: async (_templateId: string) => {
+    void _templateId
+    return { createDraftsOnRecrawl: false as boolean }
   },
 
   // helper: compute next run time based on now, freq and HH:mm "at"
@@ -174,7 +188,7 @@ export const importerAdapters = {
   logEvent: async (
     templateId: TemplateId,
     runId: string,
-    type: 'discovery' | 'scrape' | 'drafts' | 'approve' | 'abort' | 'schedule' | 'error',
+    type: 'discovery' | 'scrape' | 'drafts' | 'approve' | 'abort' | 'schedule' | 'recrawl' | 'error',
     payload: unknown,
   ) => {
     _logs.push({ at: new Date().toISOString(), templateId, runId, type, payload })
@@ -342,6 +356,50 @@ export const importerActions = {
       at: merged.at,
       nextRunAt: merged.nextRunAt,
     })
+  },
+
+  // Recrawl now: update in-place by default, or create drafts if flagged
+  recrawlRunNow: async (templateId: string) => {
+    const cfg = await importerAdapters.getImportConfig(templateId)
+    if (cfg.state !== ImportState.APPROVED && cfg.state !== ImportState.SCHEDULED) return
+    const runId = importerAdapters.newRunId()
+    try {
+      const urls = await importerAdapters.discoverProductUrls(templateId)
+      const scrape = await importerAdapters.scrapeProducts(templateId, urls)
+      const flags = await importerAdapters.getFlags(templateId)
+      let result: { updatedIds?: string[]; skippedIds?: string[]; failed?: unknown[]; draftIds?: string[] }
+      if (flags.createDraftsOnRecrawl) {
+        const drafts = await importerAdapters.createDraftProducts(
+          templateId,
+          runId,
+          (scrape.successes as Array<{ data: unknown }>).map(s => s.data),
+        )
+        result = { updatedIds: [], skippedIds: [], failed: scrape.failures, draftIds: drafts.productIds }
+        await importerAdapters.logEvent(templateId, runId, 'drafts', { count: drafts.productIds.length })
+      } else {
+        result = await importerAdapters.updateExistingProducts(
+          templateId,
+          (scrape.successes as Array<{ data: unknown }>).map(s => s.data),
+        )
+      }
+      await importerAdapters.logEvent(templateId, runId, 'recrawl', result)
+      const hadFailures = (result.failed?.length || 0) > 0
+      await importerAdapters.saveImportConfig(templateId, {
+        ...cfg,
+        counts: {
+          added: 0,
+          updated: result.updatedIds?.length || 0,
+          failed: result.failed?.length || 0,
+          skipped: result.skippedIds?.length || 0,
+        },
+        lastRunAt: new Date().toISOString(),
+        state: hadFailures ? ImportState.SCHEDULED : cfg.state,
+        hadFailures,
+      } as Partial<StoredConfig> as StoredConfig)
+    } catch (err) {
+      await importerAdapters.logEvent(templateId, runId, 'error', { message: (err as Error)?.message || String(err) })
+      await importerAdapters.saveImportConfig(templateId, { ...cfg, state: ImportState.FAILED, hadFailures: true })
+    }
   },
 }
 // <!-- END RBP GENERATED: importer-v2-3 -->

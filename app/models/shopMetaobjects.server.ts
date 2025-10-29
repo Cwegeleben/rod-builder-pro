@@ -155,12 +155,39 @@ export async function upsertTemplatesToMetaobjects(
   }
   const nowIso = new Date().toISOString()
   for (const t of templates) {
+    // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+    // Read template-level product image URL lazily (not part of TemplateOut to avoid coupling)
+    let productImageUrl: string | null = null
+    let supplierAvailability: string | null = null
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const row = (await (prisma as any).specTemplate.findUnique({
+        where: { id: t.id },
+        select: { productImageUrl: true, supplierAvailability: true },
+      })) as {
+        productImageUrl?: string | null
+        supplierAvailability?: string | null
+      }
+      productImageUrl = row?.productImageUrl ?? null
+      supplierAvailability = row?.supplierAvailability ?? null
+    } catch {
+      productImageUrl = null
+      supplierAvailability = null
+    }
+    // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
     const desired = [
       { key: 'template_id', value: t.id },
       { key: 'name', value: t.name },
       { key: 'fields_json', value: JSON.stringify(t.fields) },
       { key: 'version', value: '1' },
       { key: 'updated_at', value: nowIso },
+      // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+      // Publish Product Image URL when present so importer can read default
+      // Note: this is a separate field from fields_json core mappings
+      ...(productImageUrl ? [{ key: 'product_image_url', value: productImageUrl }] : []),
+      // Publish Supplier Availability (metadata) when present
+      ...(supplierAvailability ? [{ key: 'supplier_availability', value: supplierAvailability }] : []),
+      // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
     ] as Array<{ key: string; value: string }>
     const fields = desired.filter(f => definedKeys.has(f.key))
 
@@ -199,6 +226,10 @@ async function ensureMetaobjectDefinition(admin: AdminApi): Promise<Set<string>>
     throw new Error(defData.errors.map(e => e.message).join('; '))
   }
   if (defData?.data?.metaobjectDefinitionByType) {
+    // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
+    // Respect existing keys and filter when upserting. If the new key 'primary_variant_cost' is missing,
+    // we continue without mutating definitions (scope-safe); backfill/util can add it when scopes allow.
+    // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
     return new Set(defData.data.metaobjectDefinitionByType.fieldDefinitions.map(f => f.key))
   }
 
@@ -215,6 +246,8 @@ async function ensureMetaobjectDefinition(admin: AdminApi): Promise<Set<string>>
             { name: "Fields JSON", key: "fields_json", type: "multi_line_text_field" },
             { name: "Version", key: "version", type: "single_line_text_field" },
             { name: "Updated At", key: "updated_at", type: "single_line_text_field" }
+            ,{ name: "Product Image URL", key: "product_image_url", type: "single_line_text_field" }
+            ,{ name: "Supplier Availability", key: "supplier_availability", type: "multi_line_text_field" }
           ]
         }
       ) {
@@ -236,7 +269,15 @@ async function ensureMetaobjectDefinition(admin: AdminApi): Promise<Set<string>>
       `metaobjectDefinitionCreate failed: ${errs.map(e => e.message).join('; ')}. Ensure app has write_metaobject_definitions scope and shop has re-authed.`,
     )
   // Return the intended set since we just created them
-  return new Set(['template_id', 'name', 'fields_json', 'version', 'updated_at'])
+  return new Set([
+    'template_id',
+    'name',
+    'fields_json',
+    'version',
+    'updated_at',
+    'product_image_url',
+    'supplier_availability',
+  ])
 }
 
 export async function assignTemplateRefToProduct(
