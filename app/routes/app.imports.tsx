@@ -5,8 +5,10 @@
 // App Bridge/embedded context intact.
 
 import ImportsHome from '../../src/apps/admin.portal/app/routes/app.imports._index'
+import { useLocation } from '@remix-run/react'
 
 export default function ImportsIndex() {
-  return <ImportsHome />
+  const location = useLocation()
+  return <ImportsHome search={location.search} />
 }
 // <!-- END RBP GENERATED: importer-v2-3 -->

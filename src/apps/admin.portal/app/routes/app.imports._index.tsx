@@ -3,9 +3,9 @@ import ImportList from '../components/importer/ImportList'
 import GlobalLogList from '../components/importer/GlobalLogList'
 import { useEffect, useState } from 'react'
 
-export default function ImportsHome() {
+export default function ImportsHome({ search: initialSearch }: { search?: string }) {
   // Preserve Shopify embedded query params (embedded, host, hmac, etc.)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(initialSearch || '')
   useEffect(() => {
     try {
       setSearch(window.location.search || '')
