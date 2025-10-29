@@ -46,7 +46,8 @@
     "importer:diff": "pnpm exec tsx packages/importer/src/cli/diff-smoke.ts",
     "importer:apply": "pnpm exec tsx packages/importer/src/cli/apply-run.ts",
     "importer:apply:gw": "pnpm exec tsx packages/importer/src/cli/apply-run-via-gateway.ts",
-    "importer:refresh:price": "pnpm exec tsx packages/importer/src/cli/run-price-avail.ts"
+    "importer:refresh:price": "pnpm exec tsx packages/importer/src/cli/run-price-avail.ts",
+    "preflight:importer-v2-3": "node scripts/preflight/importer-v2-3.js"
   },
   "type": "module",
   "engines": {
