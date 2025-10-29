@@ -57,15 +57,18 @@ export const headers: HeadersFunction = headersArgs => {
 
 // Ensures only a single App Bridge NavMenu exists at a time.
 function SafeNavMenu({ children }: PropsWithChildren) {
-  const [render, setRender] = useState(true)
+  // Start with render=false to avoid SSR/CSR hydration mismatches due to App Bridge DOM mutations.
+  const [render, setRender] = useState(false)
   useEffect(() => {
     try {
       const w = window as unknown as { __RBP_NAV_MENU_MOUNTED?: boolean }
-      if (w.__RBP_NAV_MENU_MOUNTED) {
+      if (!w.__RBP_NAV_MENU_MOUNTED) {
+        w.__RBP_NAV_MENU_MOUNTED = true
+        setRender(true)
+      } else {
         setRender(false)
         return
       }
-      w.__RBP_NAV_MENU_MOUNTED = true
       return () => {
         w.__RBP_NAV_MENU_MOUNTED = false
       }
