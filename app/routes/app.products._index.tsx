@@ -201,12 +201,12 @@ export default function ProductsIndex() {
             Products
           </Text>
           <InlineStack gap="200">
-            {/* Sole importer entry: Import button links to Import Runs */}
+            {/* Sole importer entry: Import button links to new Imports hub */}
             {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
-            {/* Direct link to Import Runs index from Products; preserve current params */}
+            {/* Direct link to Imports hub from Products; preserve current params */}
             {hq && (
               // <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
-              <Button url={`/app/admin/import/runs${location.search}`} data-testid={TEST_IDS.btnProductsImport}>
+              <Button url={`/app/imports${location.search}`} data-testid={TEST_IDS.btnProductsImport}>
                 Import
               </Button>
               // <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
@@ -300,11 +300,11 @@ export default function ProductsIndex() {
               </Text>
               <InlineStack gap="200">
                 {hq && (
-                  // Direct importer entry in empty state
+                  // Direct importer entry in empty state → Imports hub
                   <Button
                     variant="primary"
                     disabled={false}
-                    url={`/app/admin/import/runs${location.search}`}
+                    url={`/app/imports${location.search}`}
                     id="btn-import-products-empty"
                     data-testid={TEST_IDS.btnProductsImport}
                   >
