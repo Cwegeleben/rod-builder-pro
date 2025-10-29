@@ -1,18 +1,12 @@
-// <!-- BEGIN RBP GENERATED: admin-hq-importer-ux-v2 -->
-import type { LoaderFunctionArgs } from '@remix-run/node'
-import { redirect } from '@remix-run/node'
+// <!-- BEGIN RBP GENERATED: importer-v2-3 -->
+// Flip /app/imports to render the new Imports hub UI (admin portal),
+// instead of redirecting to legacy /app/admin/import/runs.
+// Note: This composes the new UI directly to avoid route churn and keeps
+// App Bridge/embedded context intact.
 
-// Import Runs index alias route
-// Keeps URLs relative to preserve shop/host/embedded params
+import ImportsHome from '../../src/apps/admin.portal/app/routes/app.imports._index'
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const url = new URL(request.url)
-  const search = url.search
-  // Redirect to existing runs index under admin/import
-  return redirect(`/app/admin/import/runs${search}`)
+export default function ImportsIndex() {
+  return <ImportsHome />
 }
-
-export default function ImportsIndexAlias() {
-  return null
-}
-// <!-- END RBP GENERATED: admin-hq-importer-ux-v2 -->
+// <!-- END RBP GENERATED: importer-v2-3 -->

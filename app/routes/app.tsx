@@ -32,7 +32,10 @@ export default function App() {
           Dashboard
         </Link>
         <Link to="products">Products</Link>
-        {/** Import links intentionally omitted from the global admin nav. Entry point is Products → Import button. */}
+        {/** Import links updated for importer-v2-3 */}
+        {/* <!-- BEGIN RBP GENERATED: importer-v2-3 --> */}
+        <Link to="imports">Imports</Link>
+        {/* <!-- END RBP GENERATED: importer-v2-3 --> */}
       </SafeNavMenu>
       {/* END RBP GENERATED: admin-hq-importer-ux-v2 */}
       <AdminLayout>
