@@ -330,3 +330,33 @@ model SupplierCookieJar {
   updatedAt    DateTime @updatedAt
 }
 // <!-- END RBP GENERATED: importer-price-avail-job-v1 -->
+
+// <!-- BEGIN RBP GENERATED: importer-v2-3 -->
+model ImportTemplate {
+  id            String   @id
+  name          String
+  // importer v2.3 config/state blob (template-first 1:1)
+  importConfig  Json     @default("{}")
+  // quick status for Home row
+  state         String   @default("NEEDS_SETTINGS")
+  lastRunAt     DateTime?
+  hadFailures   Boolean  @default(false)
+
+  // logs relation
+  logs          ImportLog[]
+
+  @@index([state])
+}
+
+model ImportLog {
+  id          String   @id @default(cuid())
+  templateId  String
+  runId       String
+  type        String
+  payload     Json
+  at          DateTime @default(now())
+
+  template    ImportTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  @@index([templateId, runId, type])
+}
+// <!-- END RBP GENERATED: importer-v2-3 -->

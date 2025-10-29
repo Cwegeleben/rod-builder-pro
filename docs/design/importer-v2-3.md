@@ -155,3 +155,13 @@ Schedule Page → app/routes/app.imports.$templateId.schedule.tsx
    All internal links are relative.
    State machine constants are present.
    A “Design-Lock” header exists in /docs/design/importer-v2-3.md.
+
+<!-- BEGIN RBP GENERATED: importer-v2-3 -->
+
+### Migration note
+
+Run:
+
+- `pnpm prisma generate`
+- `pnpm prisma migrate dev --name importer_v2_3`
+<!-- END RBP GENERATED: importer-v2-3 -->
