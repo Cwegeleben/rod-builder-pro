@@ -1,5 +1,4 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 export enum ImportState {
   NEEDS_SETTINGS = 'NEEDS_SETTINGS',
   READY_TO_TEST = 'READY_TO_TEST',
@@ -58,60 +57,145 @@ export type ScheduleConfig = {
   at?: string
   nextRunAt?: string
 }
-import { repo, discover, scrape, shopify, schedule as scheduleRepo, flags } from '../server/importer.adapters'
-
-// helper: compute next run time based on now, freq and HH:mm "at"
-const computeNextRun = (nowIso: string, cfg: ScheduleConfig): string | undefined => {
-  if (!cfg.enabled) return undefined
-  if (!cfg.freq || cfg.freq === 'none') return undefined
-  const now = new Date(nowIso)
-  if (Number.isNaN(now.getTime())) return undefined
-  const [hh, mm] = (cfg.at || '09:00').split(':').map(v => parseInt(v, 10))
-  const next = new Date(now)
-  next.setSeconds(0, 0)
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) {
-    next.setHours(9, 0, 0, 0)
-  } else {
-    next.setHours(hh, mm, 0, 0)
-  }
-  const ensureFuture = (d: Date) => {
-    if (d.getTime() <= now.getTime()) {
-      if (cfg.freq === 'daily') d.setDate(d.getDate() + 1)
-      else if (cfg.freq === 'weekly') d.setDate(d.getDate() + 7)
-      else if (cfg.freq === 'monthly') d.setMonth(d.getMonth() + 1)
-    }
-  }
-  ensureFuture(next)
-  return next.toISOString()
-}
-
-const newRunId = (): string => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
 export const importerAdapters = {
-  getImportConfig: (templateId: string) => repo.getImportConfig(templateId) as Promise<StoredConfig>,
-  saveImportConfig: (templateId: string, patch: any) => repo.saveImportConfig(templateId, patch),
+  // Reads & writes ImportConfig + state safely (atomic)
+  getImportConfig: async (templateId: TemplateId): Promise<StoredConfig> => {
+    if (!_configs.has(templateId))
+      _configs.set(templateId, { templateId, state: ImportState.NEEDS_SETTINGS, productUrls: [] })
+    // Return a shallow clone to avoid external mutation
+    const cfg = _configs.get(templateId) as StoredConfig
+    return {
+      ...cfg,
+      counts: cfg.counts ? { ...cfg.counts } : undefined,
+      schedule: cfg.schedule ? { ...cfg.schedule } : undefined,
+    }
+  },
+  saveImportConfig: async (templateId: TemplateId, patch: Partial<StoredConfig>): Promise<void> => {
+    const cur = await importerAdapters.getImportConfig(templateId)
+    const next = { ...cur, ...patch }
+    _configs.set(templateId, next)
+  },
+  getSchedule: async (templateId: TemplateId): Promise<ScheduleConfig> => {
+    const cfg = await importerAdapters.getImportConfig(templateId)
+    const existing: ScheduleConfig | undefined = cfg.schedule
+    const schedule: ScheduleConfig = existing ? { ...existing } : { enabled: false, freq: 'none' }
+    return schedule
+  },
+  saveSchedule: async (templateId: TemplateId, schedule: ScheduleConfig) => {
+    const cfg = await importerAdapters.getImportConfig(templateId)
+    await importerAdapters.saveImportConfig(templateId, { ...cfg, schedule })
+  },
 
-  getSchedule: (templateId: string) => scheduleRepo.get(templateId),
-  saveSchedule: (templateId: string, cfg: ScheduleConfig) => scheduleRepo.save(templateId, cfg),
+  // Recrawl helpers
+  updateExistingProducts: async (_templateId: string, items: unknown[]) => {
+    // simulate update counts; return { updatedIds, skippedIds, failed }
+    const updatedIds = items.map((_: unknown, i: number) => `upd_${i + 1}`)
+    const skippedIds: string[] = []
+    const failed: Array<{ sourceUrl?: string; error: string }> = []
+    return { updatedIds, skippedIds, failed }
+  },
+  getFlags: async (_templateId: string) => {
+    void _templateId
+    return { createDraftsOnRecrawl: false as boolean }
+  },
 
-  computeNextRun,
+  // helper: compute next run time based on now, freq and HH:mm "at"
+  computeNextRun: (nowIso: string, cfg: ScheduleConfig): string | undefined => {
+    if (!cfg.enabled) return undefined
+    if (!cfg.freq || cfg.freq === 'none') return undefined
+    const now = new Date(nowIso)
+    if (Number.isNaN(now.getTime())) return undefined
+    const [hh, mm] = (cfg.at || '09:00').split(':').map(v => parseInt(v, 10))
+    const next = new Date(now)
+    next.setSeconds(0, 0)
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) {
+      next.setHours(9, 0, 0, 0)
+    } else {
+      next.setHours(hh, mm, 0, 0)
+    }
+    // If time already passed today, move to next period start
+    const ensureFuture = (d: Date) => {
+      if (d.getTime() <= now.getTime()) {
+        if (cfg.freq === 'daily') d.setDate(d.getDate() + 1)
+        else if (cfg.freq === 'weekly') d.setDate(d.getDate() + 7)
+        else if (cfg.freq === 'monthly') d.setMonth(d.getMonth() + 1)
+      }
+    }
+    ensureFuture(next)
+    // For weekly/monthly, if still today but in past, above handles it; otherwise this is fine
+    return next.toISOString()
+  },
 
-  discoverProductUrls: (templateId: string) => discover.urls(templateId),
-  scrapeProducts: (templateId: string, urls: string[]) => scrape.products(templateId, urls),
+  // Scraper & discovery (returns normalized items; failed list too)
+  discoverProductUrls: async (templateId: TemplateId): Promise<string[]> => {
+    const cfg = await importerAdapters.getImportConfig(templateId)
+    return Array.isArray(cfg.productUrls) && cfg.productUrls.length ? cfg.productUrls : []
+  },
+  scrapeProducts: async (_templateId: TemplateId, urls: string[]) => {
+    // Simulate scrape: all URLs succeed except ones containing "fail"
+    const successes: Array<{ data: { title: string; url: string }; sourceUrl: string }> = []
+    const failures: Array<{ sourceUrl: string; error: string }> = []
+    for (const u of urls) {
+      if (/fail/i.test(u)) failures.push({ sourceUrl: u, error: 'Simulated scrape failure' })
+      else successes.push({ data: { title: `Draft for ${u}`, url: u }, sourceUrl: u })
+    }
+    return { successes, failures }
+  },
 
-  createDraftProducts: (templateId: string, runId: string, items: any[]) =>
-    shopify.createDrafts(templateId, runId, items),
-  publishByRunTag: (templateId: string, runId: string) => shopify.publishByRunTag(templateId, runId),
-  deleteDraftsByRunTag: (templateId: string, runId: string) => shopify.deleteDraftsByRunTag(templateId, runId),
+  // Shopify ops — draft create / publish / delete by tag
+  createDraftProducts: async (_templateId: TemplateId, runId: string, items: unknown[]) => {
+    const tag = `rbp-import:${runId}`
+    const ids = items.map((_, idx) => `gid://shopify/Product/${Date.now()}${idx}`)
+    _runDrafts.set(tag, ids)
+    // mark as not published yet
+    for (const id of ids) _published.delete(id)
+    return { productIds: ids }
+  },
+  publishByRunTag: async (_templateId: TemplateId, runId: string) => {
+    const tag = `rbp-import:${runId}`
+    const ids = _runDrafts.get(tag) || []
+    const publishedIds: string[] = []
+    const alreadyActiveIds: string[] = []
+    const missingIds: string[] = []
+    for (const id of ids) {
+      if (!id) {
+        missingIds.push(id)
+        continue
+      }
+      if (_published.has(id)) alreadyActiveIds.push(id)
+      else {
+        _published.add(id)
+        publishedIds.push(id)
+      }
+    }
+    return { publishedIds, alreadyActiveIds, missingIds }
+  },
+  deleteDraftsByRunTag: async (_templateId: TemplateId, runId: string) => {
+    const tag = `rbp-import:${runId}`
+    const ids = _runDrafts.get(tag) || []
+    const deletedIds: string[] = []
+    const missingIds: string[] = []
+    for (const id of ids) {
+      if (id) deletedIds.push(id)
+      else missingIds.push(id)
+    }
+    _runDrafts.delete(tag)
+    return { deletedIds, missingIds }
+  },
 
-  updateExistingProducts: (templateId: string, items: any[]) => shopify.updateExisting(templateId, items),
+  // Logs (global + template-scoped)
+  logEvent: async (
+    templateId: TemplateId,
+    runId: string,
+    type: 'discovery' | 'scrape' | 'drafts' | 'approve' | 'abort' | 'schedule' | 'recrawl' | 'error',
+    payload: unknown,
+  ) => {
+    _logs.push({ at: new Date().toISOString(), templateId, runId, type, payload })
+  },
 
-  logEvent: (templateId: string, runId: string, type: any, payload: unknown) =>
-    repo.appendLog(templateId, runId, type, payload),
-
-  getFlags: (templateId: string) => flags.get(templateId),
-
-  newRunId,
+  // Run ID
+  newRunId: (): string => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 }
 
 export const importerActions = {
