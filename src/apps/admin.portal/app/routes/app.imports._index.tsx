@@ -7,7 +7,7 @@ export default function ImportsHome() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>Imports</h1>
-        <a href="new">Add Import</a>
+        <a href="/app/imports/new">Add Import</a>
       </div>
       <section>
         <ImportList />
