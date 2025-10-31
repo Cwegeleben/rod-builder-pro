@@ -4,6 +4,25 @@ import { BatsonRodBlanksConfig } from './batson.rod-blanks'
 // <!-- BEGIN RBP GENERATED: importer-discover-batson-series-v1 -->
 import { BatsonRodBlanksSite } from './batson.rod-blanks'
 // <!-- END RBP GENERATED: importer-discover-batson-series-v1 -->
+// <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
+export function getDiscoverSiteById(id: string) {
+  try {
+    if (id === 'batson-rod-blanks') return BatsonRodBlanksSite
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+export function getSiteConfigById(id: string): SiteConfig | null {
+  switch (id) {
+    case 'batson-rod-blanks':
+      return BatsonRodBlanksConfig
+    default:
+      return null
+  }
+}
+// <!-- END RBP GENERATED: importer-known-targets-v1 -->
 
 const ALL: SiteConfig[] = [BatsonRodBlanksConfig]
 

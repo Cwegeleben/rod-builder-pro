@@ -10,9 +10,12 @@ import { SettingsPreview } from '../components/importer/SettingsPreview'
 // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
 import { useState, useRef, useEffect } from 'react'
 // <!-- BEGIN RBP GENERATED: hq-imports-polaris-v1 -->
-import { Card, BlockStack, InlineStack, Text, Button, TextField, Banner, DataTable } from '@shopify/polaris'
+import { Card, BlockStack, InlineStack, Text, Button, TextField, Banner, DataTable, Select } from '@shopify/polaris'
 // <!-- END RBP GENERATED: hq-imports-polaris-v1 -->
 import { requireHqShopOr404 } from '../lib/access.server'
+// <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
+import { KNOWN_IMPORT_TARGETS, getTargetById } from '../server/importer/sites/targets'
+// <!-- END RBP GENERATED: importer-known-targets-v1 -->
 
 type LoaderData = {
   id: string
@@ -56,6 +59,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Restore deterministic fields for UI initialization
   const sourceUrlCfg = typeof (cfg as any).sourceUrl === 'string' ? (cfg as any).sourceUrl : undefined
   // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
+  // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
+  const siteIdCfg = typeof (cfg as any).siteId === 'string' ? (cfg as any).siteId : undefined
+  // <!-- END RBP GENERATED: importer-known-targets-v1 -->
   // Fetch last preview/test summary if any
   const lastPreview = await (prisma as any).importLog
     .findFirst({
@@ -112,6 +118,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 -->
       ...(sourceUrlCfg ? { sourceUrl: sourceUrlCfg } : {}),
       // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
+      // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
+      ...(siteIdCfg ? { siteId: siteIdCfg } : {}),
+      // <!-- END RBP GENERATED: importer-known-targets-v1 -->
     },
     preview,
     templateFields: Array.isArray(fields) ? fields : [],
@@ -140,6 +149,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const sourceUrl = String(form.get('sourceUrl') || '').trim()
     // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
     const vendor = String(form.get('vendor') || '').trim()
+    // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
+    const siteIdForm = String(form.get('siteId') || '').trim()
+    // <!-- END RBP GENERATED: importer-known-targets-v1 -->
     const seedUrls = seedUrlsRaw
       .split(/\r?\n/)
       .map(l => l.trim())
@@ -161,6 +173,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
         ...(sourceUrl ? { sourceUrl } : {}),
         // options now resolved by site config registry; nothing else persisted
         // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
+        // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
+        ...(siteIdForm ? { siteId: siteIdForm } : {}),
+        // <!-- END RBP GENERATED: importer-known-targets-v1 -->
       }
       data.importConfig = nextConfig
       // Invalidate validation if settings changed and was previously validated/approved/scheduled
@@ -181,6 +196,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const sourceUrl = String(form.get('sourceUrl') || '').trim()
     // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
     const vendor = String(form.get('vendor') || '').trim()
+    // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
+    const siteIdForm = String(form.get('siteId') || '').trim()
+    // <!-- END RBP GENERATED: importer-known-targets-v1 -->
     const seedUrls = seedUrlsRaw
       .split(/\r?\n/)
       .map(l => l.trim())
@@ -201,6 +219,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
         ...(sourceUrl ? { sourceUrl } : {}),
         // options now resolved by site config registry; nothing else persisted
         // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
+        // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
+        ...(siteIdForm ? { siteId: siteIdForm } : {}),
+        // <!-- END RBP GENERATED: importer-known-targets-v1 -->
       }
       if (name) data.name = name
       data.importConfig = nextConfig
@@ -405,6 +426,44 @@ export default function ImportsTemplateSettings() {
       return ''
     }
   })
+  // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
+  // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
+  const [targetId, setTargetId] = useState<string>(() => {
+    try {
+      const cfg: any = (data as any)?.importConfig
+      const sid = typeof cfg?.siteId === 'string' ? cfg.siteId : ''
+      if (sid && KNOWN_IMPORT_TARGETS.some(t => t.id === sid)) return sid
+      const su = typeof cfg?.sourceUrl === 'string' ? cfg.sourceUrl : ''
+      if (su) {
+        const byUrl = KNOWN_IMPORT_TARGETS.find(t => t.url === su)
+        if (byUrl) return byUrl.id
+      }
+      return ''
+    } catch {
+      return ''
+    }
+  })
+  const [siteId, setSiteId] = useState<string>(() => {
+    try {
+      const cfg: any = (data as any)?.importConfig
+      return typeof cfg?.siteId === 'string' ? cfg.siteId : ''
+    } catch {
+      return ''
+    }
+  })
+  const [showInfo, setShowInfo] = useState<boolean>(false)
+  function onTargetChange(id: string) {
+    try {
+      setTargetId(id)
+      const t = getTargetById(id)
+      if (t) {
+        setSourceUrlInput(t.url)
+        setSiteId(t.siteId)
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   // Options are site-configured; no client state for discovery/scrape models
   const batsonBase = 'https://batsonenterprises.com'
   // Discover → Seed URLs banners and control state
@@ -466,7 +525,7 @@ export default function ImportsTemplateSettings() {
       const res = await fetch('/api/importer/crawl/discover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceUrl: src, devSampleHtml }),
+        body: JSON.stringify({ sourceUrl: src, siteId, devSampleHtml }),
       })
       const data = (await res.json().catch(() => ({}))) as {
         urls?: string[]
@@ -644,14 +703,60 @@ export default function ImportsTemplateSettings() {
               {/* <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 --> */}
               <Card>
                 <BlockStack gap="400">
+                  {/* Header row with Info button top-right */}
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h3" variant="headingSm">
+                      Discovery
+                    </Text>
+                    <Button onClick={() => setShowInfo(s => !s)}>{showInfo ? 'Hide info' : 'Info'}</Button>
+                  </InlineStack>
+                  {/* Target selector + injected Source URL (read-only) */}
+                  {/* <!-- BEGIN RBP GENERATED: importer-known-targets-v1 --> */}
+                  <Select
+                    label="Target"
+                    options={[
+                      { label: 'Select a source target', value: '' },
+                      ...KNOWN_IMPORT_TARGETS.map(t => ({ label: t.label, value: t.id })),
+                    ]}
+                    value={targetId}
+                    onChange={(v: string) => onTargetChange(v)}
+                  />
                   <TextField
                     label="Source URL"
                     value={sourceUrlInput}
-                    onChange={setSourceUrlInput}
+                    disabled
                     autoComplete="off"
-                    placeholder="https://batsonenterprises.com/rod-blanks"
-                    helpText="Required for Discover and Preview."
+                    placeholder="Pick a Target to populate"
+                    helpText="Set by Target selection."
                   />
+                  <input type="hidden" name="siteId" value={siteId} />
+                  {showInfo ? (
+                    <Card>
+                      <div className="mt-2 text-sm">
+                        <p className="mb-2 font-medium">Adding a new target</p>
+                        <ol className="ml-5 list-decimal space-y-1">
+                          <li>
+                            Create site file: <code>app/server/importer/sites/&lt;vendor&gt;.&lt;slug&gt;.ts</code>
+                          </li>
+                          <li>
+                            Export <code>id</code>, <code>match(url)</code>, and the <code>discover()</code> function
+                          </li>
+                          <li>
+                            Register the site in <code>app/server/importer/sites/index.ts</code>
+                          </li>
+                          <li>
+                            Add to UI list in <code>app/server/importer/sites/targets.ts</code> with <code>label</code>,{' '}
+                            <code>url</code>, and <code>siteId</code>
+                          </li>
+                        </ol>
+                        <p className="mt-2 text-xs opacity-70">
+                          Convention: ids are kebab-case (e.g., <code>batson-rod-blanks</code>). URLs are canonical
+                          listing pages.
+                        </p>
+                      </div>
+                    </Card>
+                  ) : null}
+                  {/* <!-- END RBP GENERATED: importer-known-targets-v1 --> */}
                   {showImportCreated ? (
                     <Banner tone="success" title="Import created" onDismiss={() => setShowImportCreated(false)}>
                       <p>You can configure settings below.</p>
@@ -676,29 +781,44 @@ export default function ImportsTemplateSettings() {
                         <details>
                           <summary>Debug details</summary>
                           {(() => {
-                            // <!-- BEGIN RBP GENERATED: importer-discover-batson-series-v1 -->
-                            const d = (
+                            // <!-- BEGIN RBP GENERATED: importer-discover-hardening-v1 -->
+                            const dbg = (
                               crawlDebug && typeof crawlDebug === 'object'
                                 ? (crawlDebug as Record<string, unknown>)
-                                : {
-                                    siteId: 'unknown',
-                                    usedMode: 'unknown',
-                                    strategyUsed: 'n/a',
-                                    totalFound: 0,
-                                    deduped: 0,
-                                    sample: [],
-                                    notes: [
-                                      '(synthesized) No server diagnostics; check route wiring or inspect /api/importer/crawl/discover response.',
-                                    ],
-                                  }
-                            ) as Record<string, unknown>
+                                : {}
+                            ) as any
+                            const safeDebug = {
+                              siteId: typeof dbg.siteId === 'string' ? dbg.siteId : 'unknown',
+                              usedMode: typeof dbg.usedMode === 'string' ? dbg.usedMode : 'unknown',
+                              pageTitle: typeof dbg.pageTitle === 'string' ? dbg.pageTitle : 'n/a',
+                              contentLength: Number(dbg.contentLength ?? 0),
+                              textLength: Number(dbg.textLength ?? 0),
+                              strategyUsed: typeof dbg.strategyUsed === 'string' ? dbg.strategyUsed : 'n/a',
+                              totalFound: Number(dbg.totalFound ?? 0),
+                              deduped: Number(dbg.deduped ?? 0),
+                              sample: Array.isArray(dbg.sample) ? dbg.sample : [],
+                              htmlExcerpt: typeof dbg.htmlExcerpt === 'string' ? dbg.htmlExcerpt : '(no excerpt)',
+                              headless:
+                                dbg.headless && typeof dbg.headless === 'object'
+                                  ? dbg.headless
+                                  : { attempted: false, available: false },
+                              notes:
+                                Array.isArray(dbg.notes) && dbg.notes.length
+                                  ? dbg.notes
+                                  : ['(synthesized) No server diagnostics; check route wiring.'],
+                              startUrl: typeof dbg.startUrl === 'string' ? dbg.startUrl : undefined,
+                              status: typeof dbg.status !== 'undefined' ? String(dbg.status) : undefined,
+                              contentType: typeof dbg.contentType === 'string' ? dbg.contentType : undefined,
+                              got: typeof dbg.got === 'string' ? dbg.got : undefined,
+                            }
                             const rows: Array<[string, string]> = []
-                            if (typeof d.startUrl === 'string') rows.push(['Start URL', d.startUrl])
-                            if (typeof d.pageTitle === 'string') rows.push(['Page title', d.pageTitle])
-                            if (typeof d.status !== 'undefined') rows.push(['Status', String(d.status)])
-                            if (typeof d.contentType === 'string') rows.push(['Content-Type', d.contentType])
-                            if (typeof d.contentLength === 'string') rows.push(['Content-Length', d.contentLength])
-                            if (typeof d.got === 'string') rows.push(['Provided startUrl', d.got])
+                            if (safeDebug.startUrl) rows.push(['Start URL', safeDebug.startUrl])
+                            rows.push(['Page title', safeDebug.pageTitle])
+                            if (safeDebug.status) rows.push(['Status', safeDebug.status])
+                            if (safeDebug.contentType) rows.push(['Content-Type', safeDebug.contentType])
+                            rows.push(['Content-Length', String(safeDebug.contentLength)])
+                            rows.push(['Text-Length', String(safeDebug.textLength)])
+                            if (safeDebug.got) rows.push(['Provided startUrl', safeDebug.got])
                             return (
                               <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.4 }}>
                                 <ul style={{ paddingLeft: 16 }}>
@@ -708,26 +828,15 @@ export default function ImportsTemplateSettings() {
                                     </li>
                                   ))}
                                 </ul>
-                                {(() => {
-                                  const excerpt =
-                                    typeof d.htmlExcerpt === 'string' ? (d.htmlExcerpt as string) : undefined
-                                  if (excerpt) {
-                                    return (
-                                      <>
-                                        <div style={{ marginTop: 6 }}>
-                                          <strong>HTML excerpt (first 4k chars):</strong>
-                                        </div>
-                                        <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto' }}>
-                                          {excerpt}
-                                        </pre>
-                                      </>
-                                    )
-                                  }
-                                  return <p style={{ marginTop: 6 }}>No HTML excerpt available.</p>
-                                })()}
+                                <div style={{ marginTop: 6 }}>
+                                  <strong>HTML excerpt (first ~600 chars):</strong>
+                                </div>
+                                <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto' }}>
+                                  {safeDebug.htmlExcerpt}
+                                </pre>
                               </div>
                             )
-                            // <!-- END RBP GENERATED: importer-discover-batson-series-v1 -->
+                            // <!-- END RBP GENERATED: importer-discover-hardening-v1 -->
                           })()}
                         </details>
                       </div>

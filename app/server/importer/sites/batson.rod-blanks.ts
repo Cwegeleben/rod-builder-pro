@@ -54,12 +54,14 @@ export const BatsonRodBlanksSite = {
     return {
       seeds: [],
       debug: {
-        strategyTried: ['grid', 'nav', 'list', 'jsonld', 'heuristic'],
+        // <!-- BEGIN RBP GENERATED: importer-discover-hardening-v1 -->
+        strategyTried: ['heading-proximity', 'grid', 'nav', 'list', 'jsonld', 'heuristic'],
         strategyUsed: 'heuristic',
         totalFound: 0,
         deduped: 0,
         sample: [],
         notes: ['No series links discovered in static or headless HTML.'],
+        // <!-- END RBP GENERATED: importer-discover-hardening-v1 -->
       },
       usedMode: staticHtml ? 'static' : headlessHtml ? 'headless' : 'none',
     }
