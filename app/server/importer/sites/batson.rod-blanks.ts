@@ -12,7 +12,14 @@ export const BatsonRodBlanksConfig: SiteConfig = {
     try {
       const u = new URL(url)
       if (!/batsonenterprises\.com$/i.test(u.hostname)) return false
-      return /^\/rod-blanks\/?$/i.test(u.pathname) || /^\/rod-blanks\//i.test(u.pathname)
+      // <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
+      // Accept both the legacy /rod-blanks and Shopify collections path /collections/blanks
+      return (
+        /^\/rod-blanks\/?$/i.test(u.pathname) ||
+        /^\/rod-blanks\//i.test(u.pathname) ||
+        /^\/collections\/blanks(\/|$)/i.test(u.pathname)
+      )
+      // <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
     } catch {
       return false
     }
@@ -32,7 +39,14 @@ export const BatsonRodBlanksSite = {
   match(url: string) {
     try {
       const u = new URL(url)
-      return u.hostname.endsWith('batsonenterprises.com') && u.pathname.replace(/\/+$/, '') === '/rod-blanks'
+      // <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
+      // Accept both /rod-blanks and /collections/blanks as the canonical listing page
+      const path = u.pathname.replace(/\/+$/, '')
+      return (
+        u.hostname.endsWith('batsonenterprises.com') &&
+        (path === '/rod-blanks' || path === '/collections/blanks' || /^\/collections\/blanks\//i.test(u.pathname))
+      )
+      // <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
     } catch {
       return false
     }
