@@ -96,6 +96,14 @@ export async function action({ request }: ActionFunctionArgs) {
     runId: runIdRaw,
     manualMappings,
     rememberAliases,
+    // <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 -->
+    templateId,
+    mode,
+    devSampleHtml,
+    strategy,
+    scrapeType,
+    sourceUrl,
+    // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
   } = (await read()) as {
     variantTemplateId?: string
     scraperId?: string
@@ -105,6 +113,15 @@ export async function action({ request }: ActionFunctionArgs) {
     runId?: string
     manualMappings?: Array<{ label: string; fieldKey: string }>
     rememberAliases?: boolean
+    // <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 -->
+    templateId?: string
+    mode?: string
+    devSampleHtml?: boolean
+    strategy?: 'static' | 'headless' | 'hybrid'
+    scrapeType?: 'auto' | 'batson-attribute-grid'
+    sourceUrl?: string
+    seriesUrls?: string[]
+    // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
   }
 
   // Compose URL set
@@ -112,6 +129,374 @@ export async function action({ request }: ActionFunctionArgs) {
   const supplierId = 'batson' // current supplier scope; scrapers are generic
   const saved = includeDiscovered ? (await fetchActiveSources(supplierId)).map((s: { url: string }) => s.url) : []
   const urls = Array.from(new Set([...saved, ...manual])).slice(0, 50)
+  // <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 -->
+  // Special mode: series-preview (Crawl #2) — scrape first series page and map to template fields
+  if (mode === 'series-preview') {
+    const tplId = templateId || variantTemplateId || ''
+    const src = typeof sourceUrl === 'string' && sourceUrl.trim() ? sourceUrl.trim() : ''
+    const first = src || (Array.isArray(rawUrls) && rawUrls.length ? rawUrls[0] : '')
+    if (!tplId) return json({ error: 'templateId required' }, { status: 400 })
+    if (!first) return json({ products: [], mappingPreview: [], meta: { templateId: tplId, reason: 'no-url' } })
+
+    const base = 'https://batsonenterprises.com'
+    const strat = (strategy as 'static' | 'headless' | 'hybrid') || 'hybrid'
+    let st = scrapeType as 'auto' | 'batson-attribute-grid' | undefined
+    if (!st) {
+      try {
+        const { getSiteConfigForUrl } = await import('../server/importer/sites')
+        const siteCfg = getSiteConfigForUrl(first)
+        st = siteCfg.products.scrapeType
+      } catch {
+        st = 'auto'
+      }
+    }
+    const headers: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    }
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 8000)
+    let html = ''
+    let parserId: string | undefined
+    let siteTag: string | undefined
+    try {
+      // If site-specific Attribute-grid is selected, force static fetch
+      const r = await fetch(first, { headers, signal: ctrl.signal })
+      if (!r.ok) {
+        return json(
+          { products: [], mappingPreview: [], meta: { templateId: tplId, urlUsed: first, status: r.status } },
+          { status: 502 },
+        )
+      }
+      html = await r.text()
+    } finally {
+      clearTimeout(timer)
+    }
+    // Choose parser: site-specific vs general seriesProducts
+    let seriesProducts: Array<{
+      title?: string | null
+      url: string
+      price?: number | null
+      status?: string | null
+      raw?: Record<string, string>
+      specs?: Record<string, unknown>
+    }>
+    if (st === 'batson-attribute-grid') {
+      const mod = await import('../server/importer/preview/parsers/batsonAttributeGrid')
+      const rows = mod.extractBatsonAttributeGrid(html, base)
+      parserId = mod.PARSER_ID
+      siteTag = mod.SITE_TAG
+      // Adapt to common shape
+      seriesProducts = rows.map(r => ({
+        title: r.title || null,
+        url: r.url,
+        price: r.price ?? null,
+        status: r.status ?? null,
+        raw: r.raw,
+        specs: r.specs,
+      }))
+    } else {
+      const { extractSeriesProducts } = await import('../server/importer/preview/seriesProducts')
+      seriesProducts = extractSeriesProducts(html, base)
+    }
+    const responseMeta: Record<string, unknown> = {
+      templateId: tplId,
+      urlUsed: first,
+      parserId,
+      siteTag,
+      strategy: st === 'batson-attribute-grid' ? 'static' : strat,
+      scrapeType: st,
+    }
+    // Fallback: if zero products, the provided URL might be a category/listing page.
+    // Try to discover series links within the page and fetch the first, then extract.
+    if (!seriesProducts.length && st !== 'batson-attribute-grid') {
+      try {
+        const { crawlBatsonRodBlanksListing } = await import('../server/importer/crawlers/batsonListing')
+        const seriesLinks = crawlBatsonRodBlanksListing(html, base)
+        const firstSeries = Array.isArray(seriesLinks) && seriesLinks.length ? seriesLinks[0] : ''
+        if (firstSeries) {
+          const ctrl2 = new AbortController()
+          const timer2 = setTimeout(() => ctrl2.abort(), 8000)
+          try {
+            const r2 = await fetch(firstSeries, { headers, signal: ctrl2.signal })
+            if (r2.ok) {
+              const html2 = await r2.text()
+              const { extractSeriesProducts } = await import('../server/importer/preview/seriesProducts')
+              seriesProducts = extractSeriesProducts(html2, base)
+              // Record that we followed a listing link to a series URL
+              ;(responseMeta as Record<string, unknown>).followed = firstSeries
+            }
+          } finally {
+            clearTimeout(timer2)
+          }
+        }
+      } catch {
+        // ignore fallback errors; return empty as before
+      }
+    }
+    // Build products for UI grid
+    const products = seriesProducts.map(p => ({
+      title: p.title,
+      price: p.price ?? null,
+      status: p.status ?? null,
+      url: p.url,
+    }))
+    // Label-driven mapping preview using existing matcher if available
+    // Fetch template fields for mapping/missingFields summary
+    let tplFieldsForPreview: Array<{ id: string; label: string }> = []
+    try {
+      const tpl = await getTemplateWithFields(tplId)
+      if (tpl?.fields?.length)
+        tplFieldsForPreview = tpl.fields.map((f: { key: string; label: string }) => ({ id: f.key, label: f.label }))
+    } catch {
+      /* ignore */
+    }
+
+    const mappingPreview = (() => {
+      try {
+        if (!seriesProducts.length)
+          return [] as Array<{ field: string; value: string | number | null; matchedBy?: string; url: string }>
+        const rows = seriesProducts.slice(0, 10)
+        const out: Array<{ field: string; value: string | number | null; matchedBy?: string; url: string }> = []
+        const matched = new Set<string>()
+        for (const row of rows) {
+          const raw =
+            (row.raw && Object.keys(row.raw).length ? row.raw : (row.specs as Record<string, string> | undefined)) ||
+            undefined
+          if (!raw) continue
+          const lr = matchTemplateFieldsFromKV?.(BatsonBlanksTemplateFields, raw as Record<string, string>)
+          if (!lr || !Array.isArray(lr.mapped)) continue
+          for (const m of lr.mapped) {
+            const val =
+              typeof m.value === 'number' || typeof m.value === 'string'
+                ? (m.value as number | string)
+                : (m.rawValue as string | number | null)
+            out.push({ field: m.key, value: val ?? null, matchedBy: m.sourceLabel, url: row.url })
+            matched.add(m.key)
+            if (out.length >= 50) break
+          }
+          if (out.length >= 50) break
+        }
+        // Compute missing fields vs template (if available)
+        const missing = tplFieldsForPreview.length
+          ? tplFieldsForPreview.filter(f => !matched.has(f.id)).map(f => f.id)
+          : []
+        ;(responseMeta as Record<string, unknown>).missingFields = missing
+        return out
+      } catch {
+        return []
+      }
+    })()
+    ;(responseMeta as Record<string, unknown>).count = seriesProducts.length
+    const response: {
+      products: typeof products
+      mappingPreview: typeof mappingPreview
+      meta: Record<string, unknown>
+      debug?: Record<string, unknown>
+    } = {
+      products,
+      mappingPreview,
+      meta: responseMeta,
+    }
+    if (devSampleHtml) response.debug = { htmlExcerpt: html.slice(0, 4096) }
+    return json(response)
+  }
+  // New mode: crawl multiple series URLs and return up to 10 products total
+  if (mode === 'series-products') {
+    const tplId = templateId || variantTemplateId || ''
+    const base = 'https://batsonenterprises.com'
+    const strat = (strategy as 'static' | 'headless' | 'hybrid') || 'hybrid'
+    let st = scrapeType as 'auto' | 'batson-attribute-grid' | undefined
+    const headers: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    }
+    // Series list precedence: provided seriesUrls -> discovered from sourceUrl (if listing) -> rawUrls
+    let seriesList: string[] = Array.isArray((read as unknown as { seriesUrls?: string[] }).seriesUrls)
+      ? (((read as unknown as { seriesUrls?: string[] }).seriesUrls as string[]).filter(
+          u => typeof u === 'string' && u.trim().length,
+        ) as string[])
+      : []
+    const src = typeof sourceUrl === 'string' && sourceUrl.trim() ? sourceUrl.trim() : ''
+    let html0 = ''
+    if (!seriesList.length && src) {
+      // Try to discover from provided sourceUrl
+      const ctrl0 = new AbortController()
+      const timer0 = setTimeout(() => ctrl0.abort(), 8000)
+      try {
+        const r0 = await fetch(src, { headers, signal: ctrl0.signal })
+        if (r0.ok) {
+          html0 = await r0.text()
+          try {
+            const { crawlBatsonRodBlanksListing } = await import('../server/importer/crawlers/batsonListing')
+            seriesList = crawlBatsonRodBlanksListing(html0, base)
+          } catch {
+            // ignore
+          }
+        }
+      } finally {
+        clearTimeout(timer0)
+      }
+    }
+    // Resolve default scrape type from site config if not provided
+    if (!st) {
+      try {
+        const { getSiteConfigForUrl } = await import('../server/importer/sites')
+        const urlForCfg = seriesList[0] || src || rawUrls?.[0] || ''
+        if (urlForCfg) {
+          const siteCfg = getSiteConfigForUrl(urlForCfg)
+          st = siteCfg.products.scrapeType
+        }
+      } catch {
+        st = 'auto'
+      }
+    }
+    if (!seriesList.length && Array.isArray(rawUrls) && rawUrls.length) {
+      seriesList = rawUrls
+    }
+    const seriesTotal = seriesList.length
+    const limitTotal = 10
+    const productsAll: Array<{
+      title?: string | null
+      url: string
+      price?: number | null
+      status?: string | null
+      raw?: Record<string, string>
+      specs?: Record<string, unknown>
+    }> = []
+    let visited = 0
+    // Iterate series until we have up to 10 products
+    for (const su of seriesList) {
+      if (productsAll.length >= limitTotal) break
+      const u = su.trim()
+      if (!u) continue
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 8000)
+      try {
+        const r = await fetch(u, { headers, signal: ctrl.signal })
+        if (!r.ok) continue
+        const html = await r.text()
+        let seriesProducts: Array<{
+          title?: string | null
+          url: string
+          price?: number | null
+          status?: string | null
+          raw?: Record<string, string>
+          specs?: Record<string, unknown>
+        }>
+        if (st === 'batson-attribute-grid') {
+          const mod = await import('../server/importer/preview/parsers/batsonAttributeGrid')
+          const rows = mod.extractBatsonAttributeGrid(html, base)
+          seriesProducts = rows.map(r => ({
+            title: r.title || null,
+            url: r.url,
+            price: r.price ?? null,
+            status: r.status ?? null,
+            raw: r.raw,
+            specs: r.specs,
+          }))
+        } else {
+          const { extractSeriesProducts } = await import('../server/importer/preview/seriesProducts')
+          seriesProducts = extractSeriesProducts(html, base)
+        }
+        productsAll.push(...seriesProducts)
+        visited++
+      } catch {
+        // ignore series errors to continue
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+    // Enforce global limit
+    const enrichedLimited = productsAll.slice(0, limitTotal)
+    // Build UI products array
+    const products = enrichedLimited.map(p => ({
+      title: p.title,
+      price: p.price ?? null,
+      status: p.status ?? null,
+      url: p.url,
+    }))
+    // Template fields for coverage
+    let tplFieldsForPreview: Array<{ id: string; label: string }> = []
+    try {
+      if (tplId) {
+        const tpl = await getTemplateWithFields(tplId)
+        if (tpl?.fields?.length)
+          tplFieldsForPreview = tpl.fields.map((f: { key: string; label: string }) => ({ id: f.key, label: f.label }))
+      }
+    } catch {
+      /* ignore */
+    }
+    // Mapping preview using label-driven matcher if possible, from first few rows
+    const responseMeta: Record<string, unknown> = {
+      templateId: tplId,
+      scrapeType: st,
+      strategy: st === 'batson-attribute-grid' ? 'static' : strat,
+      seriesTotal,
+      seriesVisited: visited,
+    }
+    const mappingPreview = (() => {
+      try {
+        if (!enrichedLimited.length)
+          return [] as Array<{ field: string; value: string | number | null; matchedBy?: string; url: string }>
+        const rows = enrichedLimited.slice(0, 10)
+        const out: Array<{ field: string; value: string | number | null; matchedBy?: string; url: string }> = []
+        const matched = new Set<string>()
+        for (const row of rows) {
+          const raw =
+            (row.raw && Object.keys(row.raw).length ? row.raw : (row.specs as Record<string, string> | undefined)) ||
+            undefined
+          if (!raw) continue
+          const lr = matchTemplateFieldsFromKV?.(BatsonBlanksTemplateFields, raw as Record<string, string>)
+          if (!lr || !Array.isArray(lr.mapped)) continue
+          for (const m of lr.mapped) {
+            const val =
+              typeof m.value === 'number' || typeof m.value === 'string'
+                ? (m.value as number | string)
+                : (m.rawValue as string | number | null)
+            out.push({ field: m.key, value: val ?? null, matchedBy: m.sourceLabel, url: row.url })
+            matched.add(m.key)
+            if (out.length >= 50) break
+          }
+          if (out.length >= 50) break
+        }
+        const missing = tplFieldsForPreview.length
+          ? tplFieldsForPreview.filter(f => !matched.has(f.id)).map(f => f.id)
+          : []
+        ;(responseMeta as Record<string, unknown>).missingFields = missing
+        return out
+      } catch {
+        return []
+      }
+    })()
+    ;(responseMeta as Record<string, unknown>).count = enrichedLimited.length
+    const response: {
+      products: typeof products
+      mappingPreview: typeof mappingPreview
+      meta: Record<string, unknown>
+      debug?: Record<string, unknown>
+    } = {
+      products,
+      mappingPreview,
+      meta: responseMeta,
+    }
+    if (devSampleHtml && html0) response.debug = { htmlExcerpt: html0.slice(0, 4096) }
+    return json(response)
+  }
+  // Default mode continues below
+
+  // If explicit urls are provided, limit preview work to the first URL only for a fast preflight
+  const limitToFirst = Array.isArray(rawUrls) && rawUrls.length > 0
+  const urlsForPreview = limitToFirst ? [urls[0]].filter(Boolean) : urls
+  // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
 
   // Resolve scraper (default to jsonld)
   const scraper = (await getScraperById(scraperId || '')) || (await listScrapers()).find(s => s.id === 'jsonld-basic')!
@@ -900,7 +1285,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return out
   }
 
-  for (const u of urls) {
+  for (const u of urlsForPreview) {
     try {
       if (scraper.id === 'jsonld-basic') {
         items.push(...(await runJsonLd(u, scraper.id)))
@@ -957,7 +1342,31 @@ export async function action({ request }: ActionFunctionArgs) {
     }).catch(() => null)
   }
 
-  return json({ items, errors, templateFields })
+  // <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 -->
+  // Build mappingPreview from the first parsed item to show template-field coverage
+  const products = items.map(it => ({
+    title: it.title,
+    price: it.price ?? null,
+    status: it.availability || it.status || null,
+    url: it.url,
+  }))
+  const first = items[0]
+  const mappingPreview = (() => {
+    if (!first) return [] as Array<{ field: string; value?: string | number | null; matchedBy?: string | null }>
+    const pairs: Array<{ field: string; value?: string | number | null; matchedBy?: string | null }> = []
+    const vals = first.fieldValues || {}
+    const mapped = first.diagnostics?.mappedKeys || {}
+    for (const k of Object.keys(vals)) {
+      const v = (vals as Record<string, string | number | null | undefined>)[k]
+      const m = (mapped as Record<string, string | undefined>)[k]
+      pairs.push({ field: k, value: v, matchedBy: m || null })
+      if (pairs.length >= 20) break
+    }
+    return pairs
+  })()
+  const meta = { templateId: variantTemplateId || null, urlUsed: urlsForPreview[0] }
+  return json({ items, errors, templateFields, products, mappingPreview, meta })
+  // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
 }
 
 export default function ImporterPreviewApi() {

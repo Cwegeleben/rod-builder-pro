@@ -65,6 +65,7 @@
     "@shopify/shopify-app-remix": "3.7.1",
     "@shopify/shopify-app-session-storage-prisma": "6.0.1",
     "crawlee": "3.10.2",
+    "cheerio": "1.0.0-rc.12",
     "isbot": "5.1.23",
     "prisma": "6.4.0",
     "playwright": "1.50.1",

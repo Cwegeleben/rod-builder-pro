@@ -1,6 +1,6 @@
 {
   "id": "XXiQ2i7mHS2ni3q",
-  "json": "{\"id\":\"XXiQ2i7mHS2ni3q\",\"url\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"loadedUrl\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"uniqueKey\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"enqueueStrategy\":\"same-hostname\",\"state\":4}},\"handledAt\":\"2025-10-20T22:45:11.595Z\"}",
+  "json": "{\"id\":\"XXiQ2i7mHS2ni3q\",\"url\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"loadedUrl\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"uniqueKey\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"state\":4}},\"handledAt\":\"2025-10-31T17:46:27.207Z\"}",
   "method": "GET",
   "orderNo": null,
   "retryCount": 0,

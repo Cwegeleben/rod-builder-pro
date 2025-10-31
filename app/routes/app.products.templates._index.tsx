@@ -292,6 +292,16 @@ export default function TemplatesIndex() {
     const form = new FormData()
     form.append('_action', 'createTemplate')
     form.append('name', 'Untitled template')
+    // importer-v2-3: pass through callback for Importer unification and preserve qs
+    try {
+      const url = new URL(window.location.href)
+      const next = url.searchParams.get('next') || ''
+      if (next) form.append('next', next)
+      const qs = url.search || ''
+      if (qs) form.append('qs', qs)
+    } catch {
+      /* no-op */
+    }
     fetcher.submit(form, { method: 'post', action: '/resources/spec-templates' })
   }
 

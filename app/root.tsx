@@ -18,10 +18,23 @@ export default function App() {
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <Meta />
         <Links />
-        {/* Preemptively silence Shopify OTLP beacons before any client scripts run */}
+        {/* Preemptively silence Shopify OTLP/Monorail beacons before any client scripts run */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(()=>{try{const BLOCK=["https://otlp-http-production.shopifysvc.com/v1/traces","https://otlp-http-production.shopifysvc.com/v1/metrics"];const ORIG_BEACON=navigator.sendBeacon?.bind(navigator);if(ORIG_BEACON){navigator.sendBeacon=function(u,d){try{if(typeof u==="string"&&BLOCK.some(b=>u.startsWith(b))){return true;}}catch{}return ORIG_BEACON(u,d);};}const ORIG_FETCH=window.fetch?.bind(window);if(ORIG_FETCH){window.fetch=function(input,init){try{const url=typeof input==="string"?input:input?.url;if(url&&BLOCK.some(b=>url.startsWith(b))){return Promise.resolve(new Response(null,{status:204,statusText:"No Content"}));}}catch{}return ORIG_FETCH(input,init);};}const suppressMsg=(...args)=>{try{const str=(args||[]).map(a=>{try{if(typeof a==="string")return a;if(a&&typeof a==="object")return JSON.stringify(a);return String(a);}catch{return String(a);}}).join(" ").toLowerCase();return str.includes('sendbeacon failed')||str.includes('otlp-http-production.shopifysvc.com/v1/');}catch{return false;}};const ORIG_ERR=console.error?.bind(console);if(ORIG_ERR){console.error=function(...args){if(suppressMsg(...args))return;return ORIG_ERR(...args);};}const ORIG_WARN=console.warn?.bind(console);if(ORIG_WARN){console.warn=function(...args){try{const s=(args&&args[0]?String(args[0]):"").toLowerCase();if(s.includes('preloaded using link preload but not used')){return;}}catch{}return ORIG_WARN(...args);};}}catch(e){}})();`,
+            __html: `(()=>{try{
+              const shouldBlock=(u)=>{try{const urlStr=String(u||'');const uo=new URL(urlStr, location.origin);const host=uo.hostname||'';const path=uo.pathname||'';const href=uo.href||'';if(href.startsWith('https://otlp-http-production.shopifysvc.com/v1/')) return true; if(host.includes('otlp')&&host.includes('shopifysvc.com')) return true; if(host.includes('monorail-edge.shopifycloud.com')) return true; if(host.includes('monorail-edge.shopifysvc.com')) return true; if(host.includes('monorail.shopifysvc.com')) return true; return false;}catch{return false;}};
+              const ORIG_BEACON=navigator.sendBeacon?.bind(navigator);
+              if(ORIG_BEACON){navigator.sendBeacon=function(u,d){try{if(shouldBlock(u)){return true;}}catch{}return ORIG_BEACON(u,d);};}
+              const ORIG_FETCH=window.fetch?.bind(window);
+              if(ORIG_FETCH){window.fetch=function(input,init){try{const url=typeof input==='string'?input:input?.url;if(url&&shouldBlock(url)){return Promise.resolve(new Response(null,{status:204,statusText:'No Content'}));}}catch{}return ORIG_FETCH(input,init);};}
+              const suppressMsg=(...args)=>{try{const str=(args||[]).map(a=>{try{if(typeof a==='string')return a;if(a&&typeof a==='object')return JSON.stringify(a);return String(a);}catch{return String(a);}}).join(' ').toLowerCase();return str.includes('sendbeacon failed')||str.includes('beacon api cannot load')||str.includes('otlp-http-production.shopifysvc.com/v1/')||str.includes('monorail-edge.shopify')||str.includes('monorail.shopifysvc.com');}catch{return false;}};
+              const ORIG_ERR=console.error?.bind(console);
+              if(ORIG_ERR){console.error=function(...args){if(suppressMsg(...args))return;return ORIG_ERR(...args);};}
+              const ORIG_WARN=console.warn?.bind(console);
+              if(ORIG_WARN){console.warn=function(...args){try{const s=(args&&args[0]?String(args[0]):'').toLowerCase();if(s.includes('preloaded using link preload but not used')){return;}}catch{}return ORIG_WARN(...args);};}
+              // Best-effort: intercept window error events referencing blocked hosts (not all are cancellable)
+              window.addEventListener('error', (ev)=>{try{const msg=String(ev.message||'').toLowerCase();const src=(ev.filename||'').toLowerCase();if(msg.includes('otlp-http')||src.includes('otlp-http')||src.includes('monorail')){ev.stopImmediatePropagation?.();ev.preventDefault?.();}}catch{}}, true);
+            }catch(e){}})();`,
           }}
         />
       </head>

@@ -1,7 +1,7 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from '@remix-run/react'
-import { importerAdapters, importerActions, ImportState, type ScheduleConfig } from '../state/importerMachine'
+import { ImportState, type ScheduleConfig } from '../state/importerMachine'
 
 export default function ImportSchedulePage() {
   const { templateId: tplParam } = useParams()
@@ -10,31 +10,48 @@ export default function ImportSchedulePage() {
   const [saving, setSaving] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
   const [state, setState] = useState<ImportState>(ImportState.NEEDS_SETTINGS)
-  const [origEnabled, setOrigEnabled] = useState(false)
+  // client-side preview only
   const [form, setForm] = useState<ScheduleConfig>({ enabled: false, freq: 'none', at: '09:00', nextRunAt: undefined })
 
   useEffect(() => {
     ;(async () => {
-      const [cfg, sched] = await Promise.all([
-        importerAdapters.getImportConfig(templateId),
-        importerAdapters.getSchedule(templateId),
-      ])
-      setState(cfg.state)
-      setForm({
-        enabled: !!sched.enabled,
-        freq: sched.freq || 'none',
-        at: sched.at || '09:00',
-        nextRunAt: sched.nextRunAt,
-      })
-      setOrigEnabled(!!sched.enabled)
+      try {
+        const res = await fetch(`/api/importer/schedule?templateId=${encodeURIComponent(templateId)}`)
+        if (res.ok) {
+          const jr = (await res.json()) as { state?: string; schedule?: ScheduleConfig }
+          const st = (jr.state || ImportState.NEEDS_SETTINGS) as ImportState
+          const sch = jr.schedule || { enabled: false, freq: 'none', at: '09:00', nextRunAt: undefined }
+          setState(st)
+          setForm({ enabled: !!sch.enabled, freq: sch.freq || 'none', at: sch.at || '09:00', nextRunAt: sch.nextRunAt })
+          // no-op
+        }
+      } catch {
+        // ignore
+      }
       setLoading(false)
     })()
   }, [templateId])
 
-  const nextPreview = useMemo(
-    () => importerAdapters.computeNextRun(new Date().toISOString(), form) || undefined,
-    [form],
-  )
+  const nextPreview = useMemo(() => {
+    const compute = (nowIso: string, cfg: ScheduleConfig): string | undefined => {
+      if (!cfg.enabled) return undefined
+      if (!cfg.freq || cfg.freq === 'none') return undefined
+      const now = new Date(nowIso)
+      if (Number.isNaN(now.getTime())) return undefined
+      const [hh, mm] = (cfg.at || '09:00').split(':').map(v => parseInt(v, 10))
+      const next = new Date(now)
+      next.setSeconds(0, 0)
+      if (!Number.isFinite(hh) || !Number.isFinite(mm)) next.setHours(9, 0, 0, 0)
+      else next.setHours(hh, mm, 0, 0)
+      if (next.getTime() <= now.getTime()) {
+        if (cfg.freq === 'daily') next.setDate(next.getDate() + 1)
+        else if (cfg.freq === 'weekly') next.setDate(next.getDate() + 7)
+        else if (cfg.freq === 'monthly') next.setMonth(next.getMonth() + 1)
+      }
+      return next.toISOString()
+    }
+    return compute(new Date().toISOString(), form) || undefined
+  }, [form])
 
   const canEnable = state === ImportState.APPROVED || state === ImportState.SCHEDULED
 
@@ -47,14 +64,13 @@ export default function ImportSchedulePage() {
     }
     setSaving(true)
     try {
-      // Save freq/at first, then toggle enable to drive state transition
-      await importerActions.updateSchedule(templateId, { freq: form.freq, at: form.at })
-      if (form.enabled !== origEnabled) {
-        await importerActions.setScheduleEnabled(templateId, form.enabled)
-      } else {
-        // If still enabled, recompute nextRunAt preview save
-        if (form.enabled) await importerActions.updateSchedule(templateId, { nextRunAt: nextPreview })
-      }
+      // Save schedule via API; server will handle state transitions
+      const resp = await fetch('/api/importer/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateId, enabled: form.enabled, freq: form.freq, at: form.at }),
+      })
+      if (!resp.ok) setBanner('Failed to save schedule')
       // Redirect back to imports home
       window.location.assign('/app/imports')
     } finally {

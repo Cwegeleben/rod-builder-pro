@@ -1,3 +1,10 @@
+// <!-- BEGIN RBP GENERATED: importer-v2-3 -->
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// Extend existing API to support listing ImportTemplate rows
+// Usage: GET /app/api/importer/templates?kind=import-templates
+// Returns: { templates: Array<{ id,name,state,hadFailures,lastRunAt? }> }
+// Integrated below in the main loader.
+// <!-- END RBP GENERATED: importer-v2-3 -->
 // hq-importer-new-import-v2
 import { json, type LoaderFunctionArgs } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
@@ -6,9 +13,41 @@ import { listScrapers } from '../services/importer/scrapers.server'
 import { authenticate } from '../shopify.server'
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  // CORS: allow Shopify Admin parent frame to fetch when App Bridge proxies
+  const origin = request.headers.get('origin') || ''
+  const allowOrigins = ['https://admin.shopify.com', 'https://rbp-app.fly.dev', 'http://localhost:3000']
+  const allowOrigin = allowOrigins.find(o => origin.startsWith(o)) || '*'
+  const baseHeaders = new Headers({
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    Vary: 'Origin',
+  })
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: baseHeaders })
+  }
   await requireHqShopOr404(request)
   const url = new URL(request.url)
   const kind = (url.searchParams.get('kind') || '').toLowerCase()
+  // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
+  if (kind === 'import-templates' || kind === 'imports') {
+    const { prisma } = await import('../db.server')
+    try {
+      const rows = await (prisma as any).importTemplate.findMany({
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, state: true, hadFailures: true, lastRunAt: true },
+      })
+      return new Response(JSON.stringify({ templates: rows }), {
+        headers: new Headers({ 'Content-Type': 'application/json', ...Object.fromEntries(baseHeaders) }),
+      })
+    } catch (err) {
+      console.warn('[api.importer.templates] failed to list templates; returning empty list:', err)
+      return new Response(JSON.stringify({ templates: [] }), {
+        headers: new Headers({ 'Content-Type': 'application/json', ...Object.fromEntries(baseHeaders) }),
+      })
+    }
+  }
+  // <!-- END RBP GENERATED: importer-v2-3 -->
   if (kind === 'variant') {
     const tpls = await listTemplatesSummary()
     return json(

@@ -19,6 +19,7 @@ import {
   Toast,
 } from '@shopify/polaris'
 import { useEffect, useState } from 'react'
+import { useLocation } from '@remix-run/react'
 import { authenticate } from '../shopify.server'
 import { requireHqShopOr404 } from '../lib/access.server'
 import { getTemplateWithFields } from '../models/specTemplate.server'
@@ -214,6 +215,16 @@ const coreFieldOptions = [
 
 export default function TemplateDetail() {
   const data = useLoaderData<LoaderData>()
+  const location = useLocation()
+  const nextTarget = (() => {
+    try {
+      const sp = new URLSearchParams(location.search)
+      const n = sp.get('next')
+      return n || ''
+    } catch {
+      return ''
+    }
+  })()
   // Detect if this is a freshly created template via query param (not persisted in state)
   const isNew = typeof window !== 'undefined' ? new URL(window.location.href).searchParams.get('new') === '1' : false
   if (data.status === 'orphan') {
@@ -355,9 +366,15 @@ export default function TemplateDetail() {
             <Text as="h2" variant="headingMd">
               Template
             </Text>
-            <Button url="/app/products/templates" variant="secondary">
-              Back to Templates
-            </Button>
+            {nextTarget ? (
+              <Button url={nextTarget} variant="secondary">
+                Back to Import
+              </Button>
+            ) : (
+              <Button url="/app/products/templates" variant="secondary">
+                Back to Templates
+              </Button>
+            )}
           </InlineStack>
           <TextField
             label="Name"

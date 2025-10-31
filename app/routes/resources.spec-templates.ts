@@ -136,7 +136,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }),
           ),
         )
-        // Mark this navigation as a fresh creation so the edit page can adapt initial UI
+        // If a next callback is provided (Importer unification), redirect there with template details
+        const next = form.get('next') ? String(form.get('next')) : ''
+        const rawQs = form.get('qs') ? String(form.get('qs')) : ''
+        if (next) {
+          const sp = new URLSearchParams(rawQs.startsWith('?') ? rawQs.slice(1) : rawQs)
+          sp.set('templateId', t.id)
+          sp.set('name', name)
+          sp.set('new', '1')
+          return redirect(`${next}?${sp.toString()}`)
+        }
+        // Fallback: Mark this navigation as a fresh creation so the edit page can adapt initial UI
         return redirect(`/app/products/templates/${t.id}?new=1`)
       }
       // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->

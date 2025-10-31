@@ -158,6 +158,58 @@ Schedule Page → app/routes/app.imports.$templateId.schedule.tsx
 
 <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 
+## Templates & Imports — Unified Model (v2.3)
+
+### Core rule
+
+- One Template = One Import (1:1). Creating a Template auto-creates its Import.
+
+### Where things live
+
+- Home / Imports: Dashboard for all Templates-in-operation.
+  - Top table: one row per Template/Import (state-driven actions).
+  - Bottom table: global logs (discovery/scrape/drafts/approve/abort/schedule/recrawl).
+- Add Import: launches New Template Wizard (creates Template + Import, redirects to Import Settings).
+- Import Settings (template-scoped): General, Scrape & Mapping, Preview (no Review here).
+- Review: done in Shopify Products (Drafts filtered by `rbp-import:<runId>`), not inside importer UI.
+- Schedule: separate page; only visible after approval.
+
+### Editing Templates while active/scheduled
+
+- Allowed with override, but:
+  - Suspend schedule automatically,
+  - Set state → `NEEDS_SETTINGS`,
+  - Require re-validation on save to reach `READY_TO_TEST`.
+
+### Deleting Templates
+
+- Multi-step confirm: suspend schedule → delete drafts for open run → confirm dependencies → delete.
+
+### State machine (row actions)
+
+`NEEDS_SETTINGS → READY_TO_TEST → READY_TO_APPROVE → APPROVED → SCHEDULED`
+
+- Test: full scrape → drafts (tag `rbp-import:<runId>`) → logs → `READY_TO_APPROVE`
+- Approve: publish drafts → `APPROVED`
+- Schedule: enable/disable; state toggles `APPROVED`/`SCHEDULED`
+- Delete/Reset: remove current run’s drafts & counters → `READY_TO_TEST`
+
+### Data & persistence
+
+- ImportTemplate: `{ id, name, importConfig<JSON>, state, lastRunAt, hadFailures }`
+- ImportLog: `{ templateId, runId, type, payload, at }`
+- importConfig stores: `productUrls[]`, `mapping`, `scrapeLogic`, `schedule`, `flags`, `counts`, etc.
+
+### Acceptance
+
+- “Add Import” creates Template + Import and lands on Settings.
+- Saving valid Settings sets `READY_TO_TEST`.
+- Test → Drafts; Review in Shopify; Approve → live; Schedule → `SCHEDULED`.
+- Editing Template fields while scheduled suspends schedule and sets `NEEDS_SETTINGS`.
+<!-- END RBP GENERATED: importer-v2-3 -->
+
+<!-- BEGIN RBP GENERATED: importer-v2-3 -->
+
 ### Migration note
 
 Run:

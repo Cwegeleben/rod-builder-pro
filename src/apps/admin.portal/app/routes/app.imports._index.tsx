@@ -2,9 +2,19 @@
 import ImportList from '../components/importer/ImportList'
 import GlobalLogList from '../components/importer/GlobalLogList'
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useLocation } from '@remix-run/react'
+import { useLocation } from '@remix-run/react'
+import { Page, BlockStack, Card, InlineStack, Text } from '@shopify/polaris'
 
-type ImportsHomeProps = { search?: string }
+type ImportsHomeProps = {
+  search?: string
+  initialDbTemplates?: Array<{
+    id: string
+    name?: string
+    state: string
+    hadFailures?: boolean
+    lastRunAt?: string | null
+  }>
+}
 
 export default function ImportsHome(props: ImportsHomeProps = {}) {
   const location = useLocation()
@@ -19,25 +29,36 @@ export default function ImportsHome(props: ImportsHomeProps = {}) {
   }, [])
 
   const addImportHref = useMemo(() => {
+    // Prefer the new inline Add Import wizard which now creates a Spec Template + ImportTemplate 1:1
     const search = qs || ''
     return `/app/imports/new${search}`
   }, [qs])
 
   return (
-    <div>
-      <div className="mb-3 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Imports</h1>
-        <Link to={addImportHref} className="rounded border px-3 py-1.5">
-          Add Import
-        </Link>
-      </div>
-      <section>
-        <ImportList />
-      </section>
-      <section>
-        <GlobalLogList />
-      </section>
-    </div>
+    <Page title="Imports" primaryAction={{ content: 'Add import', url: addImportHref }}>
+      <BlockStack gap="400">
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between">
+              <Text as="h2" variant="headingSm">
+                Your imports
+              </Text>
+            </InlineStack>
+            <ImportList initialDbTemplates={props.initialDbTemplates} />
+          </BlockStack>
+        </Card>
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between">
+              <Text as="h2" variant="headingSm">
+                Logs
+              </Text>
+            </InlineStack>
+            <GlobalLogList />
+          </BlockStack>
+        </Card>
+      </BlockStack>
+    </Page>
   )
 }
 // <!-- END RBP GENERATED: importer-v2-3 -->

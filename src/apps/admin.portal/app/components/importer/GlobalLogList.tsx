@@ -1,4 +1,6 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
+import { Text, Badge, InlineStack } from '@shopify/polaris'
+
 type LogRow = {
   at: string
   templateId: string
@@ -9,62 +11,71 @@ type LogRow = {
 
 export default function GlobalLogList({ items = [] }: { items?: LogRow[] }) {
   const badge = (t: LogRow['type']) => {
-    const base = 'inline-block px-2 py-0.5 text-xs rounded'
     switch (t) {
       case 'discovery':
-        return <span className={`${base} bg-blue-100 text-blue-700`}>discovery</span>
+        return <Badge tone="info">discovery</Badge>
       case 'scrape':
-        return <span className={`${base} bg-amber-100 text-amber-700`}>scrape</span>
+        return <Badge tone="attention">scrape</Badge>
       case 'drafts':
-        return <span className={`${base} bg-slate-100 text-slate-700`}>drafts</span>
+        return <Badge>drafts</Badge>
       case 'approve':
-        return <span className={`${base} bg-green-100 text-green-700`}>approve</span>
+        return <Badge tone="success">approve</Badge>
       case 'abort':
-        return <span className={`${base} bg-red-100 text-red-700`}>abort</span>
+        return <Badge tone="critical">abort</Badge>
       case 'schedule':
-        return <span className={`${base} bg-purple-100 text-purple-700`}>schedule</span>
+        return <Badge tone="info">schedule</Badge>
       case 'recrawl':
-        return <span className={`${base} bg-lime-100 text-lime-700`}>recrawl</span>
+        return <Badge tone="attention">recrawl</Badge>
       case 'error':
-        return <span className={`${base} bg-rose-200 text-rose-800`}>error</span>
+        return <Badge tone="critical">error</Badge>
     }
   }
+  if (!items.length) {
+    return (
+      <Text as="p" tone="subdued">
+        No logs yet.
+      </Text>
+    )
+  }
   return (
-    <div className="rounded border">
-      <div className="border-b px-3 py-2 font-medium">Logs</div>
-      {!items.length ? (
-        <div className="px-3 py-2 text-sm text-slate-500">No logs yet.</div>
-      ) : (
-        <ul className="divide-y">
-          {items.map((r, i) => {
-            let nextRunSnippet: string | null = null
-            const p = r.payload as unknown
-            if (r.type === 'schedule' && p && typeof p === 'object' && 'nextRunAt' in (p as Record<string, unknown>)) {
-              const nr = (p as Record<string, unknown>).nextRunAt
-              if (typeof nr === 'string' && nr) nextRunSnippet = new Date(nr).toLocaleString?.() || nr
-            }
-            return (
-              <li key={i} className="flex items-center gap-2 px-3 py-2 text-sm">
-                {badge(r.type)}
-                <span className="text-slate-500">{new Date(r.at).toLocaleString?.() || r.at}</span>
-                <span>template</span>
-                <a href={`#tpl-${r.templateId}`} className="underline">
-                  {r.templateId}
-                </a>
-                <span className="text-slate-500">run</span>
-                <span>{r.runId}</span>
-                {nextRunSnippet ? <span className="ml-2 text-slate-600">next: {nextRunSnippet}</span> : null}
-                {(() => {
-                  if (r.type !== 'recrawl') return null
-                  const payload = r.payload as { failed?: unknown[] } | undefined
-                  const failCount = Array.isArray(payload?.failed) ? payload!.failed!.length : 0
-                  return failCount > 0 ? <span className="ml-2 text-amber-700">fails: {failCount}</span> : null
-                })()}
-              </li>
-            )
-          })}
-        </ul>
-      )}
+    <div>
+      {items.map((r, i) => {
+        let nextRunSnippet: string | null = null
+        const p = r.payload as unknown
+        if (r.type === 'schedule' && p && typeof p === 'object' && 'nextRunAt' in (p as Record<string, unknown>)) {
+          const nr = (p as Record<string, unknown>).nextRunAt
+          if (typeof nr === 'string' && nr) nextRunSnippet = new Date(nr).toLocaleString?.() || nr
+        }
+        return (
+          <InlineStack key={i} gap="200" align="start">
+            {badge(r.type)}
+            <Text as="span" tone="subdued">
+              {new Date(r.at).toLocaleString?.() || r.at}
+            </Text>
+            <Text as="span">template</Text>
+            <a href={`#tpl-${r.templateId}`}>{r.templateId}</a>
+            <Text as="span" tone="subdued">
+              run
+            </Text>
+            <Text as="span">{r.runId}</Text>
+            {nextRunSnippet ? (
+              <Text as="span" tone="subdued">
+                next: {nextRunSnippet}
+              </Text>
+            ) : null}
+            {(() => {
+              if (r.type !== 'recrawl') return null
+              const payload = r.payload as { failed?: unknown[] } | undefined
+              const failCount = Array.isArray(payload?.failed) ? payload!.failed!.length : 0
+              return failCount > 0 ? (
+                <Text as="span" tone="critical">
+                  fails: {failCount}
+                </Text>
+              ) : null
+            })()}
+          </InlineStack>
+        )
+      })}
     </div>
   )
 }

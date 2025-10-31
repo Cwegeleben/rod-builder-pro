@@ -39,6 +39,26 @@ if (process.env.NODE_ENV === 'production' && !global.__schemaFixDone) {
       if (!hasAvail) {
         await prisma.$executeRawUnsafe('ALTER TABLE SpecTemplate ADD COLUMN supplierAvailability TEXT')
       }
+      // importer-v2-3: ensure ImportTemplate and ImportLog exist to avoid 500s before migrations apply
+      const tbls = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND (name='ImportTemplate' OR name='ImportLog')",
+      )
+      const hasImportTemplate = Array.isArray(tbls) && tbls.some(t => t.name === 'ImportTemplate')
+      const hasImportLog = Array.isArray(tbls) && tbls.some(t => t.name === 'ImportLog')
+      if (!hasImportTemplate) {
+        await prisma.$executeRawUnsafe(
+          "CREATE TABLE IF NOT EXISTS ImportTemplate (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, importConfig TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL DEFAULT 'NEEDS_SETTINGS', lastRunAt DATETIME, hadFailures BOOLEAN NOT NULL DEFAULT 0)",
+        )
+        await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS ImportTemplate_state_idx ON ImportTemplate(state)')
+      }
+      if (!hasImportLog) {
+        await prisma.$executeRawUnsafe(
+          'CREATE TABLE IF NOT EXISTS ImportLog (id TEXT PRIMARY KEY NOT NULL, templateId TEXT NOT NULL, runId TEXT NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL, at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(templateId) REFERENCES ImportTemplate(id) ON DELETE CASCADE ON UPDATE CASCADE)',
+        )
+        await prisma.$executeRawUnsafe(
+          'CREATE INDEX IF NOT EXISTS ImportLog_tpl_run_type_idx ON ImportLog(templateId, runId, type)',
+        )
+      }
     } catch (err) {
       console.warn('[startup] schema check failed (non-fatal):', err)
     }
