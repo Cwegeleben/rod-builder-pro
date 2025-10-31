@@ -51,6 +51,28 @@ export const BatsonRodBlanksSite = {
       const res = runBatsonListing(headlessHtml, baseUrl)
       if (res.seeds.length > 0) return { ...res, usedMode: 'headless' }
     }
+    // <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
+    // Temporary manual-seeds safety net: ensures flow never stalls while selectors stabilize
+    const manualSeeds: Array<{ url: string; title?: string }> = [
+      // Add one or two stable top-level series URLs once confirmed
+      // Example placeholder:
+      // { url: 'https://batsonenterprises.com/rx6', title: 'RX6' },
+    ]
+    if (manualSeeds.length) {
+      return {
+        seeds: manualSeeds.map(s => ({ url: s.url })),
+        debug: {
+          strategyTried: ['manual-fallback'],
+          strategyUsed: 'manual-fallback',
+          totalFound: manualSeeds.length,
+          deduped: manualSeeds.length,
+          sample: manualSeeds.map(s => s.url).slice(0, 5),
+          notes: ['Static and headless returned empty; using manual seeds to unblock.'],
+        },
+        usedMode: 'none' as const,
+      }
+    }
+    // <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
     return {
       seeds: [],
       debug: {

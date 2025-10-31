@@ -40,5 +40,9 @@ RUN npm run build
 ARG PRUNE_DEV=true
 RUN if [ "$PRUNE_DEV" = "true" ]; then npm prune --omit=dev && npm cache clean --force; else echo "[build] Skipping dev prune for maintenance variant"; fi
 ENV NODE_ENV=production
+# <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
+# Signal that Playwright is available in the runtime
+ENV PLAYWRIGHT_AVAILABLE=1
+# <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
 
 ENTRYPOINT ["scripts/start-production.sh"]

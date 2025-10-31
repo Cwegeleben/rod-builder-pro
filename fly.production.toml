@@ -20,6 +20,9 @@ primary_region = 'sjc'
   HQ_SHOPS_REGEX = '^rbp-hq.*dev.*$'
   # Cap V8 old space for a 2GB machine (leave ~25% native overhead)
   NODE_OPTIONS = '--max-old-space-size=1536'
+  # <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
+  PLAYWRIGHT_AVAILABLE = '1'
+  # <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
 
 [processes]
   app = 'scripts/start-production.sh'

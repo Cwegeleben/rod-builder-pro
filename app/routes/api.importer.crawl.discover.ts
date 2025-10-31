@@ -1,5 +1,8 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 -->
 import { json, type ActionFunctionArgs } from '@remix-run/node'
+// <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
+import { renderHeadlessHtml } from '../server/headless/renderHeadlessHtml'
+// <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
 import { requireHqShopOr404 } from '../lib/access.server'
 
 type Req = {
@@ -13,34 +16,36 @@ type Req = {
 
 // (no-op)
 
-// <!-- BEGIN RBP GENERATED: importer-discover-hardening-v1 -->
-// Enhanced static fetch with realistic headers + simple retry/backoff
-async function fetchStaticHtmlWithHeaders(
-  url: string,
-  tries = 2,
-): Promise<{ html: string | null; info: { status?: number; contentLength?: number } }> {
-  const info: { status?: number; contentLength?: number } = {}
+// <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
+// Strong static fetch with headers + retry on 429/5xx
+async function fetchStaticHtml(url: string, tries = 2) {
   const headers = {
     'User-Agent':
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
     Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Cache-Control': 'no-cache',
     Pragma: 'no-cache',
+    'Cache-Control': 'no-cache',
   } as const
+  let lastStatus: number | undefined
+  let html: string | null = null
   for (let i = 0; i < tries; i++) {
     const res = await fetch(url, { method: 'GET', redirect: 'follow', headers }).catch(() => null)
     if (!res) continue
-    info.status = res.status
+    lastStatus = res.status
     const buf = await res.arrayBuffer()
-    info.contentLength = buf.byteLength
-    const html = new TextDecoder('utf-8').decode(buf)
-    if (res.ok && html && html.trim().length > 0) return { html, info }
-    if (res.status >= 500 || res.status === 429) await new Promise(r => setTimeout(r, 500 * (i + 1)))
+    const len = buf.byteLength
+    html = new TextDecoder('utf-8').decode(buf)
+    if (res.ok && len > 0 && html.trim().length > 0) {
+      return { html, status: lastStatus, contentLength: len }
+    }
+    if (res.status === 429 || res.status >= 500) {
+      await new Promise(r => setTimeout(r, 500 * (i + 1)))
+    }
   }
-  return { html: null, info }
+  return { html: html && html.trim().length ? html : null, status: lastStatus, contentLength: html?.length ?? 0 }
 }
-// <!-- END RBP GENERATED: importer-discover-hardening-v1 -->
+// <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
 
 export async function action({ request }: ActionFunctionArgs) {
   await requireHqShopOr404(request)
@@ -70,11 +75,13 @@ export async function action({ request }: ActionFunctionArgs) {
     attempted: false,
   }
 
-  const staticRes = await fetchStaticHtmlWithHeaders(sourceUrl)
+  // <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
+  const staticRes = await fetchStaticHtml(sourceUrl)
   html = staticRes.html || ''
-  status = staticRes.info.status || 0
-  contentType = undefined as string | undefined
-  diag.contentLength = staticRes.info.contentLength ?? 0
+  status = staticRes.status || 0
+  // contentType derived dynamically if needed; keep undefined for now
+  diag.contentLength = staticRes.contentLength ?? 0
+  // <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
   usedMode = html && html.trim().length > 500 ? 'static' : 'none'
   // <!-- END RBP GENERATED: importer-discover-hardening-v1 -->
 
@@ -152,42 +159,26 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // <!-- BEGIN RBP GENERATED: importer-discover-hardening-v1 -->
   async function tryHeadlessRender(url: string): Promise<string | null> {
+    // <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
     headless.attempted = true
     try {
-      const mod = await import('playwright')
-      const browser = await mod.chromium.launch({ headless: true })
-      try {
-        const page = await browser.newPage()
-        await page.goto(url, { timeout: 15000, waitUntil: 'networkidle' })
-        // auto-scroll to trigger lazy content
-        await page.evaluate(async () => {
-          await new Promise<void>(resolve => {
-            let total = 0
-            const step = () => {
-              const dy = Math.min(400, document.body.scrollHeight - window.scrollY)
-              window.scrollBy(0, dy)
-              total += dy
-              if (total >= document.body.scrollHeight || dy <= 0) return resolve()
-              setTimeout(step, 100)
-            }
-            step()
-          })
-        })
-        await page.waitForTimeout(400)
-        const content = await page.content()
-        const t = await page.title().catch(() => '')
+      const content = await renderHeadlessHtml(url, {
+        waitUntil: 'networkidle',
+        afterNavigateDelayMs: 400,
+        autoScroll: true,
+        timeoutMs: 15000,
+      })
+      if (content) {
         headless.available = true
-        headless.title = t || undefined
         headless.length = content.length
-        return content
-      } finally {
-        await browser.close().catch(() => {})
       }
+      return content || null
     } catch (e) {
       headless.available = false
       headless.error = (e as Error)?.message || 'headless unavailable'
       return null
     }
+    // <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
   }
   // <!-- END RBP GENERATED: importer-discover-hardening-v1 -->
 
