@@ -57,6 +57,56 @@ export async function action({ request }: ActionFunctionArgs) {
   const base = `${urlObj.protocol}//${urlObj.host}`
   let urls: string[] = []
 
+  // <!-- BEGIN RBP GENERATED: importer-discover-batson-series-v1 -->
+  // Prefer file-driven site discoverer when available (ADD-only; non-breaking)
+  try {
+    const { getSiteConfigForUrlDiscoverV1 } = await import('../server/importer/sites')
+    const site = getSiteConfigForUrlDiscoverV1?.(sourceUrl) as {
+      id: string
+      discover?: (f: (m: 'static' | 'headless') => Promise<string | null>, b: string) => Promise<unknown>
+    } | null
+    if (site && typeof site.discover === 'function') {
+      const fetchHtml = async (mode: 'static' | 'headless'): Promise<string | null> => {
+        if (mode === 'static') return html || ''
+        const rendered = await tryHeadlessRender()
+        return rendered || null
+      }
+      const result = await site.discover(fetchHtml, base)
+      const r = result && typeof result === 'object' ? (result as Record<string, unknown>) : {}
+      const seedsVal = Array.isArray(r.seeds) ? (r.seeds as Array<Record<string, unknown>>) : []
+      const list = seedsVal
+        .map(s => {
+          const u = typeof s.url === 'string' ? s.url : ''
+          return u.trim()
+        })
+        .filter(Boolean)
+      const usedMode = typeof r.usedMode === 'string' ? (r.usedMode as string) : 'static'
+      const dbg = r.debug && typeof r.debug === 'object' ? (r.debug as Record<string, unknown>) : {}
+      const pt = (() => {
+        const m = (html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+        return m ? m[1].trim() : undefined
+      })()
+      return json({
+        urls: list,
+        count: list.length,
+        debug: {
+          startUrl: sourceUrl,
+          siteId: site.id,
+          usedMode,
+          usedModel,
+          strategy: useHeadless ? 'hybrid' : 'static',
+          pageTitle: pt,
+          contentType,
+          contentLength: String((html || '').length),
+          ...dbg,
+        },
+      })
+    }
+  } catch {
+    /* ignore and fall back to generic flow */
+  }
+  // <!-- END RBP GENERATED: importer-discover-batson-series-v1 -->
+
   async function tryHeadlessRender(): Promise<string | null> {
     headless.attempted = true
     try {

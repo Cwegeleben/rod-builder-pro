@@ -675,48 +675,60 @@ export default function ImportsTemplateSettings() {
                       <div style={{ marginTop: 8 }}>
                         <details>
                           <summary>Debug details</summary>
-                          {crawlDebug ? (
-                            <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.4 }}>
-                              {(() => {
-                                const d = crawlDebug as Record<string, unknown>
-                                const rows: Array<[string, string]> = []
-                                if (typeof d.startUrl === 'string') rows.push(['Start URL', d.startUrl])
-                                if (typeof d.pageTitle === 'string') rows.push(['Page title', d.pageTitle])
-                                if (typeof d.status !== 'undefined') rows.push(['Status', String(d.status)])
-                                if (typeof d.contentType === 'string') rows.push(['Content-Type', d.contentType])
-                                if (typeof d.contentLength === 'string') rows.push(['Content-Length', d.contentLength])
-                                if (typeof d.got === 'string') rows.push(['Provided startUrl', d.got])
-                                return (
-                                  <ul style={{ paddingLeft: 16 }}>
-                                    {rows.map(([k, v]) => (
-                                      <li key={k}>
-                                        <strong>{k}:</strong> {v}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )
-                              })()}
-                              {(() => {
-                                const d = crawlDebug as Record<string, unknown>
-                                const excerpt = typeof d.htmlExcerpt === 'string' ? d.htmlExcerpt : undefined
-                                if (excerpt) {
-                                  return (
-                                    <>
-                                      <div style={{ marginTop: 6 }}>
-                                        <strong>HTML excerpt (first 4k chars):</strong>
-                                      </div>
-                                      <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto' }}>
-                                        {excerpt}
-                                      </pre>
-                                    </>
-                                  )
-                                }
-                                return <p style={{ marginTop: 6 }}>No HTML excerpt available.</p>
-                              })()}
-                            </div>
-                          ) : (
-                            <p style={{ marginTop: 8 }}>No diagnostics available.</p>
-                          )}
+                          {(() => {
+                            // <!-- BEGIN RBP GENERATED: importer-discover-batson-series-v1 -->
+                            const d = (
+                              crawlDebug && typeof crawlDebug === 'object'
+                                ? (crawlDebug as Record<string, unknown>)
+                                : {
+                                    siteId: 'unknown',
+                                    usedMode: 'unknown',
+                                    strategyUsed: 'n/a',
+                                    totalFound: 0,
+                                    deduped: 0,
+                                    sample: [],
+                                    notes: [
+                                      '(synthesized) No server diagnostics; check route wiring or inspect /api/importer/crawl/discover response.',
+                                    ],
+                                  }
+                            ) as Record<string, unknown>
+                            const rows: Array<[string, string]> = []
+                            if (typeof d.startUrl === 'string') rows.push(['Start URL', d.startUrl])
+                            if (typeof d.pageTitle === 'string') rows.push(['Page title', d.pageTitle])
+                            if (typeof d.status !== 'undefined') rows.push(['Status', String(d.status)])
+                            if (typeof d.contentType === 'string') rows.push(['Content-Type', d.contentType])
+                            if (typeof d.contentLength === 'string') rows.push(['Content-Length', d.contentLength])
+                            if (typeof d.got === 'string') rows.push(['Provided startUrl', d.got])
+                            return (
+                              <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.4 }}>
+                                <ul style={{ paddingLeft: 16 }}>
+                                  {rows.map(([k, v]) => (
+                                    <li key={k}>
+                                      <strong>{k}:</strong> {v}
+                                    </li>
+                                  ))}
+                                </ul>
+                                {(() => {
+                                  const excerpt =
+                                    typeof d.htmlExcerpt === 'string' ? (d.htmlExcerpt as string) : undefined
+                                  if (excerpt) {
+                                    return (
+                                      <>
+                                        <div style={{ marginTop: 6 }}>
+                                          <strong>HTML excerpt (first 4k chars):</strong>
+                                        </div>
+                                        <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto' }}>
+                                          {excerpt}
+                                        </pre>
+                                      </>
+                                    )
+                                  }
+                                  return <p style={{ marginTop: 6 }}>No HTML excerpt available.</p>
+                                })()}
+                              </div>
+                            )
+                            // <!-- END RBP GENERATED: importer-discover-batson-series-v1 -->
+                          })()}
                         </details>
                       </div>
                     </Banner>
