@@ -46,6 +46,7 @@ export default function ImportSettings() {
   const [seedsOverride, setSeedsOverride] = React.useState<string[] | null>(null)
   const [seedsText, setSeedsText] = React.useState<string>('')
   const [selectedSeed, setSelectedSeed] = React.useState<string>('')
+  const [attemptedPreview, setAttemptedPreview] = React.useState<boolean>(false)
   const [showAppliedToast, setShowAppliedToast] = React.useState<boolean>(false)
   const seeds = (seedsOverride ?? seedsFetched) as string[]
   React.useEffect(() => {
@@ -262,6 +263,7 @@ export default function ImportSettings() {
                 <Button
                   onClick={() => {
                     const src = selectedSeed || seeds[0] || sourceUrl
+                    setAttemptedPreview(true)
                     if (src) {
                       const data = new FormData()
                       data.set('mode', 'series-products-batson')
@@ -277,10 +279,24 @@ export default function ImportSettings() {
             </InlineStack>
 
             {previewLoading && <SkeletonBodyText lines={3} />}
+            {!previewLoading && attemptedPreview && !preview ? (
+              <Banner tone="warning" title="No preview returned">
+                <p>
+                  The server did not return preview data. Try a different URL from the seeds list or open the selected
+                  URL to confirm it is a series page with an attribute grid.
+                </p>
+              </Banner>
+            ) : null}
             {preview && (preview as unknown as { error?: unknown })?.error ? (
               <Banner tone="critical" title="Preview failed">
                 <p>{String((preview as unknown as { error?: unknown })?.error)}</p>
               </Banner>
+            ) : null}
+            {preview && !('preview' in (preview as Record<string, unknown>)) ? (
+              <details>
+                <summary>Server response (debug)</summary>
+                <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(preview, null, 2)}</pre>
+              </details>
             ) : null}
             {preview && preview.preview ? (
               <BlockStack gap="200">
