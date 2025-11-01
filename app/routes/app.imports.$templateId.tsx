@@ -1,6 +1,8 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 (re-inlined) -->
 // Revert composition: inline Import Settings UI back into app routes
 import React from 'react'
+import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node'
+import { json } from '@remix-run/node'
 // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
 import {
   Page,
@@ -22,12 +24,23 @@ import {
   Frame,
 } from '@shopify/polaris'
 // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
-import { useSearchParams, useFetcher } from '@remix-run/react'
+// <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
+import { useSearchParams, useFetcher, useLocation, useLoaderData, useParams } from '@remix-run/react'
+// <!-- END RBP GENERATED: importer-save-settings-v1 -->
 // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
 import { KNOWN_IMPORT_TARGETS, getTargetById } from '../server/importer/sites/targets'
+import { requireHqShopOr404 } from '../lib/access.server'
 // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
 
 export default function ImportSettings() {
+  // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
+  const loaderData = useLoaderData<typeof loader>() as {
+    name?: string
+    settings?: { target?: string; discoverSeedUrls?: string[] }
+  }
+  const { templateId } = useParams()
+  // <!-- END RBP GENERATED: importer-save-settings-v1 -->
+  const location = useLocation()
   const [params] = useSearchParams()
   const justCreated = params.get('created') === '1'
   // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
@@ -45,14 +58,46 @@ export default function ImportSettings() {
   const seedsFetched = Array.isArray(fetcher.data?.urls) ? (fetcher.data!.urls as string[]) : []
   const [seedsOverride, setSeedsOverride] = React.useState<string[] | null>(null)
   const [seedsText, setSeedsText] = React.useState<string>('')
-  const [selectedSeed, setSelectedSeed] = React.useState<string>('')
   const [showAppliedToast, setShowAppliedToast] = React.useState<boolean>(false)
+  const [showSavedToast, setShowSavedToast] = React.useState<boolean>(false)
+  const [showPublishedToast, setShowPublishedToast] = React.useState<boolean>(false)
+  // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
+  const [saveLoading, setSaveLoading] = React.useState<boolean>(false)
+  const [saveError, setSaveError] = React.useState<string | null>(null)
+  // <!-- END RBP GENERATED: importer-save-settings-v1 -->
   const seeds = (seedsOverride ?? seedsFetched) as string[]
+  const [importName, setImportName] = React.useState<string>('')
   React.useEffect(() => {
     // Initialize editor with fetched seeds only if user hasn't applied an override yet
     if (!seedsOverride) setSeedsText(seedsFetched.join('\n'))
-    if (!selectedSeed && seedsFetched.length) setSelectedSeed(seedsFetched[0])
+    /* no-op: preview selection removed */
   }, [seedsFetched])
+  // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
+  React.useEffect(() => {
+    // Initialize import name from server
+    if (typeof loaderData?.name === 'string') setImportName(loaderData.name)
+  }, [loaderData?.name])
+  React.useEffect(() => {
+    // Initialize saved target if present
+    const tId = loaderData?.settings?.target
+    if (tId) {
+      const t = getTargetById(tId)
+      if (t) {
+        setTargetId(t.id)
+        setSiteId(t.siteId)
+        setSourceUrl(t.url)
+      }
+    }
+  }, [loaderData?.settings?.target])
+  React.useEffect(() => {
+    // Initialize saved seeds if present
+    const saved = loaderData?.settings?.discoverSeedUrls || []
+    if (saved.length) {
+      setSeedsOverride(saved)
+      setSeedsText(saved.join('\n'))
+    }
+  }, [loaderData?.settings?.discoverSeedUrls])
+  // <!-- END RBP GENERATED: importer-save-settings-v1 -->
   function parseSeeds(input: string): string[] {
     return input
       .split(/\r?\n/)
@@ -143,17 +188,40 @@ export default function ImportSettings() {
     notes: asStringArray(d.notes).length ? asStringArray(d.notes) : ['(synthesized) No server diagnostics.'],
   }
   // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
+  // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
   async function onSave() {
-    // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
-    alert('Saved settings (demo).')
-    // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
+    setSaveError(null)
+    setSaveLoading(true)
+    try {
+      const res = await fetch(`/api/importer/targets/${templateId}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: importName, target: targetId, discoverSeedUrls: seeds }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.ok) {
+        throw new Error(String(data?.error || 'Failed to save settings'))
+      }
+      setShowSavedToast(true)
+    } catch (err) {
+      setSaveError((err as Error)?.message || 'Failed to save settings')
+    } finally {
+      setSaveLoading(false)
+    }
+  }
+  // <!-- END RBP GENERATED: importer-save-settings-v1 -->
+  function onPublish() {
+    // Trigger publish action when available; for now, show a Polaris toast
+    setShowPublishedToast(true)
   }
   return (
     // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
     <Page
       title="Import Settings"
       subtitle="Target → Seeds → Preview → Debug"
-      primaryAction={{ content: 'Save settings', onAction: onSave }}
+      primaryAction={{ content: 'Save settings', onAction: onSave, loading: saveLoading, disabled: saveLoading }}
+      secondaryActions={[{ content: 'Publish', onAction: onPublish }]}
+      backAction={{ content: 'Back to Imports', url: `/app/imports${location.search}` }}
     >
       <BlockStack gap="400">
         {/* Toasts */}
@@ -162,6 +230,42 @@ export default function ImportSettings() {
             <Toast content="Applied edited seeds" onDismiss={() => setShowAppliedToast(false)} duration={2000} />
           </Frame>
         ) : null}
+        {showSavedToast ? (
+          <Frame>
+            <Toast content="Settings saved" onDismiss={() => setShowSavedToast(false)} duration={2000} />
+          </Frame>
+        ) : null}
+        {/* <!-- BEGIN RBP GENERATED: importer-save-settings-v1 --> */}
+        {saveError ? (
+          <Banner tone="critical" title="Save failed">
+            <p>{saveError}</p>
+          </Banner>
+        ) : null}
+        {/* <!-- END RBP GENERATED: importer-save-settings-v1 --> */}
+        {showPublishedToast ? (
+          <Frame>
+            <Toast content="Import published" onDismiss={() => setShowPublishedToast(false)} duration={2000} />
+          </Frame>
+        ) : null}
+
+        {/* Details */}
+        <Card>
+          <BlockStack gap="300">
+            <Text as="h2" variant="headingMd">
+              Details
+            </Text>
+            <div style={{ maxWidth: 560 }}>
+              <TextField
+                label="Import name"
+                value={importName}
+                onChange={val => setImportName(val)}
+                autoComplete="off"
+                placeholder="e.g., Batson Rod Blanks Crawl"
+                helpText="Give this import a descriptive name."
+              />
+            </div>
+          </BlockStack>
+        </Card>
         {/* Target */}
         <Card>
           <BlockStack gap="300">
@@ -254,7 +358,6 @@ export default function ImportSettings() {
                   onClick={() => {
                     const next = parseSeeds(seedsText)
                     setSeedsOverride(next)
-                    if (next.length) setSelectedSeed(next[0])
                     setShowAppliedToast(true)
                   }}
                 >{`Apply edits (${parseSeeds(seedsText).length})`}</Button>
@@ -262,7 +365,6 @@ export default function ImportSettings() {
                   onClick={() => {
                     setSeedsOverride(null)
                     setSeedsText(seedsFetched.join('\n'))
-                    if (seedsFetched.length) setSelectedSeed(seedsFetched[0])
                   }}
                   disabled={!seedsFetched.length}
                 >{`Reset to discovered (${seedsFetched.length})`}</Button>
@@ -272,23 +374,7 @@ export default function ImportSettings() {
                   <p>Click Discover to fetch seeds, or paste URLs above and click Apply.</p>
                 </Banner>
               ) : null}
-              {seeds.length ? (
-                <InlineStack gap="300" align="start">
-                  <div style={{ minWidth: 480 }}>
-                    <Select
-                      label="Preview URL"
-                      options={seeds.map(u => ({ label: u.length > 80 ? u.slice(0, 77) + '…' : u, value: u }))}
-                      value={selectedSeed || seeds[0]}
-                      onChange={setSelectedSeed}
-                    />
-                  </div>
-                  {selectedSeed ? (
-                    <a href={selectedSeed} target="_blank" rel="noreferrer">
-                      <Button>Open</Button>
-                    </a>
-                  ) : null}
-                </InlineStack>
-              ) : null}
+              {/* Preview URL selector and Open button removed */}
             </BlockStack>
           </BlockStack>
         </Card>
@@ -477,3 +563,48 @@ export default function ImportSettings() {
   )
 }
 // <!-- END RBP GENERATED: importer-v2-3 (re-inlined) -->
+
+// Server-side loader to fetch current Import name
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  await requireHqShopOr404(request)
+  const id = params.templateId || ''
+  if (!id) return json({ name: '' })
+  try {
+    const { prisma } = await import('../db.server')
+    const row = await prisma.importTemplate.findUnique({ where: { id }, select: { name: true, importConfig: true } })
+    const cfg = (row?.importConfig as Record<string, unknown> | null) || {}
+    const settings = (cfg['settings'] as Record<string, unknown> | null) || null
+    const target = typeof settings?.['target'] === 'string' ? (settings?.['target'] as string) : undefined
+    const discoverSeedUrls = Array.isArray(settings?.['discoverSeedUrls'])
+      ? (settings?.['discoverSeedUrls'] as unknown[]).filter((x): x is string => typeof x === 'string')
+      : undefined
+    return json({ name: row?.name || '', settings: { target, discoverSeedUrls } })
+  } catch {
+    return json({ name: '' })
+  }
+}
+
+// Server-side action to persist Import name (and keep SpecTemplate in sync)
+export async function action({ request, params }: ActionFunctionArgs) {
+  await requireHqShopOr404(request)
+  const id = params.templateId || ''
+  if (!id) return json({ error: 'Missing template id' }, { status: 400 })
+  const form = await request.formData()
+  const intent = String(form.get('intent') || '')
+  if (intent !== 'save') return json({ error: 'Unsupported intent' }, { status: 400 })
+  const name = String(form.get('name') || '').trim()
+  if (!name) return json({ error: 'Name is required' }, { status: 400 })
+
+  try {
+    const { prisma } = await import('../db.server')
+    const { renameTemplate } = await import('../models/specTemplate.server')
+    // 1) Rename SpecTemplate (updates core field keys based on name)
+    await renameTemplate(id, name)
+    // 2) Keep ImportTemplate name in sync
+    await prisma.importTemplate.update({ where: { id }, data: { name } })
+    return json({ ok: true })
+  } catch (err) {
+    const message = (err as Error)?.message || 'Failed to save settings'
+    return json({ error: message }, { status: 500 })
+  }
+}
