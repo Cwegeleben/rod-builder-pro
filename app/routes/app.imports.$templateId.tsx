@@ -150,13 +150,18 @@ export default function ImportSettings() {
               {siteId ? <Badge tone="info">{`siteId: ${siteId}`}</Badge> : null}
             </InlineStack>
             <InlineStack gap="200">
-              <fetcher.Form method="post" action="/api/importer/crawl.discover">
-                <input type="hidden" name="siteId" value={siteId} />
-                <input type="hidden" name="sourceUrl" value={sourceUrl} />
-                <Button variant="primary" submit disabled={!siteId || !sourceUrl}>
-                  Discover series
-                </Button>
-              </fetcher.Form>
+              <Button
+                variant="primary"
+                disabled={!siteId || !sourceUrl}
+                onClick={() => {
+                  const data = new FormData()
+                  data.set('siteId', siteId)
+                  data.set('sourceUrl', sourceUrl)
+                  fetcher.submit(data, { method: 'post', action: '/api/importer/crawl.discover' })
+                }}
+              >
+                Discover series
+              </Button>
               <Tooltip content="Static fetch; fallback to headless if empty">
                 <Badge tone={headlessAvailable ? 'success' : 'attention'}>
                   {headlessAvailable ? 'Headless available' : 'Headless not available'}
