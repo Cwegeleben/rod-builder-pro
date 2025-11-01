@@ -51,6 +51,15 @@ export const BatsonRodBlanksSite = {
       return false
     }
   },
+  // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
+  // Declare Crawl B products model and UI defaults used by Preview/Apply
+  productsModel: 'batson-attribute-grid' as const,
+  defaults: {
+    vendor: 'Batson',
+    productType: 'Rod Blank',
+    options: ['Length', 'Power', 'Action'] as const,
+  },
+  // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
   async discover(
     fetchHtml: (mode: 'static' | 'headless') => Promise<string | null>,
     baseUrl: string,

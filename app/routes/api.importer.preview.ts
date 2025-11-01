@@ -1,5 +1,15 @@
 // hq-importer-new-import-v2
 import { json, type ActionFunctionArgs } from '@remix-run/node'
+// <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
+// Crawl B registries for product models and Shopify mappers
+import {
+  PRODUCT_MODELS,
+  SHOPIFY_MAPPERS,
+  type ProductModel,
+  type ShopifyMapper,
+} from '../server/importer/products/models'
+import { getSiteConfigForUrl } from '../server/importer/sites'
+// <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
 import { requireHqShopOr404 } from '../lib/access.server'
 import { getScraperById, listScrapers, type Scraper } from '../services/importer/scrapers.server'
 import { fetchActiveSources } from '../../packages/importer/src/seeds/sources'
@@ -153,16 +163,29 @@ export async function action({ request }: ActionFunctionArgs) {
       clearTimeout(timer)
     }
     const base = 'https://batsonenterprises.com'
-    const { extractBatsonAttributeGrid } = await import('../server/importer/products/batsonAttributeGrid')
-    const { toShopifyPreview } = await import('../server/importer/products/shopifyMapper')
-    const { rows } = extractBatsonAttributeGrid(html, base)
+    // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
+    // Use file-driven products model registry to parse and map
+    const siteCfg = getSiteConfigForUrl(src)
+    const modelId =
+      (siteCfg as { products?: { scrapeType?: string } } | undefined)?.products?.scrapeType === 'batson-attribute-grid'
+        ? 'batson-attribute-grid'
+        : 'batson-attribute-grid'
+    const parse: ProductModel = PRODUCT_MODELS[modelId]
+    const mapToShopify: ShopifyMapper = SHOPIFY_MAPPERS[modelId]
+    const { rows } = parse(html, base)
+    // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
     const h1 = html.match(/<h1[^>]*>([^<]{1,200})<\/h1>/i)
     const seriesTitle = (h1 && h1[1] ? h1[1].trim() : rows[0]?.spec.series || 'Series') as string
-    const preview = toShopifyPreview(seriesTitle, rows)
+    // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
+    const preview = mapToShopify(seriesTitle, rows)
+    // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
     const debug = {
       count: rows.length,
       urlUsed: src,
       seriesTitle,
+      // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
+      modelId,
+      // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
       htmlExcerpt: devSampleHtml ? html.slice(0, 4096) : undefined,
     }
     return json({ rows, preview, debug })

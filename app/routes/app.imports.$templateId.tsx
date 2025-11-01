@@ -1,6 +1,25 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 (re-inlined) -->
 // Revert composition: inline Import Settings UI back into app routes
 import React from 'react'
+// <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
+import {
+  Page,
+  Card,
+  BlockStack,
+  InlineStack,
+  Text,
+  Button,
+  Select,
+  TextField,
+  Banner,
+  DataTable,
+  Badge,
+  Divider,
+  InlineCode,
+  SkeletonBodyText,
+  Tooltip,
+} from '@shopify/polaris'
+// <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
 import { useSearchParams, useFetcher } from '@remix-run/react'
 // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
 import { KNOWN_IMPORT_TARGETS, getTargetById } from '../server/importer/sites/targets'
@@ -13,6 +32,23 @@ export default function ImportSettings() {
   // Import Settings UI state: target selection auto-fills source URL
   // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
   const fetcher = useFetcher<{ urls?: string[]; debug?: Record<string, unknown> }>()
+  // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
+  const previewFetcher = useFetcher<{
+    rows?: unknown[]
+    preview?: {
+      product?: { variants?: unknown[]; options?: Array<{ name?: string }>; metafields?: unknown[]; tags?: unknown[] }
+    }
+    debug?: Record<string, unknown>
+  }>()
+  const seeds = Array.isArray(fetcher.data?.urls) ? (fetcher.data!.urls as string[]) : []
+  const preview = (previewFetcher.data || null) as null | {
+    preview?: {
+      product?: { variants?: unknown[]; options?: Array<{ name?: string }>; metafields?: unknown[]; tags?: unknown[] }
+    }
+  }
+  const previewLoading = previewFetcher.state !== 'idle'
+  const headlessAvailable = true
+  // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
   const [targetId, setTargetId] = React.useState<string>('batson-rod-blanks')
   const [sourceUrl, setSourceUrl] = React.useState<string>('https://batsonenterprises.com/rod-blanks')
   const [siteId, setSiteId] = React.useState<string>('batson-rod-blanks')
@@ -71,116 +107,186 @@ export default function ImportSettings() {
     // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
   }
   return (
-    <div>
-      {justCreated ? (
-        <div className="mb-3 rounded border border-green-300 bg-green-50 p-2 text-sm text-green-800">
-          Import created. You can configure settings below.
-        </div>
-      ) : null}
-      <h1>Import Settings</h1>
-      {/* Removed placeholder sections: General, Scrape & Mapping, Preview */}
-      {/* <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 --> */}
-      <div className="mt-4 rounded border p-3">
-        <h2 className="font-semibold">Discover product series from target</h2>
-        <div className="mt-2 flex flex-col gap-2">
-          <label className="text-sm">
-            Target
-            <select
-              value={targetId}
-              onChange={e => onTargetChange(e.target.value)}
-              className="ml-2 rounded border px-2 py-1 text-sm"
-            >
-              <option value="" disabled>
-                Select a source target
-              </option>
-              {KNOWN_IMPORT_TARGETS.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm">
-            Source URL
-            <input value={sourceUrl} disabled className="ml-2 w-full max-w-xl rounded border px-2 py-1 text-sm" />
-          </label>
+    // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
+    <Page title="Import Settings" subtitle="Target → Seeds → Preview → Debug">
+      <BlockStack gap="400">
+        {/* Target */}
+        <Card>
+          <BlockStack gap="300">
+            {justCreated ? (
+              <Banner tone="success" title="Import created">
+                <p>You can configure settings below.</p>
+              </Banner>
+            ) : null}
+            <Text as="h2" variant="headingMd">
+              Target
+            </Text>
+            <InlineStack gap="300" align="start">
+              <div style={{ minWidth: 320 }}>
+                <Select
+                  label="Target"
+                  options={KNOWN_IMPORT_TARGETS.map(t => ({ label: t.label, value: t.id }))}
+                  onChange={onTargetChange}
+                  value={targetId}
+                  placeholder="Select a source target"
+                />
+              </div>
+              <div style={{ minWidth: 480 }}>
+                <TextField label="Source URL" value={sourceUrl} disabled autoComplete="off" />
+              </div>
+              {siteId ? <Badge tone="info">{`siteId: ${siteId}`}</Badge> : null}
+            </InlineStack>
+            <InlineStack gap="200">
+              <fetcher.Form method="post" action="/api/importer/crawl.discover">
+                <input type="hidden" name="siteId" value={siteId} />
+                <input type="hidden" name="sourceUrl" value={sourceUrl} />
+                <Button variant="primary" submit disabled={!siteId || !sourceUrl}>
+                  Discover series
+                </Button>
+              </fetcher.Form>
+              <Tooltip content="Static fetch; fallback to headless if empty">
+                <Badge tone={headlessAvailable ? 'success' : 'attention'}>
+                  {headlessAvailable ? 'Headless available' : 'Headless not available'}
+                </Badge>
+              </Tooltip>
+            </InlineStack>
+          </BlockStack>
+        </Card>
 
-          <fetcher.Form method="post" action="/api/importer/crawl.discover" className="flex items-center gap-2">
-            <input type="hidden" name="siteId" value={siteId} />
-            <input type="hidden" name="sourceUrl" value={sourceUrl} />
-            <button type="submit" className="rounded border px-3 py-1 text-sm" disabled={!siteId || !sourceUrl}>
-              Discover
-            </button>
-          </fetcher.Form>
-        </div>
+        {/* Seeds */}
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between">
+              <Text as="h2" variant="headingMd">
+                Discovered series (seeds)
+              </Text>
+              <Text variant="bodySm" as="span">
+                {seeds.length} found
+              </Text>
+            </InlineStack>
+            {seeds.length ? (
+              <DataTable columnContentTypes={['text']} headings={['Series URL']} rows={seeds.map(u => [u])} />
+            ) : (
+              <Banner tone="warning" title="No seeds found">
+                <p>Try a different target or ensure headless is available.</p>
+              </Banner>
+            )}
+          </BlockStack>
+        </Card>
 
-        {Array.isArray(data.urls) && data.urls.length > 0 ? (
-          <div className="mt-3 text-sm">
-            <strong>Discovered series (seeds):</strong>
-            <ul className="mt-1 list-disc pl-5">
-              {data.urls.map((u: string) => (
-                <li key={u}>{u}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </div>
+        {/* Preview */}
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between">
+              <Text as="h2" variant="headingMd">
+                Crawl B — Shopify Preview
+              </Text>
+              <InlineStack gap="200">
+                <Button
+                  onClick={() => {
+                    const src = seeds[0] || sourceUrl
+                    if (src)
+                      previewFetcher.load(
+                        `/api/importer/preview?mode=series-products-batson&sourceUrl=${encodeURIComponent(src)}`,
+                      )
+                  }}
+                  disabled={!seeds.length && !sourceUrl}
+                >
+                  Build preview
+                </Button>
+              </InlineStack>
+            </InlineStack>
 
-      <div className="mt-4 rounded border p-3">
-        <h2 className="font-semibold">Debug details</h2>
-        <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-          <div>
-            <strong>Site</strong>: {safe.siteId}
-          </div>
-          <div>
-            <strong>Status</strong>: {String(safe.status)}
-          </div>
-          <div>
-            <strong>Used mode</strong>: {safe.usedMode}
-          </div>
-          <div>
-            <strong>Page title</strong>: {safe.pageTitle}
-          </div>
-          <div>
-            <strong>Content-Length</strong>: {safe.contentLength}
-          </div>
-          <div>
-            <strong>Text-Length</strong>: {safe.textLength}
-          </div>
-          <div>
-            <strong>Strategy used</strong>: {safe.strategyUsed}
-          </div>
-          <div>
-            <strong>Headless</strong>: attempted={String(safe.headless.attempted)} available=
-            {String(safe.headless.available)} {safe.headless.error ? `error=${safe.headless.error}` : ''}
-          </div>
-        </div>
-        <div className="mt-2 text-sm">
-          <strong>Sample</strong>:
-          <pre className="max-h-40 overflow-auto rounded bg-gray-50 p-2 whitespace-pre-wrap">
-            {safe.sample.slice(0, 5).join('\n')}
-          </pre>
-        </div>
-        <details className="mt-2">
-          <summary>HTML excerpt (first ~600 chars)</summary>
-          <pre className="max-h-60 overflow-auto rounded bg-gray-50 p-2 whitespace-pre-wrap">{safe.htmlExcerpt}</pre>
-        </details>
-        <details className="mt-2">
-          <summary>Notes</summary>
-          <ul className="mt-1 list-disc pl-5">
-            {safe.notes.map((n: string, i: number) => (
-              <li key={i}>{n}</li>
-            ))}
-          </ul>
-        </details>
-      </div>
-      {/* <!-- END RBP GENERATED: importer-discover-unified-v1 --> */}
-      <div className="mt-3">
-        <button onClick={onSave} className="rounded border px-3 py-1">
-          Save Settings
-        </button>
-      </div>
-    </div>
+            {previewLoading && <SkeletonBodyText lines={3} />}
+            {preview && preview.preview ? (
+              <BlockStack gap="200">
+                <InlineStack gap="400" align="start">
+                  <Text as="p">
+                    <InlineCode>variants</InlineCode>: {preview.preview.product?.variants?.length ?? 0}
+                  </Text>
+                  <Text as="p">
+                    <InlineCode>options</InlineCode>:{' '}
+                    {((preview.preview.product?.options ?? []) as Array<{ name?: string }>)
+                      .map(o => o.name || '')
+                      .join(', ')}
+                  </Text>
+                  <Text as="p">
+                    <InlineCode>metafields</InlineCode>: {preview.preview.product?.metafields?.length ?? 0}
+                  </Text>
+                  <Text as="p">
+                    <InlineCode>tags</InlineCode>: {(preview.preview.product?.tags ?? []).length}
+                  </Text>
+                </InlineStack>
+                <Divider />
+                <Text as="h3" variant="headingSm">
+                  Variants
+                </Text>
+                <DataTable
+                  columnContentTypes={['text', 'text', 'text', 'text', 'text']}
+                  headings={['SKU', 'Length', 'Power', 'Action', 'Price']}
+                  rows={(
+                    (preview.preview.product?.variants ?? []) as Array<{
+                      sku?: string
+                      option1?: string
+                      option2?: string
+                      option3?: string
+                      price?: string
+                    }>
+                  )
+                    .slice(0, 25)
+                    .map(v => [v.sku || '', v.option1 || '', v.option2 || '', v.option3 || '', v.price || ''])}
+                />
+              </BlockStack>
+            ) : null}
+          </BlockStack>
+        </Card>
+
+        {/* Debug */}
+        <Card>
+          <BlockStack gap="300">
+            <Text as="h2" variant="headingMd">
+              Debug details
+            </Text>
+            <InlineStack gap="400">
+              <Text as="p">
+                <InlineCode>siteId</InlineCode>: {safe.siteId ?? 'unknown'}
+              </Text>
+              <Text as="p">
+                <InlineCode>usedMode</InlineCode>: {safe.usedMode ?? 'unknown'}
+              </Text>
+              <Text as="p">
+                <InlineCode>status</InlineCode>: {String(safe.status ?? 'n/a')}
+              </Text>
+              <Text as="p">
+                <InlineCode>contentLength</InlineCode>: {String(safe.contentLength ?? 0)}
+              </Text>
+              <Text as="p">
+                <InlineCode>textLength</InlineCode>: {String(safe.textLength ?? 0)}
+              </Text>
+            </InlineStack>
+            <Text as="p">
+              <InlineCode>pageTitle</InlineCode>: {safe.pageTitle ?? 'n/a'}
+            </Text>
+            <Text as="p">
+              <InlineCode>strategyUsed</InlineCode>: {safe.strategyUsed ?? 'n/a'}
+            </Text>
+            <Text as="p">
+              <InlineCode>sample</InlineCode>: {safe.sample.slice(0, 5).join('\n')}
+            </Text>
+            <Divider />
+            <details>
+              <summary>HTML excerpt (first ~600 chars)</summary>
+              <pre style={{ whiteSpace: 'pre-wrap' }}>{safe.htmlExcerpt ?? '(no excerpt)'}</pre>
+            </details>
+          </BlockStack>
+        </Card>
+
+        <InlineStack>
+          <Button onClick={onSave}>Save Settings</Button>
+        </InlineStack>
+      </BlockStack>
+    </Page>
+    // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
   )
 }
 // <!-- END RBP GENERATED: importer-v2-3 (re-inlined) -->
