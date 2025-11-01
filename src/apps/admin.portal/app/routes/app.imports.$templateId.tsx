@@ -96,9 +96,7 @@ export default function ImportSettings() {
         </div>
       ) : null}
       <h1>Import Settings</h1>
-      <div>importer-v2-3 placeholder: General</div>
-      <div>importer-v2-3 placeholder: Scrape & Mapping</div>
-      <div>importer-v2-3 placeholder: Preview</div>
+      {/* Removed placeholder sections: General, Scrape & Mapping, Preview */}
       {/* <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 --> */}
       <div className="mt-4 rounded border p-3">
         <h2 className="font-semibold">Discover product series from target</h2>
