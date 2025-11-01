@@ -129,6 +129,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const supplierId = 'batson' // current supplier scope; scrapers are generic
   const saved = includeDiscovered ? (await fetchActiveSources(supplierId)).map((s: { url: string }) => s.url) : []
   const urls = Array.from(new Set([...saved, ...manual])).slice(0, 50)
+  // <!-- BEGIN RBP GENERATED: importer-crawlB-batson-attrgrid-v1 -->
   // New mode: series-products-batson — parse Batson attribute-grid and build Shopify preview
   if (mode === 'series-products-batson') {
     const src = typeof sourceUrl === 'string' && sourceUrl.trim() ? sourceUrl.trim() : manual[0] || ''
@@ -166,6 +167,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     return json({ rows, preview, debug })
   }
+  // <!-- END RBP GENERATED: importer-crawlB-batson-attrgrid-v1 -->
   // <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 -->
   // Special mode: series-preview (Crawl #2) — scrape first series page and map to template fields
   if (mode === 'series-preview') {
