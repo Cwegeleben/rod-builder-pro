@@ -18,6 +18,8 @@ import {
   InlineCode,
   SkeletonBodyText,
   Tooltip,
+  Toast,
+  Frame,
 } from '@shopify/polaris'
 // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
 import { useSearchParams, useFetcher } from '@remix-run/react'
@@ -43,11 +45,14 @@ export default function ImportSettings() {
   const seedsFetched = Array.isArray(fetcher.data?.urls) ? (fetcher.data!.urls as string[]) : []
   const [seedsOverride, setSeedsOverride] = React.useState<string[] | null>(null)
   const [seedsText, setSeedsText] = React.useState<string>('')
+  const [selectedSeed, setSelectedSeed] = React.useState<string>('')
+  const [showAppliedToast, setShowAppliedToast] = React.useState<boolean>(false)
   const seeds = (seedsOverride ?? seedsFetched) as string[]
   React.useEffect(() => {
     // Initialize editor with fetched seeds only if user hasn't applied an override yet
     if (!seedsOverride) setSeedsText(seedsFetched.join('\n'))
-  }, [seedsFetched, seedsOverride])
+    if (!selectedSeed && seedsFetched.length) setSelectedSeed(seedsFetched[0])
+  }, [seedsFetched])
   function parseSeeds(input: string): string[] {
     return input
       .split(/\r?\n/)
@@ -121,8 +126,18 @@ export default function ImportSettings() {
   }
   return (
     // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
-    <Page title="Import Settings" subtitle="Target → Seeds → Preview → Debug">
+    <Page
+      title="Import Settings"
+      subtitle="Target → Seeds → Preview → Debug"
+      primaryAction={{ content: 'Save settings', onAction: onSave }}
+    >
       <BlockStack gap="400">
+        {/* Toasts */}
+        {showAppliedToast ? (
+          <Frame>
+            <Toast content="Applied edited seeds" onDismiss={() => setShowAppliedToast(false)} duration={2000} />
+          </Frame>
+        ) : null}
         {/* Target */}
         <Card>
           <BlockStack gap="300">
@@ -197,12 +212,15 @@ export default function ImportSettings() {
                   onClick={() => {
                     const next = parseSeeds(seedsText)
                     setSeedsOverride(next)
+                    if (next.length) setSelectedSeed(next[0])
+                    setShowAppliedToast(true)
                   }}
                 >{`Apply edits (${parseSeeds(seedsText).length})`}</Button>
                 <Button
                   onClick={() => {
                     setSeedsOverride(null)
                     setSeedsText(seedsFetched.join('\n'))
+                    if (seedsFetched.length) setSelectedSeed(seedsFetched[0])
                   }}
                   disabled={!seedsFetched.length}
                 >{`Reset to discovered (${seedsFetched.length})`}</Button>
@@ -211,6 +229,23 @@ export default function ImportSettings() {
                 <Banner tone="warning" title="No seeds yet">
                   <p>Click Discover to fetch seeds, or paste URLs above and click Apply.</p>
                 </Banner>
+              ) : null}
+              {seeds.length ? (
+                <InlineStack gap="300" align="start">
+                  <div style={{ minWidth: 480 }}>
+                    <Select
+                      label="Preview URL"
+                      options={seeds.map(u => ({ label: u.length > 80 ? u.slice(0, 77) + '…' : u, value: u }))}
+                      value={selectedSeed || seeds[0]}
+                      onChange={setSelectedSeed}
+                    />
+                  </div>
+                  {selectedSeed ? (
+                    <a href={selectedSeed} target="_blank" rel="noreferrer">
+                      <Button>Open</Button>
+                    </a>
+                  ) : null}
+                </InlineStack>
               ) : null}
             </BlockStack>
           </BlockStack>
@@ -226,7 +261,7 @@ export default function ImportSettings() {
               <InlineStack gap="200">
                 <Button
                   onClick={() => {
-                    const src = seeds[0] || sourceUrl
+                    const src = selectedSeed || seeds[0] || sourceUrl
                     if (src)
                       previewFetcher.load(
                         `/api/importer/preview?mode=series-products-batson&sourceUrl=${encodeURIComponent(src)}`,
@@ -240,6 +275,11 @@ export default function ImportSettings() {
             </InlineStack>
 
             {previewLoading && <SkeletonBodyText lines={3} />}
+            {preview && (preview as unknown as { error?: unknown })?.error ? (
+              <Banner tone="critical" title="Preview failed">
+                <p>{String((preview as unknown as { error?: unknown })?.error)}</p>
+              </Banner>
+            ) : null}
             {preview && preview.preview ? (
               <BlockStack gap="200">
                 <InlineStack gap="400" align="start">
@@ -323,9 +363,7 @@ export default function ImportSettings() {
           </BlockStack>
         </Card>
 
-        <InlineStack>
-          <Button onClick={onSave}>Save Settings</Button>
-        </InlineStack>
+        {/* Page primaryAction handles Save */}
       </BlockStack>
     </Page>
     // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
