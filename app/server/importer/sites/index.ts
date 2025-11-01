@@ -3,11 +3,17 @@ import type { SiteConfig } from './batson.rod-blanks'
 import { BatsonRodBlanksConfig } from './batson.rod-blanks'
 // <!-- BEGIN RBP GENERATED: importer-discover-batson-series-v1 -->
 import { BatsonRodBlanksSite } from './batson.rod-blanks'
+// <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
+import { BatsonReelSeatsSite } from './batson.reel-seats'
+// <!-- END RBP GENERATED: importer-discover-unified-v1 -->
 // <!-- END RBP GENERATED: importer-discover-batson-series-v1 -->
 // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
 export function getDiscoverSiteById(id: string) {
   try {
     if (id === 'batson-rod-blanks') return BatsonRodBlanksSite
+    // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
+    if (id === 'batson-reel-seats') return BatsonReelSeatsSite
+    // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
   } catch {
     /* ignore */
   }
@@ -18,6 +24,11 @@ export function getSiteConfigById(id: string): SiteConfig | null {
   switch (id) {
     case 'batson-rod-blanks':
       return BatsonRodBlanksConfig
+    // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
+    case 'batson-reel-seats':
+      // No dedicated SiteConfig yet; fall back to rod-blanks behavior if needed
+      return BatsonRodBlanksConfig
+    // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
     default:
       return null
   }
@@ -49,11 +60,17 @@ export const SITE_CONFIGS = ALL
 
 // <!-- BEGIN RBP GENERATED: importer-discover-batson-series-v1 -->
 export { BatsonRodBlanksSite } from './batson.rod-blanks'
+// <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
+export { BatsonReelSeatsSite } from './batson.reel-seats'
+// <!-- END RBP GENERATED: importer-discover-unified-v1 -->
 
 // Narrow helper used by the v1 discover flow to get a site object that may implement `discover`
 export function getSiteConfigForUrlDiscoverV1(url: string) {
   try {
     if (BatsonRodBlanksSite.match(url)) return BatsonRodBlanksSite
+    // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
+    if (BatsonReelSeatsSite.match(url)) return BatsonReelSeatsSite
+    // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
   } catch {
     /* ignore */
   }

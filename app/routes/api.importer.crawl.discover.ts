@@ -50,8 +50,23 @@ async function fetchStaticHtml(url: string, tries = 2) {
 export async function action({ request }: ActionFunctionArgs) {
   await requireHqShopOr404(request)
   const ct = request.headers.get('content-type') || ''
-  const unsafe = /json/i.test(ct) ? ((await request.json().catch(() => ({}))) as unknown) : {}
-  const body: Req = typeof unsafe === 'object' && unsafe ? (unsafe as Req) : {}
+  // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
+  let body: Req = {}
+  if (/json/i.test(ct)) {
+    const unsafe = (await request.json().catch(() => ({}))) as unknown
+    body = typeof unsafe === 'object' && unsafe ? (unsafe as Req) : {}
+  } else {
+    const fd = await request.formData().catch(() => null)
+    if (fd) {
+      body = {
+        sourceUrl: fd.get('sourceUrl')?.toString(),
+        discoveryModel: undefined,
+        headless: undefined,
+        siteId: fd.get('siteId')?.toString(),
+      }
+    }
+  }
+  // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
   const sourceUrl = String(body?.sourceUrl || '').trim()
   // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
   const siteId = String(body?.siteId || '').trim()
