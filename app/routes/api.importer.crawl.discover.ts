@@ -1,7 +1,15 @@
 import { json, type ActionFunctionArgs } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
-import { getDiscoverSiteById, getSiteConfigForUrlDiscoverV1 } from '../server/importer/sites'
+import { getDiscoverSiteById, getSiteConfigForUrlDiscoverV1, getSiteConfigForUrl } from '../server/importer/sites'
 import { renderHeadlessHtml } from '../server/headless/renderHeadlessHtml'
+import * as cheerio from 'cheerio'
+import { crawlBatsonRodBlanksListing as crawlRaw } from '../server/importer/crawlers/batsonListing'
+import {
+  PRODUCT_MODELS,
+  SHOPIFY_MAPPERS,
+  type ProductModel,
+  type ShopifyMapper,
+} from '../server/importer/products/models'
 
 export async function action({ request }: ActionFunctionArgs) {
   await requireHqShopOr404(request)
@@ -16,14 +24,33 @@ export async function action({ request }: ActionFunctionArgs) {
     if (fd) {
       const siteId = String(fd.get('siteId') || '').trim()
       const sourceUrl = String(fd.get('sourceUrl') || '').trim()
+      const alsoPreview = String(fd.get('alsoPreview') || '').trim()
+      const previewUrl = String(fd.get('previewUrl') || '').trim()
+      const strategy = String(fd.get('strategy') || '').trim()
+      const devSampleHtml = String(fd.get('devSampleHtml') || '').trim()
       if (siteId) o.siteId = siteId
       if (sourceUrl) o.sourceUrl = sourceUrl
+      if (alsoPreview) o.alsoPreview = alsoPreview
+      if (previewUrl) o.previewUrl = previewUrl
+      if (strategy) o.strategy = strategy
+      if (devSampleHtml) o.devSampleHtml = devSampleHtml
     }
     return o
   }
-  const { siteId: siteIdRaw, sourceUrl: sourceUrlRaw } = (await read()) as {
+  const {
+    siteId: siteIdRaw,
+    sourceUrl: sourceUrlRaw,
+    alsoPreview,
+    previewUrl,
+    strategy,
+    devSampleHtml,
+  } = (await read()) as {
     siteId?: string
     sourceUrl?: string
+    alsoPreview?: string
+    previewUrl?: string
+    strategy?: 'static' | 'headless' | 'hybrid' | string
+    devSampleHtml?: string
   }
   const siteId = (siteIdRaw || '').trim()
   const sourceUrl = (sourceUrlRaw || '').trim()
@@ -82,7 +109,65 @@ export async function action({ request }: ActionFunctionArgs) {
   })()
 
   const res = await siteObj.discover(fetchHtml, baseUrl)
-  const urls = Array.isArray(res.seeds) ? res.seeds.map((s: { url: string }) => s.url) : []
+  let urls = Array.isArray(res.seeds) ? res.seeds.map((s: { url: string }) => s.url) : []
+  // Attempt simple pagination on the listing page to gather additional series URLs
+  const htmlUsed = (res.usedMode === 'headless' ? headlessHtml : staticHtml) || ''
+  let pagesVisited = 1
+  let pageUrls: string[] = []
+  try {
+    if (htmlUsed) {
+      const $ = cheerio.load(htmlUsed)
+      const candidates = new Set<string>()
+      $('a[href]').each((_i, a) => {
+        const href = String($(a).attr('href') || '').trim()
+        if (!href) return
+        const abs = /^https?:/i.test(href) ? href : `${baseUrl}${href.startsWith('/') ? '' : '/'}${href}`
+        try {
+          const u = new URL(abs)
+          // Heuristics: same host, query param page or pagination classes
+          if (u.hostname === new URL(baseUrl).hostname && (u.searchParams.has('page') || /page\d+/i.test(u.pathname))) {
+            candidates.add(u.toString())
+          }
+          if (/pagination|pager|page\b/i.test($(a).attr('class') || '') || $(a).attr('rel') === 'next') {
+            candidates.add(u.toString())
+          }
+        } catch {
+          /* ignore */
+        }
+      })
+      pageUrls = Array.from(candidates)
+        .map(u => {
+          try {
+            const x = new URL(u)
+            x.hash = ''
+            return x.toString()
+          } catch {
+            return u
+          }
+        })
+        .filter(u => !urls.includes(u))
+        .slice(0, 10) // safety cap
+      for (const pu of pageUrls) {
+        try {
+          const ctrl = new AbortController()
+          const timer = setTimeout(() => ctrl.abort(), 10_000)
+          const r = await fetch(pu, { headers, signal: ctrl.signal })
+          clearTimeout(timer)
+          if (r.ok) {
+            const html = await r.text()
+            const more = crawlRaw(html, baseUrl)
+            urls.push(...more)
+            pagesVisited++
+          }
+        } catch {
+          /* ignore page errors */
+        }
+      }
+    }
+  } catch {
+    /* ignore pagination */
+  }
+  urls = Array.from(new Set(urls))
   const debug = {
     siteId: siteObj.id || siteId || 'unknown',
     usedMode: res.usedMode || 'none',
@@ -95,6 +180,82 @@ export async function action({ request }: ActionFunctionArgs) {
     status: 200,
     contentLength: (staticHtml || headlessHtml || '').length,
     textLength: (staticHtml || headlessHtml || '').replace(/<[^>]+>/g, '').length,
+    pagesVisited,
+    pageUrlsSample: pageUrls.slice(0, 5),
+  }
+  // Optionally include a preview for the first (or provided) series URL
+  if (alsoPreview) {
+    const strat = (strategy as 'static' | 'headless' | 'hybrid') || 'hybrid'
+    const src = (typeof previewUrl === 'string' && previewUrl.trim()) || urls[0] || ''
+    if (src) {
+      // Fetch page HTML
+      let html: string | null = null
+      let usedModePreview: 'static' | 'headless' | 'none' = 'none'
+      const fetchStatic = async (): Promise<string | null> => {
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 10_000)
+        try {
+          const r = await fetch(src, { headers, signal: ctrl.signal })
+          if (!r.ok) return null
+          return await r.text()
+        } catch {
+          return null
+        } finally {
+          clearTimeout(timer)
+        }
+      }
+      const fetchHeadless = async (): Promise<string | null> => {
+        try {
+          return await renderHeadlessHtml(src, { timeoutMs: 15_000 })
+        } catch {
+          return null
+        }
+      }
+      if (strat === 'headless') {
+        html = await fetchHeadless()
+        usedModePreview = html ? 'headless' : 'none'
+      } else if (strat === 'static') {
+        html = await fetchStatic()
+        usedModePreview = html ? 'static' : 'none'
+      } else {
+        html = await fetchStatic()
+        usedModePreview = html ? 'static' : 'none'
+        if (!html) {
+          html = await fetchHeadless()
+          usedModePreview = html ? 'headless' : 'none'
+        }
+      }
+      if (html) {
+        const siteCfg = getSiteConfigForUrl(src)
+        const modelId =
+          (siteCfg as { products?: { scrapeType?: string } } | undefined)?.products?.scrapeType ===
+          'batson-attribute-grid'
+            ? 'batson-attribute-grid'
+            : 'batson-attribute-grid'
+        const parse: ProductModel = PRODUCT_MODELS[modelId]
+        const mapToShopify: ShopifyMapper = SHOPIFY_MAPPERS[modelId]
+        let { rows } = parse(html, baseUrl)
+        if (strat === 'hybrid' && usedModePreview === 'static' && (!Array.isArray(rows) || rows.length === 0)) {
+          const hl = await fetchHeadless()
+          if (hl && hl.trim()) {
+            usedModePreview = 'headless'
+            rows = parse(hl, baseUrl).rows
+          }
+        }
+        const h1 = html.match(/<h1[^>]*>([^<]{1,200})<\/h1>/i)
+        const seriesTitle = (h1 && h1[1] ? h1[1].trim() : rows[0]?.spec.series || 'Series') as string
+        const preview = mapToShopify(seriesTitle, rows)
+        const debugPreview = {
+          count: rows.length,
+          urlUsed: src,
+          seriesTitle,
+          modelId,
+          htmlExcerpt: devSampleHtml ? html.slice(0, 2048) : undefined,
+          usedMode: usedModePreview,
+        }
+        return json({ urls, debug, preview: { rows, preview, debug: debugPreview } })
+      }
+    }
   }
   return json({ urls, debug })
 }

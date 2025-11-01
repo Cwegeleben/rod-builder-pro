@@ -33,7 +33,7 @@ export default function ImportSettings() {
   // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
   // Import Settings UI state: target selection auto-fills source URL
   // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
-  const fetcher = useFetcher<{ urls?: string[]; debug?: Record<string, unknown> }>()
+  const fetcher = useFetcher<{ urls?: string[]; debug?: Record<string, unknown>; preview?: unknown }>()
   // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
   const previewFetcher = useFetcher<{
     rows?: unknown[]
@@ -62,11 +62,31 @@ export default function ImportSettings() {
       .map(s => s.trim())
       .filter(Boolean)
   }
-  const preview = (previewFetcher.data || null) as null | {
+  // Prefer preview from explicit preview request; fall back to discover's preview if present
+  const previewExplicit = (previewFetcher.data || null) as null | {
     preview?: {
       product?: { variants?: unknown[]; options?: Array<{ name?: string }>; metafields?: unknown[]; tags?: unknown[] }
     }
   }
+  const previewFromDiscover = (
+    fetcher.data && (fetcher.data as { preview?: unknown }).preview
+      ? ((fetcher.data as { preview?: unknown }).preview as {
+          preview?: {
+            product?: {
+              variants?: unknown[]
+              options?: Array<{ name?: string }>
+              metafields?: unknown[]
+              tags?: unknown[]
+            }
+          }
+        })
+      : null
+  ) as null | {
+    preview?: {
+      product?: { variants?: unknown[]; options?: Array<{ name?: string }>; metafields?: unknown[]; tags?: unknown[] }
+    }
+  }
+  const preview = (previewExplicit || previewFromDiscover) as typeof previewExplicit
   const previewLoading = previewFetcher.state !== 'idle'
   const headlessAvailable = true
   // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
@@ -179,6 +199,20 @@ export default function ImportSettings() {
                 }}
               >
                 Discover series
+              </Button>
+              <Button
+                disabled={!siteId || !sourceUrl}
+                onClick={() => {
+                  const data = new FormData()
+                  data.set('siteId', siteId)
+                  data.set('sourceUrl', sourceUrl)
+                  data.set('alsoPreview', '1')
+                  data.set('strategy', previewStrategy)
+                  if (showHtmlExcerpt) data.set('devSampleHtml', '1')
+                  fetcher.submit(data, { method: 'post', action: '/api/importer/crawl/discover' })
+                }}
+              >
+                Discover + preview first
               </Button>
               <Tooltip content="Static fetch; fallback to headless if empty">
                 <Badge tone={headlessAvailable ? 'success' : 'attention'}>
