@@ -129,6 +129,43 @@ export async function action({ request }: ActionFunctionArgs) {
   const supplierId = 'batson' // current supplier scope; scrapers are generic
   const saved = includeDiscovered ? (await fetchActiveSources(supplierId)).map((s: { url: string }) => s.url) : []
   const urls = Array.from(new Set([...saved, ...manual])).slice(0, 50)
+  // New mode: series-products-batson — parse Batson attribute-grid and build Shopify preview
+  if (mode === 'series-products-batson') {
+    const src = typeof sourceUrl === 'string' && sourceUrl.trim() ? sourceUrl.trim() : manual[0] || ''
+    if (!src) return json({ error: 'sourceUrl required' }, { status: 400 })
+    const headers: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    }
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 8000)
+    let html = ''
+    try {
+      const r = await fetch(src, { headers, signal: ctrl.signal })
+      if (!r.ok) return json({ error: 'fetch-failed', status: r.status, urlUsed: src }, { status: 502 })
+      html = await r.text()
+    } finally {
+      clearTimeout(timer)
+    }
+    const base = 'https://batsonenterprises.com'
+    const { extractBatsonAttributeGrid } = await import('../server/importer/products/batsonAttributeGrid')
+    const { toShopifyPreview } = await import('../server/importer/products/shopifyMapper')
+    const { rows } = extractBatsonAttributeGrid(html, base)
+    const h1 = html.match(/<h1[^>]*>([^<]{1,200})<\/h1>/i)
+    const seriesTitle = (h1 && h1[1] ? h1[1].trim() : rows[0]?.spec.series || 'Series') as string
+    const preview = toShopifyPreview(seriesTitle, rows)
+    const debug = {
+      count: rows.length,
+      urlUsed: src,
+      seriesTitle,
+      htmlExcerpt: devSampleHtml ? html.slice(0, 4096) : undefined,
+    }
+    return json({ rows, preview, debug })
+  }
   // <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 -->
   // Special mode: series-preview (Crawl #2) — scrape first series page and map to template fields
   if (mode === 'series-preview') {
