@@ -72,7 +72,7 @@ export function crawlBatsonRodBlanksListing(html: string, base: string): string[
     .filter(u => /\/(rod-blanks|blanks-by-series|collections\/.*(blank|rod|rx|immortal|revelation))/i.test(u))
     .filter(u => !/\/(rod-blanks|blanks-by-series)\/?$/i.test(u))
 
-  // Keep unique and limit to a sensible size
-  return Array.from(new Set(list)).slice(0, 500)
+  // Keep unique; no max cap (caller/UI can paginate if needed)
+  return Array.from(new Set(list))
 }
 // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->

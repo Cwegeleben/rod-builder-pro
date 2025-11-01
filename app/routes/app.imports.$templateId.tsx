@@ -262,10 +262,12 @@ export default function ImportSettings() {
                 <Button
                   onClick={() => {
                     const src = selectedSeed || seeds[0] || sourceUrl
-                    if (src)
-                      previewFetcher.load(
-                        `/api/importer/preview?mode=series-products-batson&sourceUrl=${encodeURIComponent(src)}`,
-                      )
+                    if (src) {
+                      const data = new FormData()
+                      data.set('mode', 'series-products-batson')
+                      data.set('sourceUrl', src)
+                      previewFetcher.submit(data, { method: 'post', action: '/api/importer/preview' })
+                    }
                   }}
                   disabled={!seeds.length && !sourceUrl}
                 >
