@@ -110,44 +110,67 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const res = await siteObj.discover(fetchHtml, baseUrl)
   let urls = Array.isArray(res.seeds) ? res.seeds.map((s: { url: string }) => s.url) : []
-  // Attempt simple pagination on the listing page to gather additional series URLs
+  // Enhanced pagination: follow rel=next and numbered pages iteratively (same-host), with a safety cap
   const htmlUsed = (res.usedMode === 'headless' ? headlessHtml : staticHtml) || ''
   let pagesVisited = 1
+  const visitedPages = new Set<string>()
+  const pageQueue: string[] = []
   let pageUrls: string[] = []
+  const hostname = (() => {
+    try {
+      return new URL(baseUrl).hostname
+    } catch {
+      return ''
+    }
+  })()
+  const normalizeAbs = (href: string) => {
+    try {
+      const abs = /^https?:/i.test(href) ? href : `${baseUrl}${href.startsWith('/') ? '' : '/'}${href}`
+      const u = new URL(abs)
+      u.hash = ''
+      return u.toString()
+    } catch {
+      return href
+    }
+  }
+  const collectPaginationLinks = ($: cheerio.CheerioAPI) => {
+    const out: string[] = []
+    $('a[href]').each((_i, a) => {
+      const href = String($(a).attr('href') || '').trim()
+      if (!href) return
+      const text = ($(a).text() || '').trim().toLowerCase()
+      const rel = String($(a).attr('rel') || '').toLowerCase()
+      const cls = String($(a).attr('class') || '').toLowerCase()
+      const abs = normalizeAbs(href)
+      try {
+        const u = new URL(abs)
+        if (u.hostname !== hostname) return
+        const isNext = rel.includes('next') || /\bnext\b/.test(text) || /\bnext\b/.test(cls)
+        const isPageParam = u.searchParams.has('page')
+        const isPagePath = /page\/(\d+)/i.test(u.pathname) || /page\d+/i.test(u.pathname)
+        if (isNext || isPageParam || isPagePath || /pagination|pager|page\b/.test(cls)) {
+          out.push(u.toString())
+        }
+      } catch {
+        /* ignore */
+      }
+    })
+    return Array.from(new Set(out))
+  }
   try {
     if (htmlUsed) {
-      const $ = cheerio.load(htmlUsed)
-      const candidates = new Set<string>()
-      $('a[href]').each((_i, a) => {
-        const href = String($(a).attr('href') || '').trim()
-        if (!href) return
-        const abs = /^https?:/i.test(href) ? href : `${baseUrl}${href.startsWith('/') ? '' : '/'}${href}`
-        try {
-          const u = new URL(abs)
-          // Heuristics: same host, query param page or pagination classes
-          if (u.hostname === new URL(baseUrl).hostname && (u.searchParams.has('page') || /page\d+/i.test(u.pathname))) {
-            candidates.add(u.toString())
-          }
-          if (/pagination|pager|page\b/i.test($(a).attr('class') || '') || $(a).attr('rel') === 'next') {
-            candidates.add(u.toString())
-          }
-        } catch {
-          /* ignore */
-        }
-      })
-      pageUrls = Array.from(candidates)
-        .map(u => {
-          try {
-            const x = new URL(u)
-            x.hash = ''
-            return x.toString()
-          } catch {
-            return u
-          }
-        })
-        .filter(u => !urls.includes(u))
-        .slice(0, 10) // safety cap
-      for (const pu of pageUrls) {
+      // Seed queue from initial page
+      const $0 = cheerio.load(htmlUsed)
+      const initial = collectPaginationLinks($0)
+      for (const u of initial) {
+        if (!visitedPages.has(u)) pageQueue.push(u)
+      }
+      pageUrls = initial.slice(0, 5)
+      const MAX_PAGES = 12
+      while (pageQueue.length && pagesVisited < MAX_PAGES) {
+        const pu = pageQueue.shift()!
+        if (!pu || visitedPages.has(pu)) continue
+        visitedPages.add(pu)
         try {
           const ctrl = new AbortController()
           const timer = setTimeout(() => ctrl.abort(), 10_000)
@@ -158,6 +181,12 @@ export async function action({ request }: ActionFunctionArgs) {
             const more = crawlRaw(html, baseUrl)
             urls.push(...more)
             pagesVisited++
+            // Discover more pagination links from this page (for deeper pages)
+            const $ = cheerio.load(html)
+            const nexts = collectPaginationLinks($)
+            for (const nx of nexts) {
+              if (!visitedPages.has(nx)) pageQueue.push(nx)
+            }
           }
         } catch {
           /* ignore page errors */

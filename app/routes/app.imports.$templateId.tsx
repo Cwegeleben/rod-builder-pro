@@ -36,7 +36,7 @@ export default function ImportSettings() {
   const fetcher = useFetcher<{ urls?: string[]; debug?: Record<string, unknown>; preview?: unknown }>()
   // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
   const previewFetcher = useFetcher<{
-    rows?: unknown[]
+    rows?: Array<{ raw?: Record<string, unknown>; spec?: Record<string, unknown> }>
     preview?: {
       product?: { variants?: unknown[]; options?: Array<{ name?: string }>; metafields?: unknown[]; tags?: unknown[] }
     }
@@ -46,10 +46,7 @@ export default function ImportSettings() {
   const [seedsOverride, setSeedsOverride] = React.useState<string[] | null>(null)
   const [seedsText, setSeedsText] = React.useState<string>('')
   const [selectedSeed, setSelectedSeed] = React.useState<string>('')
-  const [attemptedPreview, setAttemptedPreview] = React.useState<boolean>(false)
   const [showAppliedToast, setShowAppliedToast] = React.useState<boolean>(false)
-  const [previewStrategy, setPreviewStrategy] = React.useState<'hybrid' | 'static' | 'headless'>('hybrid')
-  const [showHtmlExcerpt, setShowHtmlExcerpt] = React.useState<boolean>(false)
   const seeds = (seedsOverride ?? seedsFetched) as string[]
   React.useEffect(() => {
     // Initialize editor with fetched seeds only if user hasn't applied an override yet
@@ -64,6 +61,7 @@ export default function ImportSettings() {
   }
   // Prefer preview from explicit preview request; fall back to discover's preview if present
   const previewExplicit = (previewFetcher.data || null) as null | {
+    rows?: Array<{ raw?: Record<string, unknown>; spec?: Record<string, unknown> }>
     preview?: {
       product?: { variants?: unknown[]; options?: Array<{ name?: string }>; metafields?: unknown[]; tags?: unknown[] }
     }
@@ -82,11 +80,14 @@ export default function ImportSettings() {
         })
       : null
   ) as null | {
+    rows?: Array<{ raw?: Record<string, unknown>; spec?: Record<string, unknown> }>
     preview?: {
       product?: { variants?: unknown[]; options?: Array<{ name?: string }>; metafields?: unknown[]; tags?: unknown[] }
     }
   }
   const preview = (previewExplicit || previewFromDiscover) as typeof previewExplicit
+  const previewRows =
+    (preview?.rows as Array<{ raw?: Record<string, unknown>; spec?: Record<string, unknown> }> | undefined) ?? []
   const previewLoading = previewFetcher.state !== 'idle'
   const headlessAvailable = true
   // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
@@ -207,8 +208,6 @@ export default function ImportSettings() {
                   data.set('siteId', siteId)
                   data.set('sourceUrl', sourceUrl)
                   data.set('alsoPreview', '1')
-                  data.set('strategy', previewStrategy)
-                  if (showHtmlExcerpt) data.set('devSampleHtml', '1')
                   fetcher.submit(data, { method: 'post', action: '/api/importer/crawl/discover' })
                 }}
               >
@@ -299,55 +298,13 @@ export default function ImportSettings() {
           <BlockStack gap="300">
             <InlineStack align="space-between">
               <Text as="h2" variant="headingMd">
-                Crawl B — Shopify Preview
+                Preview
               </Text>
-              <InlineStack gap="200">
-                <Button
-                  onClick={() => {
-                    const src = selectedSeed || seeds[0] || sourceUrl
-                    setAttemptedPreview(true)
-                    if (src) {
-                      const data = new FormData()
-                      data.set('mode', 'series-products-batson')
-                      data.set('sourceUrl', src)
-                      data.set('strategy', previewStrategy)
-                      if (showHtmlExcerpt) data.set('devSampleHtml', '1')
-                      previewFetcher.submit(data, { method: 'post', action: '/api/importer/preview' })
-                    }
-                  }}
-                  disabled={!seeds.length && !sourceUrl}
-                >
-                  Build preview
-                </Button>
-                <div style={{ minWidth: 200 }}>
-                  <Select
-                    label="Fetch strategy"
-                    options={[
-                      { label: 'Hybrid (static → headless)', value: 'hybrid' },
-                      { label: 'Static only', value: 'static' },
-                      { label: 'Headless only', value: 'headless' },
-                    ]}
-                    value={previewStrategy}
-                    onChange={v => setPreviewStrategy(v as 'hybrid' | 'static' | 'headless')}
-                  />
-                </div>
-                <div style={{ paddingTop: 22 }}>
-                  <Button onClick={() => setShowHtmlExcerpt(v => !v)} accessibilityLabel="Toggle HTML excerpt">
-                    {showHtmlExcerpt ? 'HTML excerpt: On' : 'HTML excerpt: Off'}
-                  </Button>
-                </div>
-              </InlineStack>
+              <InlineStack gap="200"></InlineStack>
             </InlineStack>
 
             {previewLoading && <SkeletonBodyText lines={3} />}
-            {!previewLoading && attemptedPreview && !preview ? (
-              <Banner tone="warning" title="No preview returned">
-                <p>
-                  The server did not return preview data. Try a different URL from the seeds list or open the selected
-                  URL to confirm it is a series page with an attribute grid.
-                </p>
-              </Banner>
-            ) : null}
+            {/* No explicit build button; preview will show when available from Discover or background load */}
             {preview && (preview as unknown as { error?: unknown })?.error ? (
               <Banner tone="critical" title="Preview failed">
                 <p>{String((preview as unknown as { error?: unknown })?.error)}</p>
@@ -401,6 +358,73 @@ export default function ImportSettings() {
                     .slice(0, 25)
                     .map(v => [v.sku || '', v.option1 || '', v.option2 || '', v.option3 || '', v.price || ''])}
                 />
+                {/* Attributes table from parsed rows */}
+                {previewRows.length ? (
+                  <>
+                    <Divider />
+                    <Text as="h3" variant="headingSm">
+                      Attributes (parsed)
+                    </Text>
+                    <DataTable
+                      columnContentTypes={[
+                        'text',
+                        'text',
+                        'text',
+                        'text',
+                        'text',
+                        'text',
+                        'text',
+                        'text',
+                        'text',
+                        'text',
+                        'text',
+                        'text',
+                      ]}
+                      headings={[
+                        'Code',
+                        'Model',
+                        'Length',
+                        'Power',
+                        'Action',
+                        'Line (lb)',
+                        'Lure (oz)',
+                        'Weight (oz)',
+                        'Butt dia (in)',
+                        'Tip top',
+                        'Availability',
+                        'Price',
+                      ]}
+                      rows={previewRows.slice(0, 25).map(r => {
+                        const spec = (r.spec as Record<string, unknown>) || {}
+                        const raw = (r.raw as Record<string, unknown>) || {}
+                        const length =
+                          (spec['length_label'] as string) || (spec['length_in'] ? `${spec['length_in']}"` : '')
+                        const line =
+                          spec['line_lb_min'] || spec['line_lb_max']
+                            ? `${spec['line_lb_min'] ?? ''}-${spec['line_lb_max'] ?? ''}`
+                            : ''
+                        const lure =
+                          spec['lure_oz_min'] || spec['lure_oz_max']
+                            ? `${spec['lure_oz_min'] ?? ''}-${spec['lure_oz_max'] ?? ''}`
+                            : ''
+                        return [
+                          String((raw['code'] as string) || ''),
+                          String((raw['model'] as string) || ''),
+                          String(length || ''),
+                          String((spec['power'] as string) || ''),
+                          String((spec['action'] as string) || ''),
+                          String(line || ''),
+                          String(lure || ''),
+                          String((spec['weight_oz'] as number | string | undefined) ?? ''),
+                          String((spec['butt_dia_in'] as number | string | undefined) ?? ''),
+                          String((spec['tip_top_size'] as string) || ''),
+                          String((raw['availability'] as string) || ''),
+                          String((raw['price'] as number | string | undefined) ?? ''),
+                        ]
+                      })}
+                    />
+                  </>
+                ) : null}
               </BlockStack>
             ) : null}
           </BlockStack>
