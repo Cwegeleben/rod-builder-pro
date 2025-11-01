@@ -9,6 +9,7 @@ import {
   type ShopifyMapper,
 } from '../server/importer/products/models'
 import { getSiteConfigForUrl } from '../server/importer/sites'
+import { renderHeadlessHtml } from '../server/headless/renderHeadlessHtml'
 // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
 import { requireHqShopOr404 } from '../lib/access.server'
 import { getScraperById, listScrapers, type Scraper } from '../services/importer/scrapers.server'
@@ -152,17 +153,65 @@ export async function action({ request }: ActionFunctionArgs) {
       'Cache-Control': 'no-cache',
       Pragma: 'no-cache',
     }
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 8000)
-    let html = ''
-    try {
-      const r = await fetch(src, { headers, signal: ctrl.signal })
-      if (!r.ok) return json({ error: 'fetch-failed', status: r.status, urlUsed: src }, { status: 502 })
-      html = await r.text()
-    } finally {
-      clearTimeout(timer)
-    }
     const base = 'https://batsonenterprises.com'
+    // Fetch HTML using same strategy as Discover: static-first with headless fallback
+    const strat = (strategy as 'static' | 'headless' | 'hybrid') || 'hybrid'
+    let staticHtml: string | null = null
+    let headlessHtml: string | null = null
+    const fetchStatic = async (): Promise<string | null> => {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 10_000)
+      try {
+        const r = await fetch(src, { headers, signal: ctrl.signal })
+        if (!r.ok) return null
+        return await r.text()
+      } catch {
+        return null
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+    const fetchHeadless = async (): Promise<string | null> => {
+      try {
+        return await renderHeadlessHtml(src, { timeoutMs: 15_000 })
+      } catch {
+        return null
+      }
+    }
+    // Acquire HTML based on strategy
+    let usedMode: 'static' | 'headless' | 'none' = 'none'
+    let html: string = ''
+    if (strat === 'headless') {
+      headlessHtml = await fetchHeadless()
+      if (headlessHtml && headlessHtml.trim()) {
+        usedMode = 'headless'
+        html = headlessHtml
+      }
+    } else if (strat === 'static') {
+      staticHtml = await fetchStatic()
+      if (staticHtml && staticHtml.trim()) {
+        usedMode = 'static'
+        html = staticHtml
+      }
+    } else {
+      // hybrid: try static then headless if parser yields nothing
+      staticHtml = await fetchStatic()
+      if (staticHtml && staticHtml.trim()) {
+        usedMode = 'static'
+        html = staticHtml
+      }
+    }
+    if (!html) {
+      // If hybrid or static failed, try headless as last resort
+      if (strat !== 'static') {
+        headlessHtml = await fetchHeadless()
+        if (headlessHtml && headlessHtml.trim()) {
+          usedMode = 'headless'
+          html = headlessHtml
+        }
+      }
+    }
+    if (!html) return json({ error: 'fetch-failed', status: 502, urlUsed: src }, { status: 502 })
     // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
     // Use file-driven products model registry to parse and map
     const siteCfg = getSiteConfigForUrl(src)
@@ -172,7 +221,16 @@ export async function action({ request }: ActionFunctionArgs) {
         : 'batson-attribute-grid'
     const parse: ProductModel = PRODUCT_MODELS[modelId]
     const mapToShopify: ShopifyMapper = SHOPIFY_MAPPERS[modelId]
-    const { rows } = parse(html, base)
+    let { rows } = parse(html, base)
+    // If hybrid and static produced 0 rows, try headless and re-parse
+    if (strat === 'hybrid' && usedMode === 'static' && (!Array.isArray(rows) || rows.length === 0)) {
+      headlessHtml = headlessHtml || (await fetchHeadless())
+      if (headlessHtml && headlessHtml.trim()) {
+        usedMode = 'headless'
+        html = headlessHtml
+        rows = parse(html, base).rows
+      }
+    }
     // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
     const h1 = html.match(/<h1[^>]*>([^<]{1,200})<\/h1>/i)
     const seriesTitle = (h1 && h1[1] ? h1[1].trim() : rows[0]?.spec.series || 'Series') as string
@@ -187,6 +245,7 @@ export async function action({ request }: ActionFunctionArgs) {
       modelId,
       // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
       htmlExcerpt: devSampleHtml ? html.slice(0, 4096) : undefined,
+      usedMode,
     }
     return json({ rows, preview, debug })
   }
