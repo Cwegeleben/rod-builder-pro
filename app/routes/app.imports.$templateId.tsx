@@ -48,6 +48,8 @@ export default function ImportSettings() {
   const [selectedSeed, setSelectedSeed] = React.useState<string>('')
   const [attemptedPreview, setAttemptedPreview] = React.useState<boolean>(false)
   const [showAppliedToast, setShowAppliedToast] = React.useState<boolean>(false)
+  const [previewStrategy, setPreviewStrategy] = React.useState<'hybrid' | 'static' | 'headless'>('hybrid')
+  const [showHtmlExcerpt, setShowHtmlExcerpt] = React.useState<boolean>(false)
   const seeds = (seedsOverride ?? seedsFetched) as string[]
   React.useEffect(() => {
     // Initialize editor with fetched seeds only if user hasn't applied an override yet
@@ -204,10 +206,16 @@ export default function ImportSettings() {
                 value={seedsText}
                 onChange={val => setSeedsText(val)}
                 autoComplete="off"
-                multiline={6}
+                multiline={16}
                 placeholder={seedsFetched.length ? '' : 'Paste one URL per line'}
                 helpText="Edit the discovered list or paste your own. Click Apply to use these for preview/import."
               />
+              {seedsText ? (
+                <details>
+                  <summary>View all seeds (scroll)</summary>
+                  <pre style={{ whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto' }}>{seedsText}</pre>
+                </details>
+              ) : null}
               <InlineStack gap="200">
                 <Button
                   onClick={() => {
@@ -268,6 +276,8 @@ export default function ImportSettings() {
                       const data = new FormData()
                       data.set('mode', 'series-products-batson')
                       data.set('sourceUrl', src)
+                      data.set('strategy', previewStrategy)
+                      if (showHtmlExcerpt) data.set('devSampleHtml', '1')
                       previewFetcher.submit(data, { method: 'post', action: '/api/importer/preview' })
                     }
                   }}
@@ -275,6 +285,23 @@ export default function ImportSettings() {
                 >
                   Build preview
                 </Button>
+                <div style={{ minWidth: 200 }}>
+                  <Select
+                    label="Fetch strategy"
+                    options={[
+                      { label: 'Hybrid (static → headless)', value: 'hybrid' },
+                      { label: 'Static only', value: 'static' },
+                      { label: 'Headless only', value: 'headless' },
+                    ]}
+                    value={previewStrategy}
+                    onChange={v => setPreviewStrategy(v as 'hybrid' | 'static' | 'headless')}
+                  />
+                </div>
+                <div style={{ paddingTop: 22 }}>
+                  <Button onClick={() => setShowHtmlExcerpt(v => !v)} accessibilityLabel="Toggle HTML excerpt">
+                    {showHtmlExcerpt ? 'HTML excerpt: On' : 'HTML excerpt: Off'}
+                  </Button>
+                </div>
               </InlineStack>
             </InlineStack>
 
@@ -300,6 +327,10 @@ export default function ImportSettings() {
             ) : null}
             {preview && preview.preview ? (
               <BlockStack gap="200">
+                <Text as="p">
+                  <InlineCode>usedMode</InlineCode>:{' '}
+                  {String((previewFetcher.data?.debug as { usedMode?: string } | undefined)?.usedMode ?? 'n/a')}
+                </Text>
                 <InlineStack gap="400" align="start">
                   <Text as="p">
                     <InlineCode>variants</InlineCode>: {preview.preview.product?.variants?.length ?? 0}
