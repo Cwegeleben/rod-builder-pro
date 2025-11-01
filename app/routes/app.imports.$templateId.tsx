@@ -157,7 +157,7 @@ export default function ImportSettings() {
                   const data = new FormData()
                   data.set('siteId', siteId)
                   data.set('sourceUrl', sourceUrl)
-                  fetcher.submit(data, { method: 'post', action: '/api/importer/crawl.discover' })
+                  fetcher.submit(data, { method: 'post', action: '/api/importer/crawl/discover' })
                 }}
               >
                 Discover series

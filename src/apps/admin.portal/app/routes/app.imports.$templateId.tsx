@@ -123,13 +123,21 @@ export default function ImportSettings() {
             <input value={sourceUrl} disabled className="ml-2 w-full max-w-xl rounded border px-2 py-1 text-sm" />
           </label>
 
-          <fetcher.Form method="post" action="/api/importer/crawl.discover" className="flex items-center gap-2">
-            <input type="hidden" name="siteId" value={siteId} />
-            <input type="hidden" name="sourceUrl" value={sourceUrl} />
-            <button type="submit" className="rounded border px-3 py-1 text-sm" disabled={!siteId || !sourceUrl}>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded border px-3 py-1 text-sm"
+              disabled={!siteId || !sourceUrl}
+              onClick={() => {
+                const fd = new FormData()
+                fd.set('siteId', siteId)
+                fd.set('sourceUrl', sourceUrl)
+                fetcher.submit(fd, { method: 'post', action: '/api/importer/crawl/discover' })
+              }}
+            >
               Discover
             </button>
-          </fetcher.Form>
+          </div>
         </div>
 
         {Array.isArray(data.urls) && data.urls.length > 0 ? (
