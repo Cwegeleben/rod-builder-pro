@@ -40,7 +40,20 @@ export default function ImportSettings() {
     }
     debug?: Record<string, unknown>
   }>()
-  const seeds = Array.isArray(fetcher.data?.urls) ? (fetcher.data!.urls as string[]) : []
+  const seedsFetched = Array.isArray(fetcher.data?.urls) ? (fetcher.data!.urls as string[]) : []
+  const [seedsOverride, setSeedsOverride] = React.useState<string[] | null>(null)
+  const [seedsText, setSeedsText] = React.useState<string>('')
+  const seeds = (seedsOverride ?? seedsFetched) as string[]
+  React.useEffect(() => {
+    // Initialize editor with fetched seeds only if user hasn't applied an override yet
+    if (!seedsOverride) setSeedsText(seedsFetched.join('\n'))
+  }, [seedsFetched, seedsOverride])
+  function parseSeeds(input: string): string[] {
+    return input
+      .split(/\r?\n/)
+      .map(s => s.trim())
+      .filter(Boolean)
+  }
   const preview = (previewFetcher.data || null) as null | {
     preview?: {
       product?: { variants?: unknown[]; options?: Array<{ name?: string }>; metafields?: unknown[]; tags?: unknown[] }
@@ -161,16 +174,40 @@ export default function ImportSettings() {
                 Discovered series (seeds)
               </Text>
               <Text variant="bodySm" as="span">
-                {seeds.length} found
+                {seeds.length} in use
               </Text>
             </InlineStack>
-            {seeds.length ? (
-              <DataTable columnContentTypes={['text']} headings={['Series URL']} rows={seeds.map(u => [u])} />
-            ) : (
-              <Banner tone="warning" title="No seeds found">
-                <p>Try a different target or ensure headless is available.</p>
-              </Banner>
-            )}
+            <BlockStack gap="200">
+              <TextField
+                label="Series URLs (editable)"
+                value={seedsText}
+                onChange={val => setSeedsText(val)}
+                autoComplete="off"
+                multiline={6}
+                placeholder={seedsFetched.length ? '' : 'Paste one URL per line'}
+                helpText="Edit the discovered list or paste your own. Click Apply to use these for preview/import."
+              />
+              <InlineStack gap="200">
+                <Button
+                  onClick={() => {
+                    const next = parseSeeds(seedsText)
+                    setSeedsOverride(next)
+                  }}
+                >{`Apply edits (${parseSeeds(seedsText).length})`}</Button>
+                <Button
+                  onClick={() => {
+                    setSeedsOverride(null)
+                    setSeedsText(seedsFetched.join('\n'))
+                  }}
+                  disabled={!seedsFetched.length}
+                >{`Reset to discovered (${seedsFetched.length})`}</Button>
+              </InlineStack>
+              {!seedsFetched.length && !seeds.length ? (
+                <Banner tone="warning" title="No seeds yet">
+                  <p>Click Discover to fetch seeds, or paste URLs above and click Apply.</p>
+                </Banner>
+              ) : null}
+            </BlockStack>
           </BlockStack>
         </Card>
 
