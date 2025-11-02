@@ -64,7 +64,7 @@ export async function crawlBatson(seedUrls: string[], options?: { templateKey?: 
     requestHandlerTimeoutSecs: 120,
     navigationTimeoutSecs: 60,
     launchContext: {
-      launchOptions: { args: ['--disable-dev-shm-usage'] },
+      launchOptions: { args: ['--disable-dev-shm-usage', '--no-sandbox'] },
     },
     async requestHandler({ request, page, enqueueLinks }) {
       const currentUrl = request.loadedUrl || request.url
@@ -84,13 +84,15 @@ export async function crawlBatson(seedUrls: string[], options?: { templateKey?: 
 
       // 2) Navigate and wait for network to settle
       await page.goto(currentUrl, { waitUntil: 'domcontentloaded' }).catch(() => {})
-      await page.waitForLoadState('networkidle').catch(() => {})
+      // Be resilient: don't block entirely on networkidle (some pages keep polling). Use timeout guard.
+      await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
 
       // 3) If we are on /ecom/purchaselistsearch, wait for client-rendered results and enqueue detail links
       const isEcomList = /\/ecom\/purchaselistsearch/i.test(currentUrl)
       if (isEcomList) {
+        // Try a few selectors; if none match, proceed to generic anchor scan
         try {
-          await page.waitForSelector('a[href*="detail"], a[href*="/ecom/"]', { timeout: 5000 })
+          await page.waitForSelector('a[href*="detail"], a[href*="/ecom/"], a[href*="/products/"]', { timeout: 5000 })
         } catch {
           /* no visible results rendered */
         }
@@ -156,6 +158,7 @@ export async function crawlBatson(seedUrls: string[], options?: { templateKey?: 
 
       const isCollection = /\/collections\//i.test(currentUrl)
       const productAnchors: string[] = sameDomainAnchors.filter(h => /\/(products|product|ecom|rod-blanks)\//i.test(h))
+      // If Shopify products path exists but list heuristics are empty, include them
       const pageAnchors: string[] = [
         ...sameDomainAnchors.filter(
           h => (/\/collections\//i.test(h) && /page=/.test(h)) || /\/ecom\/purchaselistsearch/i.test(h),
