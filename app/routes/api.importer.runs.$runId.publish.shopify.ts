@@ -25,6 +25,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (conflicts > 0) return json({ ok: false, error: 'Resolve conflicts before publishing' }, { status: 400 })
   if (approved === 0) return json({ ok: false, error: 'No approved items to publish' }, { status: 400 })
 
+  // Mark as publishing so status endpoint can reflect running state
+  await prisma.importRun.update({ where: { id: runId }, data: { status: 'publishing' } })
+
   const { totals, productIds } = await publishRunToShopify({ runId, dryRun: dryRun || true })
 
   // Store summary under run.summary.publish

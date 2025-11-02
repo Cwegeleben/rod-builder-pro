@@ -48,12 +48,14 @@ export default function ReviewRunRoute() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [toast, setToast] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
+  const [polling, setPolling] = useState(false)
   const [publishTotals, setPublishTotals] = useState<{
     created: number
     updated: number
     skipped: number
     failed: number
   } | null>(null)
+  const [publishProgress, setPublishProgress] = useState<number>(0)
   type DebugLog = { id: string; type: string; at: string; payload: unknown }
   const debugFetcher = useFetcher<{ run?: unknown; logs?: DebugLog[] }>()
   const [showDebug, setShowDebug] = useState(false)
@@ -187,6 +189,46 @@ export default function ReviewRunRoute() {
             disabled={hasConflicts || approvedCount === 0}
             onClick={async () => {
               setPublishing(true)
+              setPolling(true)
+              setPublishProgress(0)
+              setPublishTotals(null)
+              // Start polling status immediately
+              const poll = async () => {
+                try {
+                  const r = await fetch(`/api/importer/runs/${run.id}/publish/status`, {
+                    headers: { 'Cache-Control': 'no-store' },
+                  })
+                  if (r.ok) {
+                    const s = (await r.json()) as {
+                      ok: boolean
+                      progress: number
+                      state: string
+                      totals?: { created: number; updated: number; skipped: number; failed: number }
+                    }
+                    if (s?.ok) {
+                      setPublishProgress(s.progress || 0)
+                      if (s.totals) setPublishTotals(s.totals)
+                      if (s.state === 'published') {
+                        // Redirect once complete; prefer server totals
+                        const t = s.totals || publishTotals || { created: 0, updated: 0, skipped: 0, failed: 0 }
+                        const query = new URLSearchParams()
+                        query.set('tag', `importRun:${run.id}`)
+                        query.set('banner', 'publishOk')
+                        query.set('created', String(t.created))
+                        query.set('updated', String(t.updated))
+                        query.set('skipped', String(t.skipped))
+                        query.set('failed', String(t.failed))
+                        window.location.assign(`/app/products?${query.toString()}`)
+                        return
+                      }
+                    }
+                  }
+                } catch {
+                  /* ignore transient errors */
+                }
+                if (polling) setTimeout(poll, 800)
+              }
+              setTimeout(poll, 0)
               try {
                 const resp = await fetch(`/api/importer/runs/${run.id}/publish/shopify`, {
                   method: 'POST',
@@ -202,20 +244,14 @@ export default function ReviewRunRoute() {
                 }
                 if (jr?.ok) {
                   setPublishTotals(jr.totals)
-                  // Redirect to products with tag and banner details
-                  const query = new URLSearchParams()
-                  query.set('tag', jr.filter.tag)
-                  query.set('banner', 'publishOk')
-                  query.set('created', String(jr.totals.created))
-                  query.set('updated', String(jr.totals.updated))
-                  query.set('skipped', String(jr.totals.skipped))
-                  query.set('failed', String(jr.totals.failed))
-                  window.location.assign(`/app/products?${query.toString()}`)
+                  setPublishProgress(p => (p < 90 ? 90 : p))
                 } else {
                   setToast('Publish failed')
+                  setPolling(false)
                 }
               } catch (e) {
                 setToast((e as Error)?.message || 'Publish failed')
+                setPolling(false)
               } finally {
                 setPublishing(false)
               }
@@ -227,14 +263,17 @@ export default function ReviewRunRoute() {
         <ReviewFilters searchParams={params} onChange={setParams} />
         <Modal
           open={publishing}
-          onClose={() => setPublishing(false)}
+          onClose={() => {
+            setPublishing(false)
+            setPolling(false)
+          }}
           title="Publishing to Shopify…"
           primaryAction={{ content: 'Close', onAction: () => setPublishing(false) }}
         >
           <Modal.Section>
             <BlockStack gap="200">
               <Text as="p">This may take a minute. You can safely leave this page.</Text>
-              <ProgressBar progress={50} size="small" />
+              <ProgressBar progress={publishProgress || 10} size="small" />
               {publishTotals ? (
                 <Text as="p">
                   Created {publishTotals.created}, Updated {publishTotals.updated}, Skipped {publishTotals.skipped},
