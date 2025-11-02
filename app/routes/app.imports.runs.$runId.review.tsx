@@ -22,8 +22,17 @@ import ReviewFilters from 'app/components/importer/review/ReviewFilters'
 import ReviewIndexTable from 'app/components/importer/review/ReviewIndexTable'
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
+  const url = new URL(request.url)
+  // E2E stub mode: allow tests to render the Review page without HQ/session or DB
+  if (url.searchParams.get('e2e') === '1') {
+    const runId = String(params.runId || '')
+    const now = new Date().toISOString()
+    return json({ run: { id: runId || 'run-e2e', supplierId: 'test-supplier', startedAt: now } })
+  }
   if (!(await isHqShop(request))) throw new Response('Not Found', { status: 404 })
+
   const runId = String(params.runId || '')
+
   const run = await prisma.importRun.findUnique({
     where: { id: runId },
     select: { id: true, supplierId: true, startedAt: true },
