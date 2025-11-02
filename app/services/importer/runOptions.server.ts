@@ -139,6 +139,19 @@ async function createRunFromStaging(supplierId: string): Promise<string> {
   return run.id
 }
 
+// Exported helper to compute diffs for an existing run id (used by launcher fallback to keep logs/run cohesive)
+export async function diffStagingIntoExistingRun(supplierId: string, runId: string, opts?: { options?: RunOptions }) {
+  await prisma.importDiff.deleteMany({ where: { importRunId: runId } })
+  await createDiffRowsForRun(supplierId, runId, { options: opts?.options })
+  const counts = await countDiffsForRun(runId)
+  await writeOptionsToRun(runId, opts?.options || DEFAULT_OPTIONS)
+  await prisma.importRun.update({
+    where: { id: runId },
+    data: { status: 'started', summary: { counts, options: opts?.options || DEFAULT_OPTIONS } as unknown as object },
+  })
+  return counts
+}
+
 async function generateCounts(supplierId: string): Promise<Record<string, number>> {
   const staging = await prisma.partStaging.findMany({ where: { supplierId } })
   const partsTableExists = await prisma.$queryRawUnsafe<{ name: string }[]>(

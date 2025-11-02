@@ -99,15 +99,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     })
     // Fallback: generate diffs from current staging (no crawl) so Review can open
     try {
-      const { diffStagingToCanonical } = await import('../../packages/importer/src/pipelines/diff')
-      // Map target -> supplier; current Batson setup uses 'batson'
+      const { diffStagingIntoExistingRun } = await import('../services/importer/runOptions.server')
+      // Use same pre-created run to keep logs and debug cohesive
       const supplierId = 'batson'
-      const runId = await diffStagingToCanonical(supplierId)
+      await diffStagingIntoExistingRun(supplierId, preRun.id, { options })
       await prisma.importLog.create({
-        data: { templateId, runId, type: 'launcher:fallback:diff-only', payload: {} },
+        data: { templateId, runId: preRun.id, type: 'launcher:fallback:diff-only', payload: {} },
       })
       const search = new URL(request.url).search
-      return redirect(`/app/imports/runs/${runId}/review${search}`)
+      return redirect(`/app/imports/runs/${preRun.id}/review${search}`)
     } catch {
       // If all else fails, redirect back with a banner trigger
       const url = new URL(request.url)
