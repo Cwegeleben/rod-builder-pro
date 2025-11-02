@@ -4,7 +4,7 @@ import { useLocation } from '@remix-run/react'
 import ImportRowStateBadge from './ImportRowStateBadge'
 import ShopifyFilterLink from './ShopifyFilterLink'
 import { importerActions, importerAdapters, ImportState } from '../../state/importerMachine'
-import { IndexTable, Button, ButtonGroup, Link, Text } from '@shopify/polaris'
+import { IndexTable, Button, ButtonGroup, Link, Text, Frame, Toast, Banner } from '@shopify/polaris'
 
 type Row = {
   templateId: string
@@ -27,6 +27,8 @@ type InitialDbTemplate = {
 export default function ImportList({ initialDbTemplates }: { initialDbTemplates?: InitialDbTemplate[] } = {}) {
   const [rows, setRows] = useState<Row[]>([])
   const [busy, setBusy] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const location = useLocation()
 
   useEffect(() => {
@@ -212,6 +214,16 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
 
   return (
     <div>
+      {toast ? (
+        <Frame>
+          <Toast content={toast} duration={2000} onDismiss={() => setToast(null)} />
+        </Frame>
+      ) : null}
+      {error ? (
+        <Banner tone="critical" title="Publish failed" onDismiss={() => setError(null)}>
+          <p>{error}</p>
+        </Banner>
+      ) : null}
       {rows.length === 0 ? (
         <Text as="p" tone="subdued">
           No imports yet. Use “Add import” to create your first one.
@@ -248,6 +260,34 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   <ButtonGroup>
+                    {/* <!-- BEGIN RBP GENERATED: importer-publish-stage-v1 --> */}
+                    <Button
+                      loading={isBusy}
+                      onClick={async () => {
+                        setBusy(r.templateId)
+                        setError(null)
+                        try {
+                          const resp = await fetch('/api/importer/runs', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ templateId: r.templateId, action: 'stage-latest' }),
+                          })
+                          const jr = await resp.json()
+                          if (!resp.ok || !jr?.ok) throw new Error(String(jr?.error || 'Failed'))
+                          const runId = String(jr.runId || '')
+                          setRows(cur => cur.map(x => (x.templateId === r.templateId ? { ...x, runId } : x)))
+                          setToast('Import staged for review.')
+                        } catch (e) {
+                          setError((e as Error)?.message || 'Failed to publish')
+                        } finally {
+                          setBusy(null)
+                        }
+                      }}
+                    >
+                      Publish
+                    </Button>
+                    {r.runId ? <Button url={`/app/imports/${r.runId}${location.search}`}>Review</Button> : null}
+                    {/* <!-- END RBP GENERATED: importer-publish-stage-v1 --> */}
                     {r.state === ImportState.NEEDS_SETTINGS && (
                       <Button url={`/app/imports/${r.templateId}${location.search}`}>Edit settings</Button>
                     )}
