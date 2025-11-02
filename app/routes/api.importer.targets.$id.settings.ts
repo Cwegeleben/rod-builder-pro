@@ -76,7 +76,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     // Keep SpecTemplate and ImportTemplate name in sync
     await renameTemplate(id, nameRaw)
-    await prisma.importTemplate.update({ where: { id }, data: { name: nameRaw, importConfig: nextCfg } })
+    // Persist settings and mark template READY for review launcher
+    await prisma.importTemplate.update({
+      where: { id },
+      data: { name: nameRaw, importConfig: nextCfg, state: 'READY' },
+    })
 
     return json({ ok: true, settings: { name: nameRaw, target: target.id, discoverSeedUrls } })
   } catch (err) {

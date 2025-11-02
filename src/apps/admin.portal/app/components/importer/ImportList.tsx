@@ -260,36 +260,8 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   <ButtonGroup>
-                    {/* <!-- BEGIN RBP GENERATED: importer-publish-stage-v1 --> */}
-                    <Button
-                      loading={isBusy}
-                      onClick={async () => {
-                        setBusy(r.templateId)
-                        setError(null)
-                        try {
-                          const resp = await fetch('/api/importer/runs', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ templateId: r.templateId, action: 'stage-latest' }),
-                          })
-                          const jr = await resp.json()
-                          if (!resp.ok || !jr?.ok) throw new Error(String(jr?.error || 'Failed'))
-                          const runId = String(jr.runId || '')
-                          setRows(cur => cur.map(x => (x.templateId === r.templateId ? { ...x, runId } : x)))
-                          setToast('Import staged for review.')
-                        } catch (e) {
-                          setError((e as Error)?.message || 'Failed to publish')
-                        } finally {
-                          setBusy(null)
-                        }
-                      }}
-                    >
-                      Publish
-                    </Button>
-                    {r.runId ? (
-                      <Button url={`/app/imports/runs/${r.runId}/review${location.search}`}>Review</Button>
-                    ) : null}
-                    {/* <!-- END RBP GENERATED: importer-publish-stage-v1 --> */}
+                    {/* Publish removed; always offer Review which will auto-stage */}
+                    <Button url={`/app/imports/${r.templateId}/review${location.search}`}>Review</Button>
                     {r.state === ImportState.NEEDS_SETTINGS && (
                       <Button url={`/app/imports/${r.templateId}${location.search}`}>Edit settings</Button>
                     )}

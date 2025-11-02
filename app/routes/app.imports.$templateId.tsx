@@ -60,7 +60,6 @@ export default function ImportSettings() {
   const [seedsText, setSeedsText] = React.useState<string>('')
   const [showAppliedToast, setShowAppliedToast] = React.useState<boolean>(false)
   const [showSavedToast, setShowSavedToast] = React.useState<boolean>(false)
-  const [showPublishedToast, setShowPublishedToast] = React.useState<boolean>(false)
   // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
   const [saveLoading, setSaveLoading] = React.useState<boolean>(false)
   const [saveError, setSaveError] = React.useState<string | null>(null)
@@ -210,17 +209,12 @@ export default function ImportSettings() {
     }
   }
   // <!-- END RBP GENERATED: importer-save-settings-v1 -->
-  function onPublish() {
-    // Trigger publish action when available; for now, show a Polaris toast
-    setShowPublishedToast(true)
-  }
   return (
     // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
     <Page
       title="Import Settings"
       subtitle="Target → Seeds → Preview → Debug"
       primaryAction={{ content: 'Save settings', onAction: onSave, loading: saveLoading, disabled: saveLoading }}
-      secondaryActions={[{ content: 'Publish', onAction: onPublish }]}
       backAction={{ content: 'Back to Imports', url: `/app/imports${location.search}` }}
     >
       <BlockStack gap="400">
@@ -242,11 +236,7 @@ export default function ImportSettings() {
           </Banner>
         ) : null}
         {/* <!-- END RBP GENERATED: importer-save-settings-v1 --> */}
-        {showPublishedToast ? (
-          <Frame>
-            <Toast content="Import published" onDismiss={() => setShowPublishedToast(false)} duration={2000} />
-          </Frame>
-        ) : null}
+        {/* Publish removed; review is launched from the list and auto-stages */}
 
         {/* Details */}
         <Card>
