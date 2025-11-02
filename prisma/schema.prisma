@@ -341,11 +341,14 @@ model ImportTemplate {
   state         String   @default("NEEDS_SETTINGS")
   lastRunAt     DateTime?
   hadFailures   Boolean  @default(false)
+  // current preparing run (async review prep); cleared on completion/failure
+  preparingRunId String?
 
   // logs relation
   logs          ImportLog[]
 
   @@index([state])
+  @@index([preparingRunId])
 }
 
 model ImportLog {

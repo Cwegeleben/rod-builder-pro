@@ -35,9 +35,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
     try {
       const rows = await (prisma as any).importTemplate.findMany({
         orderBy: { name: 'asc' },
-        select: { id: true, name: true, state: true, hadFailures: true, lastRunAt: true },
+        select: { id: true, name: true, state: true, hadFailures: true, lastRunAt: true, preparingRunId: true },
       })
-      return new Response(JSON.stringify({ templates: rows }), {
+      // Enrich with preparing snapshot from ImportRun
+      const preparingIds = rows.filter((r: any) => r.preparingRunId).map((r: any) => r.preparingRunId as string)
+      const prepRuns = preparingIds.length
+        ? await (prisma as any).importRun.findMany({
+            where: { id: { in: preparingIds } },
+            select: { id: true, startedAt: true, summary: true },
+          })
+        : []
+      const prepById = Object.fromEntries(
+        prepRuns.map((r: any) => [r.id, { startedAt: r.startedAt, preflight: (r.summary as any)?.preflight || null }]),
+      )
+      const out = rows.map((r: any) => {
+        const prep = r.preparingRunId ? prepById[r.preparingRunId] || null : null
+        const preparing =
+          r.preparingRunId && prep
+            ? {
+                runId: r.preparingRunId as string,
+                startedAt: prep.startedAt as Date,
+                etaSeconds: (prep.preflight?.etaSeconds as number) || undefined,
+              }
+            : null
+        const rest = { ...r }
+        delete (rest as any).preparingRunId
+        return { ...rest, preparing }
+      })
+      return new Response(JSON.stringify({ templates: out }), {
         headers: new Headers({ 'Content-Type': 'application/json', ...Object.fromEntries(baseHeaders) }),
       })
     } catch (err) {

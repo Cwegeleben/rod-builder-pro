@@ -14,6 +14,7 @@ type ImportsHomeProps = {
     hadFailures?: boolean
     lastRunAt?: string | null
   }>
+  initialLogs?: Array<{ at: string; templateId: string; runId: string; type: string; payload?: unknown }>
 }
 
 export default function ImportsHome(props: ImportsHomeProps = {}) {
@@ -54,7 +55,7 @@ export default function ImportsHome(props: ImportsHomeProps = {}) {
                 Logs
               </Text>
             </InlineStack>
-            <GlobalLogList />
+            <GlobalLogList items={props.initialLogs} />
           </BlockStack>
         </Card>
       </BlockStack>

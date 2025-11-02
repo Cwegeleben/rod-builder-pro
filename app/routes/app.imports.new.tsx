@@ -51,6 +51,14 @@ export async function action({ request }: ActionFunctionArgs) {
         hadFailures: false,
       },
     })
+    // Log template created
+    try {
+      await (prisma as any).importLog.create({
+        data: { templateId: tpl.id, runId: tpl.id, type: 'template:created', payload: { name: tpl.name || name } },
+      })
+    } catch {
+      /* ignore */
+    }
     // Redirect to settings for this template id
     const sp = new URLSearchParams(search || '')
     sp.set('created', '1')

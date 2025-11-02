@@ -81,6 +81,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
       where: { id },
       data: { name: nameRaw, importConfig: nextCfg, state: 'READY' },
     })
+    // Log settings saved
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (prisma as any).importLog.create({
+        data: {
+          templateId: id,
+          runId: id,
+          type: 'settings:saved',
+          payload: { name: nameRaw, target: target.id, seeds: discoverSeedUrls.length },
+        },
+      })
+    } catch {
+      /* ignore */
+    }
 
     return json({ ok: true, settings: { name: nameRaw, target: target.id, discoverSeedUrls } })
   } catch (err) {

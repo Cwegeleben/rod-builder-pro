@@ -134,16 +134,33 @@ export async function action({ request }: ActionFunctionArgs) {
   await prisma.importLog.create({
     data: { templateId, runId: run.id, type: 'prepare:start', payload: { candidates, etaSeconds, options } },
   })
+  // Persist preparing run on template for UI polling
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: run.id } })
+  // Additional preflight report log (sample up to 10 discovered URLs for quick debug)
+  try {
+    const sample = Array.from(discovered).slice(0, 10)
+    await prisma.importLog.create({
+      data: { templateId, runId: run.id, type: 'prepare:report', payload: { candidates, etaSeconds, sample } },
+    })
+  } catch {
+    /* ignore */
+  }
 
   import('../services/importer/runOptions.server').then(({ startImportFromOptions }) => {
     setTimeout(() => {
       startImportFromOptions(options, run.id)
         .then(async () => {
           await prisma.importRun.update({ where: { id: run.id }, data: { status: 'started' } })
+          // Clear preparing run pointer
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
           await prisma.importLog.create({ data: { templateId, runId: run.id, type: 'prepare:done', payload: {} } })
         })
         .catch(async (err: unknown) => {
           await prisma.importRun.update({ where: { id: run.id }, data: { status: 'failed' } })
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
           await prisma.importLog.create({
             data: {
               templateId,

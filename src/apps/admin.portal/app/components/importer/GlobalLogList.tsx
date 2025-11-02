@@ -5,7 +5,7 @@ type LogRow = {
   at: string
   templateId: string
   runId: string
-  type: 'discovery' | 'scrape' | 'drafts' | 'approve' | 'abort' | 'schedule' | 'recrawl' | 'error'
+  type: string
   payload?: unknown
 }
 
@@ -28,6 +28,20 @@ export default function GlobalLogList({ items = [] }: { items?: LogRow[] }) {
         return <Badge tone="attention">recrawl</Badge>
       case 'error':
         return <Badge tone="critical">error</Badge>
+      case 'template:created':
+        return <Badge tone="success">created</Badge>
+      case 'settings:saved':
+        return <Badge tone="info">settings</Badge>
+      case 'prepare:start':
+        return <Badge tone="info">prep:start</Badge>
+      case 'prepare:report':
+        return <Badge tone="attention">prep:report</Badge>
+      case 'prepare:done':
+        return <Badge tone="success">prep:done</Badge>
+      case 'prepare:error':
+        return <Badge tone="critical">prep:error</Badge>
+      default:
+        return <Badge>{t}</Badge>
     }
   }
   if (!items.length) {
