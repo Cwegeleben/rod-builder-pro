@@ -35,24 +35,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return redirect(`/app/imports/${templateId}${search}`)
   }
 
-  // Kick off crawl+stage using run options helper; include saved seeds and saved target template key if applicable
+  // Kick off crawl+stage using run options helper; MUST use saved settings seeds to match Preview behavior
   const { startImportFromOptions } = await import('../services/importer/runOptions.server')
-  // Merge seeds priority: explicit settings > BATSON_SEEDS env > target.url
-  const envSeeds = (process.env.BATSON_SEEDS || '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean)
-  const defaultSeeds = target.url ? [target.url] : []
-  const manualUrls = (discoverSeedUrls.length ? discoverSeedUrls : envSeeds.length ? envSeeds : defaultSeeds).filter(
-    Boolean,
-  )
+  const manualUrls = discoverSeedUrls.filter(Boolean)
+  if (!manualUrls.length) {
+    // No saved seeds; redirect back to settings to configure seeds via Discover/Preview
+    const url = new URL(request.url)
+    url.searchParams.set('reviewError', 'need-seeds')
+    return redirect(`/app/imports/${templateId}${url.search}`)
+  }
+
+  // Map target -> templateKey used by extractor so crawl matches Preview
+  function templateKeyForTarget(id: string): string | undefined {
+    if (/^batson-/.test(id)) return 'batson.product.v2'
+    return undefined
+  }
   const options = {
     mode: 'price_avail' as const,
     includeSeeds: true,
     manualUrls,
     skipSuccessful: false,
     notes: `launcher:${templateId}`,
-    templateKey: undefined,
+    templateKey: templateKeyForTarget(targetId),
     variantTemplateId: undefined,
     scraperId: undefined,
   }
