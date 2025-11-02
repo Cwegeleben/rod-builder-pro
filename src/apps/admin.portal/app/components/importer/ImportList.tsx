@@ -244,6 +244,14 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   <ButtonGroup>
+                    {/* Prepare Review starts async preflight + staging */}
+                    <Button
+                      variant="primary"
+                      tone="success"
+                      url={`/app/imports/${r.templateId}/prepare${location.search}`}
+                    >
+                      Prepare review
+                    </Button>
                     {/* Publish removed; always offer Review which will auto-stage */}
                     <Button url={`/app/imports/${r.templateId}/review${location.search}`}>Review</Button>
                     {r.state === ImportState.NEEDS_SETTINGS && (

@@ -25,7 +25,7 @@ export default function PrepareReviewPage() {
     let cancelled = false
     ;(async () => {
       // Kick off prepare
-      const res = await fetch('/api/importer.prepare', {
+      const res = await fetch('/api/importer/prepare', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ templateId }),
