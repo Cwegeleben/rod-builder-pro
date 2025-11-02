@@ -19,6 +19,8 @@ import {
   Divider,
   InlineCode,
   SkeletonBodyText,
+  Spinner,
+  Loading,
   Tooltip,
   Toast,
   Frame,
@@ -48,6 +50,7 @@ export default function ImportSettings() {
   // Import Settings UI state: target selection auto-fills source URL
   // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
   const fetcher = useFetcher<{ urls?: string[]; debug?: Record<string, unknown>; preview?: unknown }>()
+  const discovering = fetcher.state !== 'idle'
   // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
   const previewFetcher = useFetcher<{
     rows?: Array<{ raw?: Record<string, unknown>; spec?: Record<string, unknown> }>
@@ -219,6 +222,12 @@ export default function ImportSettings() {
       backAction={{ content: 'Back to Imports', url: `/app/imports${location.search}` }}
     >
       <BlockStack gap="400">
+        {/* Global top bar loader while discovery runs */}
+        {discovering ? (
+          <Frame>
+            <Loading />
+          </Frame>
+        ) : null}
         {/* Launcher failure banner */}
         {reviewError ? (
           <Banner tone="critical" title="Couldn’t prepare Review">
@@ -297,10 +306,10 @@ export default function ImportSettings() {
               </div>
               {siteId ? <Badge tone="info">{`siteId: ${siteId}`}</Badge> : null}
             </InlineStack>
-            <InlineStack gap="200">
+            <InlineStack gap="200" align="start">
               <Button
                 variant="primary"
-                disabled={!siteId || !sourceUrl}
+                disabled={discovering || !siteId || !sourceUrl}
                 onClick={() => {
                   const data = new FormData()
                   data.set('siteId', siteId)
@@ -311,7 +320,7 @@ export default function ImportSettings() {
                 Discover series
               </Button>
               <Button
-                disabled={!siteId || !sourceUrl}
+                disabled={discovering || !siteId || !sourceUrl}
                 onClick={() => {
                   const data = new FormData()
                   data.set('siteId', siteId)
@@ -322,6 +331,7 @@ export default function ImportSettings() {
               >
                 Discover + preview first
               </Button>
+              {discovering ? <Spinner accessibilityLabel="Discovering series" size="small" /> : null}
               <Tooltip content="Static fetch; fallback to headless if empty">
                 <Badge tone={headlessAvailable ? 'success' : 'attention'}>
                   {headlessAvailable ? 'Headless available' : 'Headless not available'}
@@ -343,6 +353,8 @@ export default function ImportSettings() {
               </Text>
             </InlineStack>
             <BlockStack gap="200">
+              {/* Skeleton hint while discovering and no seeds yet */}
+              {discovering && seeds.length === 0 ? <SkeletonBodyText lines={4} /> : null}
               <TextField
                 label="Series URLs (editable)"
                 value={seedsText}
