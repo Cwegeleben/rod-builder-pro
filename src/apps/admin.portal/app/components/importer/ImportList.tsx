@@ -286,7 +286,9 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                     >
                       Publish
                     </Button>
-                    {r.runId ? <Button url={`/app/imports/${r.runId}${location.search}`}>Review</Button> : null}
+                    {r.runId ? (
+                      <Button url={`/app/imports/runs/${r.runId}/review${location.search}`}>Review</Button>
+                    ) : null}
                     {/* <!-- END RBP GENERATED: importer-publish-stage-v1 --> */}
                     {r.state === ImportState.NEEDS_SETTINGS && (
                       <Button url={`/app/imports/${r.templateId}${location.search}`}>Edit settings</Button>
