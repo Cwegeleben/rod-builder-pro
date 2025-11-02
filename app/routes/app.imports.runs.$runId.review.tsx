@@ -35,6 +35,9 @@ export default function ReviewRunRoute() {
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [toast, setToast] = useState<string | null>(null)
+  type DebugLog = { id: string; type: string; at: string; payload: unknown }
+  const debugFetcher = useFetcher<{ run?: unknown; logs?: DebugLog[] }>()
+  const [showDebug, setShowDebug] = useState(false)
   // const navigate = useNavigate()
   // const location = useLocation()
 
@@ -115,6 +118,7 @@ export default function ReviewRunRoute() {
   const subtitle = `${run.supplierId} — ${new Date(run.startedAt).toLocaleString()}`
 
   const hasRows = (data?.rows?.length || 0) > 0
+  const allZero = (data?.totals?.all || 0) === 0
   return (
     <Page title={title} subtitle={subtitle} backAction={{ content: 'Back to Imports', url: '/app/imports' }}>
       <BlockStack gap="400">
@@ -127,9 +131,30 @@ export default function ReviewRunRoute() {
           <Banner title="No items to review" tone="info">
             There are no changes detected for this run. Try returning to Imports and launching Review again after
             Discovery has found products.
+            {allZero ? (
+              <div style={{ marginTop: 8 }}>
+                <a
+                  href="#"
+                  onClick={e => {
+                    e.preventDefault()
+                    setShowDebug(s => !s)
+                    if (!debugFetcher.data) debugFetcher.load(`/api/importer/runs/${run.id}/debug`)
+                  }}
+                >
+                  {showDebug ? 'Hide' : 'Show'} debug details
+                </a>
+              </div>
+            ) : null}
           </Banner>
         ) : hasConflicts ? (
           <Banner tone="critical" title="Resolve conflicts before publishing to Shopify."></Banner>
+        ) : null}
+        {showDebug ? (
+          <div style={{ border: '1px solid #eee', padding: 12, borderRadius: 6 }}>
+            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>
+              {JSON.stringify(debugFetcher.data || {}, null, 2)}
+            </pre>
+          </div>
         ) : null}
         <Tabs tabs={tabs as unknown as { id: string; content: string }[]} selected={selectedTab} onSelect={setTab} />
         <ReviewFilters searchParams={params} onChange={setParams} />

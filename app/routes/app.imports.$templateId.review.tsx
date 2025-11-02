@@ -66,18 +66,46 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return (await Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])) as T
   }
 
+  // Pre-create a run so we can attach logs and have a stable runId even if crawl fails
+  const supplierId = 'batson'
+  const preRun = await prisma.importRun.create({
+    data: { supplierId, status: 'started', summary: { options, seedCount: manualUrls.length } as unknown as object },
+  })
+  await prisma.importLog.create({
+    data: {
+      templateId,
+      runId: preRun.id,
+      type: 'launcher:start',
+      payload: { options, seedCount: manualUrls.length },
+    },
+  })
+
   try {
-    // Try full crawl+stage with a 20s guard; if it times out, fall back below
-    const runId = await withTimeout(startImportFromOptions(options), 20_000)
+    // Try full crawl+stage with a 60s guard; if it times out, fall back below
+    const runId = await withTimeout(startImportFromOptions(options, preRun.id), 60_000)
+    await prisma.importLog.create({
+      data: { templateId, runId, type: 'launcher:success', payload: {} },
+    })
     const search = new URL(request.url).search
     return redirect(`/app/imports/runs/${runId}/review${search}`)
-  } catch {
+  } catch (err) {
+    await prisma.importLog.create({
+      data: {
+        templateId,
+        runId: preRun.id,
+        type: 'launcher:error',
+        payload: { message: (err as Error)?.message || 'unknown', stack: (err as Error)?.stack },
+      },
+    })
     // Fallback: generate diffs from current staging (no crawl) so Review can open
     try {
       const { diffStagingToCanonical } = await import('../../packages/importer/src/pipelines/diff')
       // Map target -> supplier; current Batson setup uses 'batson'
       const supplierId = 'batson'
       const runId = await diffStagingToCanonical(supplierId)
+      await prisma.importLog.create({
+        data: { templateId, runId, type: 'launcher:fallback:diff-only', payload: {} },
+      })
       const search = new URL(request.url).search
       return redirect(`/app/imports/runs/${runId}/review${search}`)
     } catch {
