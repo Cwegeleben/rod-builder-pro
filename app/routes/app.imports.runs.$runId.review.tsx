@@ -114,6 +114,7 @@ export default function ReviewRunRoute() {
   const title = 'Review import'
   const subtitle = `${run.supplierId} — ${new Date(run.startedAt).toLocaleString()}`
 
+  const hasRows = (data?.rows?.length || 0) > 0
   return (
     <Page title={title} subtitle={subtitle} backAction={{ content: 'Back to Imports', url: '/app/imports' }}>
       <BlockStack gap="400">
@@ -122,7 +123,12 @@ export default function ReviewRunRoute() {
             <Toast content={toast} duration={2000} onDismiss={() => setToast(null)} />
           </Frame>
         ) : null}
-        {hasConflicts ? (
+        {!hasRows ? (
+          <Banner title="No items to review" tone="info">
+            There are no changes detected for this run. Try returning to Imports and launching Review again after
+            Discovery has found products.
+          </Banner>
+        ) : hasConflicts ? (
           <Banner tone="critical" title="Resolve conflicts before publishing to Shopify."></Banner>
         ) : null}
         <Tabs tabs={tabs as unknown as { id: string; content: string }[]} selected={selectedTab} onSelect={setTab} />

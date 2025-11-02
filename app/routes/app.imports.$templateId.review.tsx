@@ -37,10 +37,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Kick off crawl+stage using run options helper; include saved seeds and saved target template key if applicable
   const { startImportFromOptions } = await import('../services/importer/runOptions.server')
+  // Merge seeds priority: explicit settings > BATSON_SEEDS env > target.url
+  const envSeeds = (process.env.BATSON_SEEDS || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+  const defaultSeeds = target.url ? [target.url] : []
+  const manualUrls = (discoverSeedUrls.length ? discoverSeedUrls : envSeeds.length ? envSeeds : defaultSeeds).filter(
+    Boolean,
+  )
   const options = {
     mode: 'price_avail' as const,
     includeSeeds: true,
-    manualUrls: discoverSeedUrls,
+    manualUrls,
     skipSuccessful: false,
     notes: `launcher:${templateId}`,
     templateKey: undefined,
