@@ -331,6 +331,9 @@ export default function ImportSettings() {
               >
                 Discover + preview first
               </Button>
+              <Button variant="primary" tone="success" url={`/app/imports/${templateId}/prepare${location.search}`}>
+                Prepare review
+              </Button>
               {discovering ? <Spinner accessibilityLabel="Discovering series" size="small" /> : null}
               <Tooltip content="Static fetch; fallback to headless if empty">
                 <Badge tone={headlessAvailable ? 'success' : 'attention'}>
