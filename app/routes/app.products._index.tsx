@@ -35,6 +35,17 @@ type ProductRow = {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request)
   const url = new URL(request.url)
+  // <!-- BEGIN RBP GENERATED: importer-publish-shopify-v1 -->
+  // Support tag=importRun:<runId> (and banner params) for post-publish redirect.
+  const tag = url.searchParams.get('tag') || ''
+  const banner = url.searchParams.get('banner') || ''
+  const created = Number(url.searchParams.get('created') || '0') || 0
+  const updated = Number(url.searchParams.get('updated') || '0') || 0
+  const skipped = Number(url.searchParams.get('skipped') || '0') || 0
+  const failed = Number(url.searchParams.get('failed') || '0') || 0
+  // Shop Admin tag query link
+  const adminTagQuery = tag ? `tag:${tag}` : ''
+  // <!-- END RBP GENERATED: importer-publish-shopify-v1 -->
   const q = url.searchParams.get('q') || ''
   const statusParams = url.searchParams.getAll('status')
   const sortParam = url.searchParams.get('sort') || 'updatedAt desc'
@@ -55,7 +66,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } else if (statusParams.length > 1) {
     queryTokens.push(`(${statusParams.map(s => `status:${s}`).join(' OR ')})`)
   }
-  const finalQuery = queryTokens.join(' ')
+  if (tag) queryTokens.unshift(`tag:${tag}`)
+  const finalQuery = queryTokens.filter(Boolean).join(' ')
 
   const GQL = `#graphql
     query Products($first:Int!, $after:String, $query:String, $sortKey: ProductSortKeys, $reverse:Boolean) {
@@ -116,18 +128,40 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const nextCursor: string | null = edges.length > 0 ? edges[edges.length - 1].cursor : null
 
   const hq = await isHqShop(request)
-  return json({ items, q, status: statusParams, sort: sortParam, first, nextCursor, hq })
+  return json({
+    items,
+    q,
+    status: statusParams,
+    sort: sortParam,
+    first,
+    nextCursor,
+    hq,
+    tag,
+    banner,
+    created,
+    updated,
+    skipped,
+    failed,
+    adminTagQuery,
+  })
 }
 
 export default function ProductsIndex() {
-  const { items, q, status, sort, nextCursor, hq } = useLoaderData<typeof loader>() as {
-    items: ProductRow[]
-    q: string
-    status: string[]
-    sort: string
-    nextCursor: string | null
-    hq: boolean
-  }
+  const { items, q, status, sort, nextCursor, hq, banner, created, updated, skipped, failed, adminTagQuery } =
+    useLoaderData<typeof loader>() as {
+      items: ProductRow[]
+      q: string
+      status: string[]
+      sort: string
+      nextCursor: string | null
+      hq: boolean
+      banner?: string
+      created?: number
+      updated?: number
+      skipped?: number
+      failed?: number
+      adminTagQuery?: string
+    }
   const [params, setParams] = useSearchParams()
   const location = useLocation()
   const [mode, setMode] = useState<IndexFiltersMode>(IndexFiltersMode.Default)
@@ -196,6 +230,27 @@ export default function ProductsIndex() {
   return (
     <Card>
       <BlockStack gap="400">
+        {/* <!-- BEGIN RBP GENERATED: importer-publish-shopify-v1 --> */}
+        {banner === 'publishOk' ? (
+          <Card>
+            <div className="p-m">
+              <InlineStack align="space-between">
+                <Text as="p">
+                  Published {created} created, {updated} updated, {skipped} skipped{failed ? `, ${failed} failed` : ''}.
+                </Text>
+                {adminTagQuery ? (
+                  <Button
+                    url={`https://admin.shopify.com/store/dev/products?query=${encodeURIComponent(adminTagQuery ?? '')}`}
+                    variant="plain"
+                  >
+                    View in Shopify Admin
+                  </Button>
+                ) : null}
+              </InlineStack>
+            </div>
+          </Card>
+        ) : null}
+        {/* <!-- END RBP GENERATED: importer-publish-shopify-v1 --> */}
         <InlineStack align="space-between">
           <Text as="h2" variant="headingLg">
             Products

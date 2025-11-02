@@ -3,7 +3,19 @@ import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { useEffect, useMemo, useState } from 'react'
 import { useFetcher, useLoaderData, useSearchParams } from '@remix-run/react'
-import { Page, Banner, Tabs, BlockStack, Toast, Frame } from '@shopify/polaris'
+import {
+  Page,
+  Banner,
+  Tabs,
+  BlockStack,
+  Toast,
+  Frame,
+  Button,
+  Modal,
+  Text,
+  InlineStack,
+  ProgressBar,
+} from '@shopify/polaris'
 import { prisma } from '../db.server'
 import { isHqShop } from '../lib/access.server'
 import ReviewFilters from 'app/components/importer/review/ReviewFilters'
@@ -35,6 +47,13 @@ export default function ReviewRunRoute() {
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [toast, setToast] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState(false)
+  const [publishTotals, setPublishTotals] = useState<{
+    created: number
+    updated: number
+    skipped: number
+    failed: number
+  } | null>(null)
   type DebugLog = { id: string; type: string; at: string; payload: unknown }
   const debugFetcher = useFetcher<{ run?: unknown; logs?: DebugLog[] }>()
   const [showDebug, setShowDebug] = useState(false)
@@ -114,6 +133,10 @@ export default function ReviewRunRoute() {
   }
 
   const hasConflicts = (data?.totals?.conflicts || 0) > 0
+  const approvedCount = (() => {
+    const rows = data?.rows || []
+    return rows.filter(r => r.core.status === 'approved').length
+  })()
   const title = 'Review import'
   const subtitle = `${run.supplierId} — ${new Date(run.startedAt).toLocaleString()}`
 
@@ -156,8 +179,71 @@ export default function ReviewRunRoute() {
             </pre>
           </div>
         ) : null}
-        <Tabs tabs={tabs as unknown as { id: string; content: string }[]} selected={selectedTab} onSelect={setTab} />
+        <InlineStack align="space-between">
+          <Tabs tabs={tabs as unknown as { id: string; content: string }[]} selected={selectedTab} onSelect={setTab} />
+          <Button
+            variant="primary"
+            tone="success"
+            disabled={hasConflicts || approvedCount === 0}
+            onClick={async () => {
+              setPublishing(true)
+              try {
+                const resp = await fetch(`/api/importer/runs/${run.id}/publish/shopify`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ dryRun: true }),
+                })
+                if (!resp.ok) throw new Error('Publish failed')
+                const jr = (await resp.json()) as {
+                  ok: boolean
+                  runId: string
+                  totals: { created: number; updated: number; skipped: number; failed: number }
+                  filter: { tag: string }
+                }
+                if (jr?.ok) {
+                  setPublishTotals(jr.totals)
+                  // Redirect to products with tag and banner details
+                  const query = new URLSearchParams()
+                  query.set('tag', jr.filter.tag)
+                  query.set('banner', 'publishOk')
+                  query.set('created', String(jr.totals.created))
+                  query.set('updated', String(jr.totals.updated))
+                  query.set('skipped', String(jr.totals.skipped))
+                  query.set('failed', String(jr.totals.failed))
+                  window.location.assign(`/app/products?${query.toString()}`)
+                } else {
+                  setToast('Publish failed')
+                }
+              } catch (e) {
+                setToast((e as Error)?.message || 'Publish failed')
+              } finally {
+                setPublishing(false)
+              }
+            }}
+          >
+            Publish to Shopify
+          </Button>
+        </InlineStack>
         <ReviewFilters searchParams={params} onChange={setParams} />
+        <Modal
+          open={publishing}
+          onClose={() => setPublishing(false)}
+          title="Publishing to Shopify…"
+          primaryAction={{ content: 'Close', onAction: () => setPublishing(false) }}
+        >
+          <Modal.Section>
+            <BlockStack gap="200">
+              <Text as="p">This may take a minute. You can safely leave this page.</Text>
+              <ProgressBar progress={50} size="small" />
+              {publishTotals ? (
+                <Text as="p">
+                  Created {publishTotals.created}, Updated {publishTotals.updated}, Skipped {publishTotals.skipped},
+                  Failed {publishTotals.failed}
+                </Text>
+              ) : null}
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
         <ReviewIndexTable
           runId={run.id}
           rows={data.rows || []}
