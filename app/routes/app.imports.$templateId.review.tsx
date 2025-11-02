@@ -47,14 +47,32 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     variantTemplateId: undefined,
     scraperId: undefined,
   }
+
+  // Helper: timeout wrapper to avoid long-running crawling in a request cycle
+  async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+    return (await Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])) as T
+  }
+
   try {
-    const runId = await startImportFromOptions(options)
+    // Try full crawl+stage with a 20s guard; if it times out, fall back below
+    const runId = await withTimeout(startImportFromOptions(options), 20_000)
     const search = new URL(request.url).search
     return redirect(`/app/imports/runs/${runId}/review${search}`)
   } catch {
-    // If staging fails, redirect back to settings so the user can adjust configuration
-    const search = new URL(request.url).search
-    return redirect(`/app/imports/${templateId}${search}`)
+    // Fallback: generate diffs from current staging (no crawl) so Review can open
+    try {
+      const { diffStagingToCanonical } = await import('../../packages/importer/src/pipelines/diff')
+      // Map target -> supplier; current Batson setup uses 'batson'
+      const supplierId = 'batson'
+      const runId = await diffStagingToCanonical(supplierId)
+      const search = new URL(request.url).search
+      return redirect(`/app/imports/runs/${runId}/review${search}`)
+    } catch {
+      // If all else fails, redirect back with a banner trigger
+      const url = new URL(request.url)
+      url.searchParams.set('reviewError', '1')
+      return redirect(`/app/imports/${templateId}${url.search}`)
+    }
   }
 }
 

@@ -43,6 +43,7 @@ export default function ImportSettings() {
   const location = useLocation()
   const [params] = useSearchParams()
   const justCreated = params.get('created') === '1'
+  const reviewError = params.get('reviewError') === '1'
   // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
   // Import Settings UI state: target selection auto-fills source URL
   // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
@@ -218,6 +219,20 @@ export default function ImportSettings() {
       backAction={{ content: 'Back to Imports', url: `/app/imports${location.search}` }}
     >
       <BlockStack gap="400">
+        {/* Launcher failure banner */}
+        {reviewError ? (
+          <Banner tone="critical" title="Couldn’t prepare Review">
+            <p>
+              We couldn’t crawl and stage items for review just now. You can adjust settings and try again. If the
+              problem persists, Review will still open using any existing staging data.
+            </p>
+            <InlineStack gap="200">
+              <Button url={`/app/imports/${templateId}/review${location.search}`} variant="primary">
+                Try Review again
+              </Button>
+            </InlineStack>
+          </Banner>
+        ) : null}
         {/* Toasts */}
         {showAppliedToast ? (
           <Frame>
