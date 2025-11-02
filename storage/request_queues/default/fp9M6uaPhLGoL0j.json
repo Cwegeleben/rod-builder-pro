@@ -1,6 +1,6 @@
 {
   "id": "fp9M6uaPhLGoL0j",
-  "json": "{\"id\":\"fp9M6uaPhLGoL0j\",\"url\":\"https://batsonenterprises.com/ecom/purchaselistsearch?page=1\",\"loadedUrl\":\"https://batsonenterprises.com/user-login?returnurl=ecom%252fpurchaselistsearch%253fpage%253d1\",\"uniqueKey\":\"https://batsonenterprises.com/ecom/purchaselistsearch?page=1\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"state\":4}},\"handledAt\":\"2025-10-31T21:00:35.932Z\"}",
+  "json": "{\"id\":\"fp9M6uaPhLGoL0j\",\"url\":\"https://batsonenterprises.com/ecom/purchaselistsearch?page=1\",\"loadedUrl\":\"https://batsonenterprises.com/user-login?returnurl=ecom%252fpurchaselistsearch%253fpage%253d1\",\"uniqueKey\":\"https://batsonenterprises.com/ecom/purchaselistsearch?page=1\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"state\":4}},\"handledAt\":\"2025-11-02T06:21:11.855Z\"}",
   "method": "GET",
   "orderNo": null,
   "retryCount": 0,
