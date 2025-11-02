@@ -115,7 +115,7 @@ export default function ReviewRunRoute() {
   const subtitle = `${run.supplierId} — ${new Date(run.startedAt).toLocaleString()}`
 
   return (
-    <Page title={title} subtitle={subtitle} backAction={{ content: 'Back to imports', url: '/app/admin/import/runs' }}>
+    <Page title={title} subtitle={subtitle} backAction={{ content: 'Back to Imports', url: '/app/imports' }}>
       <BlockStack gap="400">
         {toast ? (
           <Frame>
