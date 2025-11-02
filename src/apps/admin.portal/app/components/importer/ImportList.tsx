@@ -251,6 +251,39 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
     )
   }
 
+  async function doPrepare(r: Row) {
+    setBusy(r.templateId)
+    try {
+      const resp = await fetch('/api/importer/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateId: r.templateId }),
+      })
+      if (!resp.ok) throw new Error('Prepare failed')
+      const data = (await resp.json()) as { runId: string; candidates?: number; etaSeconds?: number }
+      // Optimistically attach preparing snapshot so progress UI starts immediately
+      setRows(cur =>
+        cur.map(x =>
+          x.templateId === r.templateId
+            ? {
+                ...x,
+                preparing: {
+                  runId: data.runId,
+                  startedAt: new Date().toISOString(),
+                  etaSeconds: typeof data.etaSeconds === 'number' ? data.etaSeconds : 60,
+                },
+              }
+            : x,
+        ),
+      )
+      setToast('Review prep started')
+    } catch (e) {
+      setError((e as Error)?.message || 'Prepare failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const resourceName = { singular: 'import', plural: 'imports' }
 
   return (
@@ -325,12 +358,8 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   <ButtonGroup>
-                    {/* Prepare Review starts async preflight + staging */}
-                    <Button
-                      variant="primary"
-                      tone="success"
-                      url={`/app/imports/${r.templateId}/prepare${location.search}`}
-                    >
+                    {/* Prepare Review starts async preflight + staging in-place */}
+                    <Button variant="primary" tone="success" loading={isBusy} onClick={() => doPrepare(r)}>
                       Prepare review
                     </Button>
                     {/* Review disabled during prepare */}
