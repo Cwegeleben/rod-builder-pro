@@ -89,23 +89,7 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
     })()
   }, [])
 
-  async function doTest(r: Row) {
-    setBusy(r.templateId)
-    try {
-      await importerActions.testRun(r.templateId)
-    } finally {
-      setBusy(null)
-    }
-    const [cfg, sched] = await Promise.all([
-      importerAdapters.getImportConfig(r.templateId),
-      importerAdapters.getSchedule(r.templateId),
-    ])
-    setRows(cur =>
-      cur.map(x =>
-        x.templateId === r.templateId ? { ...x, state: cfg.state, runId: cfg.runId, nextRunAt: sched.nextRunAt } : x,
-      ),
-    )
-  }
+  // Validate action removed
   async function doApprove(r: Row) {
     if (!confirm('Publish all drafts for this run?')) return
     setBusy(r.templateId)
@@ -265,12 +249,7 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                     {r.state === ImportState.NEEDS_SETTINGS && (
                       <Button url={`/app/imports/${r.templateId}${location.search}`}>Edit settings</Button>
                     )}
-                    {r.state === ImportState.NEEDS_SETTINGS && <Button disabled>Validate</Button>}
-                    {r.state === ImportState.READY_TO_TEST && (
-                      <Button loading={isBusy} onClick={() => doTest(r)}>
-                        Validate
-                      </Button>
-                    )}
+                    {/* Validate flow removed from list UI */}
                     {r.state === ImportState.READY_TO_APPROVE && (
                       <>
                         {r.runId ? <ShopifyFilterLink runId={r.runId} /> : null}

@@ -47,10 +47,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     variantTemplateId: undefined,
     scraperId: undefined,
   }
-  const runId = await startImportFromOptions(options)
-
-  const search = new URL(request.url).search
-  return redirect(`/app/imports/runs/${runId}/review${search}`)
+  try {
+    const runId = await startImportFromOptions(options)
+    const search = new URL(request.url).search
+    return redirect(`/app/imports/runs/${runId}/review${search}`)
+  } catch {
+    // If staging fails, redirect back to settings so the user can adjust configuration
+    const search = new URL(request.url).search
+    return redirect(`/app/imports/${templateId}${search}`)
+  }
 }
 
 export default function ImportReviewLauncherRoute() {

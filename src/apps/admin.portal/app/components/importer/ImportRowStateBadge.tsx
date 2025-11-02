@@ -6,6 +6,8 @@ export default function ImportRowStateBadge({ state = ImportState.NEEDS_SETTINGS
   switch (state) {
     case ImportState.NEEDS_SETTINGS:
       return <Badge tone="info">Needs settings</Badge>
+    case ImportState.READY:
+      return <Badge tone="info">Ready</Badge>
     case ImportState.READY_TO_TEST:
       return <Badge tone="attention">Validate</Badge>
     case ImportState.READY_TO_APPROVE:

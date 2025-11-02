@@ -1,6 +1,7 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 export enum ImportState {
   NEEDS_SETTINGS = 'NEEDS_SETTINGS',
+  READY = 'READY',
   READY_TO_TEST = 'READY_TO_TEST',
   IN_TEST = 'IN_TEST',
   READY_TO_APPROVE = 'READY_TO_APPROVE',
