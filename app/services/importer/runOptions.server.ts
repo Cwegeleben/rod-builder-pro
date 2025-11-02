@@ -94,7 +94,8 @@ export async function startImportFromOptions(
   // Crawl and stage (honor template + polite defaults)
   await crawlBatson(seeds, {
     templateKey: options.templateKey,
-    politeness: { jitterMs: [250, 600], maxConcurrency: 3, blockAssetsOnLists: true },
+    // Conservative defaults for Fly Machines with headless Chromium
+    politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
   })
   // Generate diffs
   if (runId) {

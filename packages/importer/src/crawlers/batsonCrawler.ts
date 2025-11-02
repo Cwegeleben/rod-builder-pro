@@ -32,7 +32,12 @@ async function sitemapProducts(page: { evaluate: (fn: () => Promise<string>) => 
   }
 }
 
-type Politeness = { jitterMs?: [number, number]; maxConcurrency?: number; blockAssetsOnLists?: boolean }
+type Politeness = {
+  jitterMs?: [number, number]
+  maxConcurrency?: number
+  rpm?: number // requests per minute
+  blockAssetsOnLists?: boolean
+}
 export async function crawlBatson(seedUrls: string[], options?: { templateKey?: string; politeness?: Politeness }) {
   const seen = new Set<string>()
   try {
@@ -54,12 +59,13 @@ export async function crawlBatson(seedUrls: string[], options?: { templateKey?: 
   if (forcedEnv.length) log.info(`batson: forcing ${forcedEnv.length} URLs from BATSON_FORCE_URLS`)
   // Record seeds in DB as 'forced' (env or manual); discovery writes will use 'discovered'
   for (const u of initial) await upsertProductSource('batson', u, 'forced')
-  const jitter: [number, number] = options?.politeness?.jitterMs || [250, 600]
-  const maxConc = options?.politeness?.maxConcurrency || 2
+  const jitter: [number, number] = options?.politeness?.jitterMs || [300, 800]
+  const maxConc = options?.politeness?.maxConcurrency || 1
+  const rpm = options?.politeness?.rpm || 30
   const blockAssets = options?.politeness?.blockAssetsOnLists !== false
 
   const crawler = new PlaywrightCrawler({
-    maxRequestsPerMinute: 90,
+    maxRequestsPerMinute: rpm,
     maxConcurrency: maxConc,
     requestHandlerTimeoutSecs: 120,
     navigationTimeoutSecs: 60,

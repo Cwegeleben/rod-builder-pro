@@ -22,6 +22,8 @@ primary_region = 'sjc'
   HQ_SHOPS_REGEX = '^rbp-hq.*dev.*$'
   # Cap V8 old space for a 2GB machine (leave ~25% native overhead)
   NODE_OPTIONS = '--max-old-space-size=1536'
+  # Help Crawlee detect available memory correctly in containerized env
+  CRAWLEE_MEMORY_MBYTES = '1536'
   # <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
   PLAYWRIGHT_AVAILABLE = '1'
   # <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
@@ -53,7 +55,7 @@ primary_region = 'sjc'
     protocol = 'http'
     tls_skip_verify = false
 
-[[vm]]
+[vm]
   memory = '2gb'
   cpu_kind = 'shared'
   cpus = 1

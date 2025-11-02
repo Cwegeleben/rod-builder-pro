@@ -12,6 +12,8 @@ primary_region = 'sjc'
   PORT = '3000'
   SCOPES = 'write_products,read_metaobjects,write_metaobjects'
   SHOPIFY_APP_URL = 'https://rbp-app-staging.fly.dev'
+  # Staging VM is 1GB; advertise ~768MB usable to Crawlee
+  CRAWLEE_MEMORY_MBYTES = '768'
 
 [processes]
   app = 'node ./dbsetup.js npm run docker-start'

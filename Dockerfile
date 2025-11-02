@@ -1,7 +1,7 @@
 FROM node:22.14.0-bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-    openssl ca-certificates tini \
+    openssl ca-certificates tini procps \
     && ln -sf $(command -v tini) /sbin/tini \
     && rm -rf /var/lib/apt/lists/*
 
