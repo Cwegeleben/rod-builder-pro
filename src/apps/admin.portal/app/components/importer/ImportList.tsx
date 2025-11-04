@@ -284,6 +284,32 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
   // doPrepare removed: Full Discover is launched from Settings page header
 
   const resourceName = { singular: 'import', plural: 'imports' }
+  const [selected, setSelected] = useState<string[]>([])
+
+  async function bulkDelete(ids: string[]) {
+    if (!ids.length) return
+    if (
+      !confirm(
+        `Delete ${ids.length} selected imports? This will remove their settings, logs, and staged items for their suppliers.`,
+      )
+    )
+      return
+    setBusy('bulk')
+    try {
+      const resp = await fetch('/api/importer/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateIds: ids }),
+      })
+      if (!resp.ok) throw new Error('Delete failed')
+      setRows(cur => cur.filter(x => !ids.includes(x.templateId)))
+      setSelected([])
+    } catch {
+      setError('Delete failed')
+    } finally {
+      setBusy(null)
+    }
+  }
 
   return (
     <div>
@@ -305,6 +331,24 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
         <IndexTable
           resourceName={resourceName}
           itemCount={rows.length}
+          selectable
+          selectedItemsCount={selected.length}
+          onSelectionChange={selection => {
+            // selection can be 'all' or an array of ids
+            if (selection === 'all') {
+              setSelected(rows.map(r => r.templateId))
+            } else if (Array.isArray(selection)) {
+              setSelected(selection as string[])
+            } else {
+              setSelected([])
+            }
+          }}
+          bulkActions={[
+            {
+              content: 'Delete selected',
+              onAction: () => bulkDelete(selected),
+            },
+          ]}
           headings={[{ title: 'Name' }, { title: 'State' }, { title: 'Next run' }, { title: 'Actions' }]}
         >
           {rows.map((r, index) => {
@@ -319,7 +363,12 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                 })()
               : '—'
             return (
-              <IndexTable.Row id={r.templateId} key={r.templateId} position={index}>
+              <IndexTable.Row
+                id={r.templateId}
+                key={r.templateId}
+                position={index}
+                selected={selected.includes(r.templateId)}
+              >
                 <IndexTable.Cell>
                   <Link url={`/app/imports/${r.templateId}${location.search}`}>{r.name || r.templateId}</Link>
                 </IndexTable.Cell>
@@ -372,9 +421,9 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                     >
                       Review
                     </Button>
-                    {r.state === ImportState.NEEDS_SETTINGS && (
-                      <Button url={`/app/imports/${r.templateId}${location.search}`}>Edit settings</Button>
-                    )}
+                    <Button url={`/app/imports/${r.templateId}${location.search}`}>
+                      {r.state === ImportState.NEEDS_SETTINGS ? 'Edit settings' : 'Settings'}
+                    </Button>
                     {/* Validate flow removed from list UI */}
                     {r.state === ImportState.READY_TO_APPROVE && (
                       <>
@@ -410,6 +459,12 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                         <Button loading={isBusy} onClick={() => doRunNow(r)}>
                           Run Now
                         </Button>
+                        <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
+                          Reset drafts
+                        </Button>
+                        <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
+                          Delete import
+                        </Button>
                         {r.hadFailures ? (
                           <Text as="span" tone="critical">
                             Last run had failures
@@ -418,7 +473,15 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                       </>
                     )}
                     {r.state !== ImportState.APPROVED && r.state !== ImportState.SCHEDULED && (
-                      <Button disabled>Schedule</Button>
+                      <>
+                        <Button disabled>Schedule</Button>
+                        <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
+                          Reset drafts
+                        </Button>
+                        <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
+                          Delete import
+                        </Button>
+                      </>
                     )}
                   </ButtonGroup>
                 </IndexTable.Cell>

@@ -15,6 +15,7 @@ import {
   Link,
   EmptyState,
 } from '@shopify/polaris'
+import { Modal, TextContainer } from '@shopify/polaris'
 
 type LogRow = {
   at: string
@@ -40,6 +41,7 @@ export default function GlobalLogList({
   const [past, setPast] = useState<'all' | '1h' | '24h' | '7d'>('all')
   const [cursor, setCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const badge = (t: LogRow['type']) => {
     switch (t) {
@@ -319,6 +321,9 @@ export default function GlobalLogList({
           }
         >
           <InlineStack gap="200" align="end">
+            <Button tone="critical" onClick={() => setDeleteOpen(true)} accessibilityLabel="Delete imports">
+              Delete imports…
+            </Button>
             <LiveControls
               onRefreshRequest={async () => {
                 try {
@@ -345,6 +350,8 @@ export default function GlobalLogList({
           </InlineStack>
         </Filters>
         <Divider />
+        {/* Delete imports modal */}
+        <DeleteImports open={deleteOpen} onClose={() => setDeleteOpen(false)} templates={templateNames} />
         {/* Active runs strip */}
         {(() => {
           const latestByRun = new Map<string, LogRow>()
@@ -560,6 +567,71 @@ function LiveControls({
       </Button>
       <Button onClick={() => onRefreshRequest?.()}>Refresh</Button>
     </InlineStack>
+  )
+}
+
+function DeleteImports({
+  open,
+  onClose,
+  templates,
+}: {
+  open: boolean
+  onClose: () => void
+  templates: Record<string, string>
+}) {
+  const [selected, setSelected] = useState<string[]>([])
+  const options = useMemo(
+    () => Object.entries(templates).map(([id, name]) => ({ label: name, value: id })),
+    [templates],
+  )
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Delete imports"
+      primaryAction={{
+        content: 'Delete',
+        destructive: true,
+        onAction: async () => {
+          if (!selected.length) return onClose()
+          try {
+            await fetch('/api/importer/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ templateIds: selected }),
+            })
+          } catch {
+            // ignore
+          } finally {
+            onClose()
+            // reload to reflect updated list/logs
+            try {
+              window.location.reload()
+            } catch {
+              // ignore reload errors
+            }
+          }
+        },
+      }}
+      secondaryActions={[{ content: 'Cancel', onAction: onClose }]}
+    >
+      <Modal.Section>
+        <BlockStack gap="200">
+          <Text as="p">
+            Select the imports to delete. This will remove their settings, logs, and any staged items for their
+            supplier.
+          </Text>
+          <ChoiceList
+            allowMultiple
+            title="Imports"
+            titleHidden
+            choices={options}
+            selected={selected}
+            onChange={vals => setSelected(vals as string[])}
+          />
+        </BlockStack>
+      </Modal.Section>
+    </Modal>
   )
 }
 // <!-- END RBP GENERATED: importer-v2-3 -->
