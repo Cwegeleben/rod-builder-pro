@@ -239,7 +239,16 @@ export async function startImportFromOptions(
     options.includeSeeds && !options.useSeriesParser
       ? (await fetchActiveSources(supplierId)).map((s: { url: string }) => s.url)
       : []
-  const seeds = Array.from(new Set([...saved, ...options.manualUrls]))
+  // Sanitize and de-duplicate seeds; only allow absolute http(s) URLs to avoid SyntaxError from URL/fetch
+  const isValidHttpUrl = (s: string): boolean => {
+    try {
+      const u = new URL(s)
+      return u.protocol === 'http:' || u.protocol === 'https:'
+    } catch {
+      return false
+    }
+  }
+  const seeds = Array.from(new Set([...saved, ...options.manualUrls])).filter(isValidHttpUrl)
   if (runId)
     await setProgress(runId, { status: 'discover', phase: 'discover', percent: 15, details: { seeds: seeds.length } })
   await throwIfCancelled(runId)

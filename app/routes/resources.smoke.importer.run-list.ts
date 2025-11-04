@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
-import { guardSmokeRoute } from '../../app/lib/smokes.server'
-import { queryStagedRows, computeTotals } from '../../app/server/importer/review.server'
+import { guardSmokeRoute } from '../lib/smokes.server'
+import { queryStagedRows, computeTotals } from '../server/importer/review.server'
 
 export async function loader(args: LoaderFunctionArgs) {
   guardSmokeRoute(args)
@@ -32,6 +32,4 @@ export async function loader(args: LoaderFunctionArgs) {
   })
 }
 
-export default function SmokeImporterRunList() {
-  return null
-}
+// No default export to keep this a pure JSON resource route

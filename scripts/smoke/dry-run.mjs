@@ -48,7 +48,7 @@ async function getJson(path) {
 
 async function start() {
   console.log(`[dry-run] launching prepare…`)
-  const res = await getJson(`/resources.smoke.importer.prepare?${q}`)
+  const res = await getJson(`/resources/smoke/importer/prepare?${q}`)
   if (!res?.ok || !res?.runId) throw new Error(`failed to start: ${JSON.stringify(res)}`)
   const runId = res.runId
   console.log(`[dry-run] runId=${runId} supplierId=${res.supplierId}`)
@@ -57,8 +57,8 @@ async function start() {
   let last = { stagedCount: 0, diffCount: 0 }
   while (Date.now() < until) {
     try {
-  const exp = await getJson(`/resources.smoke.importer.run-expected?runId=${encodeURIComponent(runId)}`)
-  const stats = await getJson(`/resources.smoke.importer.run-stats?runId=${encodeURIComponent(runId)}`)
+  const exp = await getJson(`/resources/smoke/importer/run-expected?runId=${encodeURIComponent(runId)}`)
+  const stats = await getJson(`/resources/smoke/importer/run-stats?runId=${encodeURIComponent(runId)}`)
       const sc = Number(exp?.stagedCount || 0)
       const dc = Number(exp?.diffCount || 0)
       const ei = exp?.expectedItems ?? null

@@ -50,6 +50,4 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export const handle = { private: true }
 
-export default function SmokeForceDiffs() {
-  return null
-}
+// No default export to keep this a pure JSON resource route

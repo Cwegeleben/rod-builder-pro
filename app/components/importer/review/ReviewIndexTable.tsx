@@ -18,6 +18,7 @@ export default function ReviewIndexTable({
   onPageSizeChange,
   onApproveSelected,
   onRejectSelected,
+  detailsBase,
 }: {
   runId: string
   rows: Array<{
@@ -47,6 +48,7 @@ export default function ReviewIndexTable({
   onPageSizeChange: (s: number) => void
   onApproveSelected: () => void
   onRejectSelected: () => void
+  detailsBase?: (runId: string, rowId: string) => string
 }) {
   // keep API stable; columns are now rendered in the expand panel rather than the main row
   void _columns
@@ -142,20 +144,22 @@ export default function ReviewIndexTable({
               {visibleDynamic.map(c => (
                 <IndexTable.Cell key={c.key}>{formatAttr(r.attributes[c.key])}</IndexTable.Cell>
               ))}
-              {isExpanded ? (
-                <IndexTable.Cell colSpan={headings.length}>
-                  <RowExpandPanel
-                    runId={runId}
-                    rowId={r.core.id}
-                    onApprove={() => onApproveSelected()}
-                    onReject={() => onRejectSelected()}
-                  />
-                </IndexTable.Cell>
-              ) : null}
+              {/* Expanded content is rendered below the table to avoid invalid table structure */}
             </IndexTable.Row>
           )
         })}
       </IndexTable>
+      {expandedRowId ? (
+        <div style={{ padding: '8px 12px' }}>
+          <RowExpandPanel
+            runId={runId}
+            rowId={expandedRowId}
+            onApprove={() => onApproveSelected()}
+            onReject={() => onRejectSelected()}
+            detailsBase={detailsBase}
+          />
+        </div>
+      ) : null}
       <div style={{ padding: '8px 12px' }}>
         <InlineStack align="space-between" blockAlign="center" gap="400">
           <Pagination

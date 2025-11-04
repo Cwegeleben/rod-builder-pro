@@ -15,7 +15,7 @@ import {
   Link,
   EmptyState,
 } from '@shopify/polaris'
-import { Modal, TextContainer } from '@shopify/polaris'
+import { Modal } from '@shopify/polaris'
 
 type LogRow = {
   at: string
@@ -33,6 +33,11 @@ export default function GlobalLogList({
   templateNames?: Record<string, string>
 }) {
   const [logItems, setLogItems] = useState<LogRow[]>(items)
+  const [hydrated, setHydrated] = useState(false)
+  // Defer IndexTable rendering to client to avoid SSR/CSR mismatches in condensed mode
+  useMemo(() => {
+    setHydrated(true)
+  }, [])
   const [filterType, setFilterType] = useState<
     'all' | 'prepare' | 'settings' | 'approve' | 'error' | 'discovery' | 'scrape' | 'schedule' | 'recrawl'
   >('all')
@@ -408,77 +413,80 @@ export default function GlobalLogList({
                     <Badge>{String(rows.length)}</Badge>
                   </InlineStack>
                 </InlineStack>
-                <IndexTable
-                  resourceName={resourceName}
-                  itemCount={rows.length}
-                  selectable={false}
-                  condensed
-                  headings={[
-                    { title: 'When' },
-                    { title: 'Type' },
-                    { title: 'Run' },
-                    { title: 'Summary' },
-                    { title: 'Actions' },
-                  ]}
-                >
-                  {rows.map((r, i) => {
-                    const key = `${r.at}|${r.type}|${r.runId}`
-                    const isOpen = !!expanded[key]
-                    return (
-                      <IndexTable.Row id={key} key={key} position={i}>
-                        <IndexTable.Cell>
-                          <Text as="span" tone="subdued">
-                            {rel(r.at)}
-                          </Text>
-                        </IndexTable.Cell>
-                        <IndexTable.Cell>{badge(r.type)}</IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <InlineStack gap="100" align="start">
+                {/* Render the table only after mount to avoid SSR/CSR markup mismatches in condensed layouts */}
+                {!hydrated ? null : (
+                  <IndexTable
+                    resourceName={resourceName}
+                    itemCount={rows.length}
+                    selectable={false}
+                    condensed
+                    headings={[
+                      { title: 'When' },
+                      { title: 'Type' },
+                      { title: 'Run' },
+                      { title: 'Summary' },
+                      { title: 'Actions' },
+                    ]}
+                  >
+                    {rows.map((r, i) => {
+                      const key = `${r.at}|${r.type}|${r.runId}`
+                      const isOpen = !!expanded[key]
+                      return (
+                        <IndexTable.Row id={key} key={key} position={i}>
+                          <IndexTable.Cell>
                             <Text as="span" tone="subdued">
-                              run
+                              {rel(r.at)}
                             </Text>
-                            <Link url={`/app/imports/runs/${r.runId}/review`}>{r.runId}</Link>
-                          </InlineStack>
-                        </IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <BlockStack gap="100">
-                            <Text as="span" tone="subdued" variant="bodySm">
-                              {summarize(r.type, r.payload) ?? ''}
-                            </Text>
-                            <Collapsible open={isOpen} id={`log-${i}`}>
-                              <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
-                                <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0 }}>
-                                  {JSON.stringify(r.payload ?? null, null, 2)}
-                                </pre>
-                              </div>
-                            </Collapsible>
-                          </BlockStack>
-                        </IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <Button
-                            accessibilityLabel="Toggle details"
-                            onClick={() => setExpanded(cur => ({ ...cur, [key]: !cur[key] }))}
-                          >
-                            {isOpen ? 'Hide' : 'Details'}
-                          </Button>
-                          <Button
-                            variant="plain"
-                            accessibilityLabel="Copy payload"
-                            onClick={async () => {
-                              try {
-                                await navigator.clipboard.writeText(JSON.stringify(r.payload ?? null, null, 2))
-                              } catch {
-                                // ignore
-                              }
-                            }}
-                          >
-                            Copy
-                          </Button>
-                        </IndexTable.Cell>
-                      </IndexTable.Row>
-                    )
-                  })}
-                </IndexTable>
+                          </IndexTable.Cell>
+                          <IndexTable.Cell>{badge(r.type)}</IndexTable.Cell>
+                          <IndexTable.Cell>
+                            <InlineStack gap="100" align="start">
+                              <Text as="span" tone="subdued">
+                                run
+                              </Text>
+                              <Link url={`/app/imports/runs/${r.runId}/review`}>{r.runId}</Link>
+                            </InlineStack>
+                          </IndexTable.Cell>
+                          <IndexTable.Cell>
+                            <BlockStack gap="100">
+                              <Text as="span" tone="subdued" variant="bodySm">
+                                {summarize(r.type, r.payload) ?? ''}
+                              </Text>
+                              <Collapsible open={isOpen} id={`log-${i}`}>
+                                <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
+                                  <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0 }}>
+                                    {JSON.stringify(r.payload ?? null, null, 2)}
+                                  </pre>
+                                </div>
+                              </Collapsible>
+                            </BlockStack>
+                          </IndexTable.Cell>
+                          <IndexTable.Cell>
+                            <Button
+                              accessibilityLabel="Toggle details"
+                              onClick={() => setExpanded(cur => ({ ...cur, [key]: !cur[key] }))}
+                            >
+                              {isOpen ? 'Hide' : 'Details'}
+                            </Button>
+                            <Button
+                              variant="plain"
+                              accessibilityLabel="Copy payload"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(JSON.stringify(r.payload ?? null, null, 2))
+                                } catch {
+                                  // ignore
+                                }
+                              }}
+                            >
+                              Copy
+                            </Button>
+                          </IndexTable.Cell>
+                        </IndexTable.Row>
+                      )
+                    })}
+                  </IndexTable>
+                )}
                 {/* Load older */}
                 <InlineStack align="center">
                   <Button

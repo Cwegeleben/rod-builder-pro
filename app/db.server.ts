@@ -39,24 +39,59 @@ if (process.env.NODE_ENV === 'production' && !global.__schemaFixDone) {
       if (!hasAvail) {
         await prisma.$executeRawUnsafe('ALTER TABLE SpecTemplate ADD COLUMN supplierAvailability TEXT')
       }
-      // importer-v2-3: ensure ImportTemplate and ImportLog exist to avoid 500s before migrations apply
+      // importer-v2-3: ensure essential importer tables exist to avoid 500s before migrations apply
       const tbls = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
-        "SELECT name FROM sqlite_master WHERE type='table' AND (name='ImportTemplate' OR name='ImportLog')",
+        "SELECT name FROM sqlite_master WHERE type='table'",
       )
-      const hasImportTemplate = Array.isArray(tbls) && tbls.some(t => t.name === 'ImportTemplate')
-      const hasImportLog = Array.isArray(tbls) && tbls.some(t => t.name === 'ImportLog')
-      if (!hasImportTemplate) {
+      const has = (n: string) => Array.isArray(tbls) && tbls.some(t => t.name === n)
+
+      // ImportTemplate
+      if (!has('ImportTemplate')) {
         await prisma.$executeRawUnsafe(
           "CREATE TABLE IF NOT EXISTS ImportTemplate (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, importConfig TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL DEFAULT 'NEEDS_SETTINGS', lastRunAt DATETIME, hadFailures BOOLEAN NOT NULL DEFAULT 0)",
         )
         await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS ImportTemplate_state_idx ON ImportTemplate(state)')
       }
-      if (!hasImportLog) {
+      // ImportLog
+      if (!has('ImportLog')) {
         await prisma.$executeRawUnsafe(
           'CREATE TABLE IF NOT EXISTS ImportLog (id TEXT PRIMARY KEY NOT NULL, templateId TEXT NOT NULL, runId TEXT NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL, at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(templateId) REFERENCES ImportTemplate(id) ON DELETE CASCADE ON UPDATE CASCADE)',
         )
         await prisma.$executeRawUnsafe(
           'CREATE INDEX IF NOT EXISTS ImportLog_tpl_run_type_idx ON ImportLog(templateId, runId, type)',
+        )
+      }
+
+      // ImportRun
+      if (!has('ImportRun')) {
+        await prisma.$executeRawUnsafe(
+          'CREATE TABLE IF NOT EXISTS ImportRun (id TEXT PRIMARY KEY NOT NULL, supplierId TEXT NOT NULL, startedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, finishedAt DATETIME, status TEXT NOT NULL, progress TEXT, summary TEXT)',
+        )
+        await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS ImportRun_supplier_idx ON ImportRun(supplierId)')
+      }
+      // ImportDiff
+      if (!has('ImportDiff')) {
+        await prisma.$executeRawUnsafe(
+          'CREATE TABLE IF NOT EXISTS ImportDiff (id TEXT PRIMARY KEY NOT NULL, importRunId TEXT NOT NULL, externalId TEXT NOT NULL, diffType TEXT NOT NULL, before TEXT, after TEXT, validation TEXT, resolution TEXT, resolvedBy TEXT, resolvedAt DATETIME)',
+        )
+        await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS ImportDiff_run_idx ON ImportDiff(importRunId)')
+      }
+      // PartStaging
+      if (!has('PartStaging')) {
+        await prisma.$executeRawUnsafe(
+          "CREATE TABLE IF NOT EXISTS PartStaging (id TEXT PRIMARY KEY NOT NULL, supplierId TEXT NOT NULL, externalId TEXT NOT NULL, title TEXT NOT NULL, partType TEXT NOT NULL, description TEXT, images TEXT, rawSpecs TEXT, normSpecs TEXT, priceMsrp REAL, priceWh REAL, hashContent TEXT NOT NULL DEFAULT '', fetchedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, shopifyProductId TEXT, shopifyVariantIds TEXT, publishedAt DATETIME, publishStatus TEXT, publishResult TEXT)",
+        )
+        await prisma.$executeRawUnsafe(
+          'CREATE UNIQUE INDEX IF NOT EXISTS PartStaging_supplier_external_unique ON PartStaging(supplierId, externalId)',
+        )
+      }
+      // ProductSource (seeds)
+      if (!has('ProductSource')) {
+        await prisma.$executeRawUnsafe(
+          'CREATE TABLE IF NOT EXISTS ProductSource (id TEXT PRIMARY KEY NOT NULL, supplierId TEXT NOT NULL, url TEXT NOT NULL, externalId TEXT, source TEXT NOT NULL, notes TEXT, firstSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, lastSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)',
+        )
+        await prisma.$executeRawUnsafe(
+          'CREATE UNIQUE INDEX IF NOT EXISTS ProductSource_supplier_url_unique ON ProductSource(supplierId, url)',
         )
       }
     } catch (err) {

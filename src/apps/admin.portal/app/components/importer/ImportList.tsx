@@ -41,11 +41,14 @@ type InitialDbTemplate = {
 export default function ImportList({ initialDbTemplates }: { initialDbTemplates?: InitialDbTemplate[] } = {}) {
   const [rows, setRows] = useState<Row[]>([])
   const [busy, setBusy] = useState<string | null>(null)
+  const [hydrated, setHydrated] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const location = useLocation()
 
   useEffect(() => {
+    // Avoid SSR/CSR markup mismatches from responsive IndexTable by rendering table client-only
+    setHydrated(true)
     ;(async () => {
       // Seed from server-loaded templates first (SSR-safe)
       if (Array.isArray(initialDbTemplates)) {
@@ -345,6 +348,12 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
         <Text as="p" tone="subdued">
           No imports yet. Use “Add import” to create your first one.
         </Text>
+      ) : !hydrated ? (
+        <div aria-hidden>
+          <Text as="p" tone="subdued">
+            Loading…
+          </Text>
+        </div>
       ) : (
         <IndexTable
           resourceName={resourceName}

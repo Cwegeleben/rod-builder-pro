@@ -22,16 +22,16 @@ Option B — Smoke-only API (no HQ)
 
 1. Launch a prepare run
 
-- GET {BASE}/resources.smoke.importer.prepare?token={SMOKE_TOKEN}&target=batson-rod-blanks&seeds={CSV_SEEDS}
+- GET {BASE}/resources/smoke/importer/prepare?token={SMOKE_TOKEN}&target=batson-rod-blanks&seeds={CSV_SEEDS}
 - Example seeds value: https://batsonenterprises.com/collections/blanks
 - Response: { ok, runId, supplierId }
 
 2. Poll progress and counts
 
-- GET {BASE}/resources.smoke.importer.run-expected?token={SMOKE_TOKEN}&runId={runId}
+- GET {BASE}/resources/smoke/importer/run-expected?token={SMOKE_TOKEN}&runId={runId}
   - Fields: expectedItems (from preflight), stagedCount, diffCount
-- Optional totals by type: {BASE}/resources.smoke.importer.run-stats?token={SMOKE_TOKEN}&runId={runId}
-- Optional staged page sample: {BASE}/resources.smoke.importer.run-list?token={SMOKE_TOKEN}&runId={runId}&page=1&pageSize=25
+- Optional totals by type: {BASE}/resources/smoke/importer/run-stats?token={SMOKE_TOKEN}&runId={runId}
+- Optional staged page sample: {BASE}/resources/smoke/importer/run-list?token={SMOKE_TOKEN}&runId={runId}&page=1&pageSize=25
 
 3. Review results (UI)
 
@@ -49,6 +49,20 @@ Troubleshooting
 - 403 on smoke routes → bad or missing SMOKE_TOKEN
 - No progress for >60s → check Fly logs for headless renderer availability; optionally increase resources or retry with strategy=static seeds
 - UI banners missing → ensure VITE_IMPORTER_SSE_ENABLED=1 and refresh
+
+Curl examples
+
+```bash
+# Start a run (Batson blanks, single seed)
+curl -sS -H "Accept: application/json" "${BASE}/resources/smoke/importer/prepare?token=${SMOKE_TOKEN}&target=batson-rod-blanks&seeds=$(python -c 'import urllib.parse as u;print(u.quote("https://batsonenterprises.com/collections/blanks"))')"
+
+# Query expected/staging/diff counts
+curl -sS -H "Accept: application/json" "${BASE}/resources/smoke/importer/run-expected?token=${SMOKE_TOKEN}&runId=${RUN_ID}"
+curl -sS -H "Accept: application/json" "${BASE}/resources/smoke/importer/run-stats?token=${SMOKE_TOKEN}&runId=${RUN_ID}"
+
+# Page through staged rows
+curl -sS -H "Accept: application/json" "${BASE}/resources/smoke/importer/run-list?token=${SMOKE_TOKEN}&runId=${RUN_ID}&page=1&pageSize=25"
+```
 
 Notes
 

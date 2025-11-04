@@ -21,6 +21,4 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export const handle = { private: true }
 
-export default function SmokeRunExpected() {
-  return null
-}
+// No default export to keep this as a pure resource route returning JSON

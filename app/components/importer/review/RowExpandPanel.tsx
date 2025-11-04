@@ -8,16 +8,22 @@ export default function RowExpandPanel({
   rowId,
   onApprove,
   onReject,
+  detailsBase,
 }: {
   runId: string
   rowId: string
   onApprove?: () => void
   onReject?: () => void
+  // Optional alternate endpoint builder for smoke mode; default uses API route
+  detailsBase?: (runId: string, rowId: string) => string
 }) {
   const fetcher = useFetcher()
   useEffect(() => {
-    if (rowId) fetcher.load(`/api/importer/runs/${runId}/staged/${rowId}`)
-  }, [rowId, runId])
+    if (rowId) {
+      const url = detailsBase ? detailsBase(runId, rowId) : `/api/importer/runs/${runId}/staged/${rowId}`
+      fetcher.load(url)
+    }
+  }, [rowId, runId, detailsBase])
   const data = (fetcher.data || {}) as {
     changedFields?: Array<{
       key: string
@@ -34,6 +40,15 @@ export default function RowExpandPanel({
     availability?: string | null
   }
   const fields = data.changedFields || []
+  const isValidHttpUrl = (u: unknown): u is string => {
+    if (typeof u !== 'string' || !u) return false
+    try {
+      const url = new URL(u, typeof window !== 'undefined' ? window.location.origin : 'https://example.com')
+      return url.protocol === 'http:' || url.protocol === 'https:'
+    } catch {
+      return false
+    }
+  }
   return (
     <Card>
       <BlockStack gap="200">
@@ -63,7 +78,7 @@ export default function RowExpandPanel({
           <Text as="h3" variant="headingSm">
             Metadata
           </Text>
-          {data.sourceUrl ? (
+          {isValidHttpUrl(data.sourceUrl) ? (
             <PolarisLink url={data.sourceUrl} target="_blank">
               Source
             </PolarisLink>

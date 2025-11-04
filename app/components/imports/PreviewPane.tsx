@@ -27,7 +27,16 @@ export function PreviewPane({
           <Text as="h3" variant="headingMd">
             Extracted
           </Text>
-          <Badge tone="info">{new URL(url).hostname}</Badge>
+          <Badge tone="info">
+            {(() => {
+              try {
+                return new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://example.com')
+                  .hostname
+              } catch {
+                return '—'
+              }
+            })()}
+          </Badge>
         </InlineStack>
         <div className="grid grid-cols-2 gap-4">
           <div>

@@ -18,6 +18,7 @@ import {
 } from '@shopify/polaris'
 import { prisma } from '../db.server'
 import { isHqShop } from '../lib/access.server'
+import { smokesEnabled, extractSmokeToken } from '../lib/smokes.server'
 import ReviewFilters from 'app/components/importer/review/ReviewFilters'
 import ReviewIndexTable from 'app/components/importer/review/ReviewIndexTable'
 import RunLogList from 'app/components/importer/review/RunLogList'
@@ -28,9 +29,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (url.searchParams.get('e2e') === '1') {
     const runId = String(params.runId || '')
     const now = new Date().toISOString()
-    return json({ run: { id: runId || 'run-e2e', supplierId: 'test-supplier', startedAt: now } })
+    return json({ run: { id: runId || 'run-e2e', supplierId: 'test-supplier', startedAt: now }, smokeMode: false })
   }
-  if (!(await isHqShop(request))) throw new Response('Not Found', { status: 404 })
+  // Optional smoke-friendly mode: allow bypassing HQ if ENABLE_SMOKES and a valid token is provided
+  const smokeParam = url.searchParams.get('smoke') === '1'
+  let smokeMode = false
+  if (smokeParam && smokesEnabled()) {
+    const tok = extractSmokeToken(request)
+    const expected = process.env.SMOKE_TOKEN || 'smoke-ok'
+    if (tok && tok === expected) smokeMode = true
+  }
+  if (!smokeMode) {
+    if (!(await isHqShop(request))) throw new Response('Not Found', { status: 404 })
+  }
 
   const runId = String(params.runId || '')
 
@@ -39,16 +50,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     select: { id: true, supplierId: true, startedAt: true },
   })
   if (!run) throw new Response('Not Found', { status: 404 })
-  return json({ run })
+  return json({ run, smokeMode })
 }
 
 type LoaderData = Awaited<ReturnType<typeof loader>> extends { json(): infer U } ? U : never
 
 export default function ReviewRunRoute() {
-  const { run } = useLoaderData<LoaderData>() as unknown as {
+  const { run, smokeMode } = useLoaderData<LoaderData>() as unknown as {
     run: { id: string; supplierId: string; startedAt: string }
+    smokeMode: boolean
   }
   const [params, setParams] = useSearchParams()
+  const smokeToken = useMemo(() => (smokeMode ? params.get('token') || '' : ''), [smokeMode, params])
   const tab = (params.get('tab') as 'unlinked' | 'linked' | 'conflicts' | 'all') || 'all'
   const page = Math.max(1, Number(params.get('page') || '1') || 1)
   const pageSize = [25, 50].includes(Number(params.get('pageSize'))) ? Number(params.get('pageSize')) : 25
@@ -97,8 +110,17 @@ export default function ReviewRunRoute() {
     usp.set('tab', tab)
     usp.set('page', String(page))
     usp.set('pageSize', String(pageSize))
+    if (smokeMode) {
+      const usp2 = new URLSearchParams()
+      usp2.set('runId', run.id)
+      usp2.set('tab', tab)
+      usp2.set('page', String(page))
+      usp2.set('pageSize', String(pageSize))
+      if (smokeToken) usp2.set('token', smokeToken)
+      return `/resources/smoke/importer/run-list?${usp2.toString()}`
+    }
     return `/api/importer/runs/${run.id}/staged?${usp.toString()}`
-  }, [params, tab, page, pageSize, run.id])
+  }, [params, tab, page, pageSize, run.id, smokeMode, smokeToken])
   useEffect(() => {
     fetcher.load(listUrl)
     // Collapse on tab/page/filter change
@@ -215,84 +237,86 @@ export default function ReviewRunRoute() {
         ) : null}
         <InlineStack align="space-between">
           <Tabs tabs={tabs as unknown as { id: string; content: string }[]} selected={selectedTab} onSelect={setTab} />
-          <Button
-            variant="primary"
-            tone="success"
-            disabled={hasConflicts || approvedCount === 0}
-            onClick={async () => {
-              setPublishing(true)
-              setPolling(true)
-              setPublishProgress(0)
-              setPublishTotals(null)
-              // Start polling status immediately
-              const poll = async () => {
-                try {
-                  const r = await fetch(`/api/importer/runs/${run.id}/publish/status`, {
-                    headers: { 'Cache-Control': 'no-store' },
-                  })
-                  if (r.ok) {
-                    const s = (await r.json()) as {
-                      ok: boolean
-                      progress: number
-                      state: string
-                      totals?: { created: number; updated: number; skipped: number; failed: number }
-                      etaMs?: number | null
-                    }
-                    if (s?.ok) {
-                      setPublishProgress(s.progress || 0)
-                      if (s.totals) setPublishTotals(s.totals)
-                      setPublishEtaMs(typeof s.etaMs === 'number' ? s.etaMs : null)
-                      if (s.state === 'published') {
-                        // Redirect once complete; prefer server totals
-                        const t = s.totals || publishTotals || { created: 0, updated: 0, skipped: 0, failed: 0 }
-                        const query = new URLSearchParams()
-                        query.set('tag', `importRun:${run.id}`)
-                        query.set('banner', 'publishOk')
-                        query.set('created', String(t.created))
-                        query.set('updated', String(t.updated))
-                        query.set('skipped', String(t.skipped))
-                        query.set('failed', String(t.failed))
-                        window.location.assign(`/app/products?${query.toString()}`)
-                        return
+          {!smokeMode ? (
+            <Button
+              variant="primary"
+              tone="success"
+              disabled={hasConflicts || approvedCount === 0}
+              onClick={async () => {
+                setPublishing(true)
+                setPolling(true)
+                setPublishProgress(0)
+                setPublishTotals(null)
+                // Start polling status immediately
+                const poll = async () => {
+                  try {
+                    const r = await fetch(`/api/importer/runs/${run.id}/publish/status`, {
+                      headers: { 'Cache-Control': 'no-store' },
+                    })
+                    if (r.ok) {
+                      const s = (await r.json()) as {
+                        ok: boolean
+                        progress: number
+                        state: string
+                        totals?: { created: number; updated: number; skipped: number; failed: number }
+                        etaMs?: number | null
+                      }
+                      if (s?.ok) {
+                        setPublishProgress(s.progress || 0)
+                        if (s.totals) setPublishTotals(s.totals)
+                        setPublishEtaMs(typeof s.etaMs === 'number' ? s.etaMs : null)
+                        if (s.state === 'published') {
+                          // Redirect once complete; prefer server totals
+                          const t = s.totals || publishTotals || { created: 0, updated: 0, skipped: 0, failed: 0 }
+                          const query = new URLSearchParams()
+                          query.set('tag', `importRun:${run.id}`)
+                          query.set('banner', 'publishOk')
+                          query.set('created', String(t.created))
+                          query.set('updated', String(t.updated))
+                          query.set('skipped', String(t.skipped))
+                          query.set('failed', String(t.failed))
+                          window.location.assign(`/app/products?${query.toString()}`)
+                          return
+                        }
                       }
                     }
+                  } catch {
+                    /* ignore transient errors */
                   }
-                } catch {
-                  /* ignore transient errors */
+                  if (polling) setTimeout(poll, 800)
                 }
-                if (polling) setTimeout(poll, 800)
-              }
-              setTimeout(poll, 0)
-              try {
-                const resp = await fetch(`/api/importer/runs/${run.id}/publish/shopify`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ dryRun: false }),
-                })
-                if (!resp.ok) throw new Error('Publish failed')
-                const jr = (await resp.json()) as {
-                  ok: boolean
-                  runId: string
-                  totals: { created: number; updated: number; skipped: number; failed: number }
-                  filter: { tag: string }
-                }
-                if (jr?.ok) {
-                  setPublishTotals(jr.totals)
-                  setPublishProgress(p => (p < 90 ? 90 : p))
-                } else {
-                  setToast('Publish failed')
+                setTimeout(poll, 0)
+                try {
+                  const resp = await fetch(`/api/importer/runs/${run.id}/publish/shopify`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dryRun: false }),
+                  })
+                  if (!resp.ok) throw new Error('Publish failed')
+                  const jr = (await resp.json()) as {
+                    ok: boolean
+                    runId: string
+                    totals: { created: number; updated: number; skipped: number; failed: number }
+                    filter: { tag: string }
+                  }
+                  if (jr?.ok) {
+                    setPublishTotals(jr.totals)
+                    setPublishProgress(p => (p < 90 ? 90 : p))
+                  } else {
+                    setToast('Publish failed')
+                    setPolling(false)
+                  }
+                } catch (e) {
+                  setToast((e as Error)?.message || 'Publish failed')
                   setPolling(false)
+                } finally {
+                  setPublishing(false)
                 }
-              } catch (e) {
-                setToast((e as Error)?.message || 'Publish failed')
-                setPolling(false)
-              } finally {
-                setPublishing(false)
-              }
-            }}
-          >
-            Publish to Shopify
-          </Button>
+              }}
+            >
+              Publish to Shopify
+            </Button>
+          ) : null}
         </InlineStack>
         <ReviewFilters searchParams={params} onChange={setParams} />
         <Modal
@@ -340,8 +364,18 @@ export default function ReviewRunRoute() {
             usp.set('page', '1')
             setParams(usp)
           }}
-          onApproveSelected={() => bulkAction('approve')}
-          onRejectSelected={() => bulkAction('reject')}
+          onApproveSelected={smokeMode ? () => {} : () => bulkAction('approve')}
+          onRejectSelected={smokeMode ? () => {} : () => bulkAction('reject')}
+          detailsBase={
+            smokeMode
+              ? (_runId: string, rowId: string) => {
+                  const usp = new URLSearchParams()
+                  usp.set('id', rowId)
+                  if (smokeToken) usp.set('token', smokeToken)
+                  return `/resources/smoke/importer/get-diff?${usp.toString()}`
+                }
+              : undefined
+          }
         />
       </BlockStack>
     </Page>

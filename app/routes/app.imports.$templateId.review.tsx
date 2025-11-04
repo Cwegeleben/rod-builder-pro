@@ -37,7 +37,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Kick off crawl+stage using run options helper; MUST use saved settings seeds to match Preview behavior
   const { startImportFromOptions } = await import('../services/importer/runOptions.server')
-  const manualUrls = discoverSeedUrls.filter(Boolean)
+  // Sanitize saved seeds: only accept absolute http(s) URLs to avoid runtime fetch/URL errors
+  const manualUrls = discoverSeedUrls
+    .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+    .filter(s => {
+      try {
+        const u = new URL(s)
+        return u.protocol === 'http:' || u.protocol === 'https:'
+      } catch {
+        return false
+      }
+    })
 
   // Map target -> templateKey used by extractor so crawl matches Preview
   function templateKeyForTarget(id: string): string | undefined {
