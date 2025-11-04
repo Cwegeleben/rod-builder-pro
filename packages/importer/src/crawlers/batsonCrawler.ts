@@ -38,7 +38,11 @@ type Politeness = {
   rpm?: number // requests per minute
   blockAssetsOnLists?: boolean
 }
-export async function crawlBatson(seedUrls: string[], options?: { templateKey?: string; politeness?: Politeness }) {
+export async function crawlBatson(
+  seedUrls: string[],
+  options?: { templateKey?: string; politeness?: Politeness; supplierId?: string; ignoreSavedSources?: boolean },
+) {
+  const SUPPLIER = options?.supplierId || 'batson'
   const seen = new Set<string>()
   try {
     log.setLevel(log.LEVELS.DEBUG)
@@ -46,8 +50,8 @@ export async function crawlBatson(seedUrls: string[], options?: { templateKey?: 
     /* keep default */
   }
   // Compose initial seeds: saved from DB + env forced + caller-provided
-  const savedRows = await fetchActiveSources('batson')
-  const saved = savedRows.map((s: { url: string }) => s.url)
+  const savedRows = options?.ignoreSavedSources ? [] : await fetchActiveSources(SUPPLIER)
+  const saved = (savedRows as Array<{ url: string }>).map((s: { url: string }) => s.url)
   const forcedEnv = (process.env.BATSON_FORCE_URLS || '')
     .split(',')
     .map(s => s.trim())
@@ -55,10 +59,10 @@ export async function crawlBatson(seedUrls: string[], options?: { templateKey?: 
   const seeds = Array.from(new Set([...(forcedEnv || []), ...seedUrls]))
     .map(u => normalizeUrl(u, ORIGIN))
     .filter((u): u is string => Boolean(u))
-  const initial = Array.from(new Set([...saved, ...seeds]))
+  const initial = Array.from(new Set([...(saved || []), ...seeds]))
   if (forcedEnv.length) log.info(`batson: forcing ${forcedEnv.length} URLs from BATSON_FORCE_URLS`)
   // Record seeds in DB as 'forced' (env or manual); discovery writes will use 'discovered'
-  for (const u of initial) await upsertProductSource('batson', u, 'forced')
+  for (const u of initial) await upsertProductSource(SUPPLIER, u, 'forced')
   const jitter: [number, number] = options?.politeness?.jitterMs || [300, 800]
   const maxConc = options?.politeness?.maxConcurrency || 1
   const rpm = options?.politeness?.rpm || 30
@@ -110,7 +114,7 @@ export async function crawlBatson(seedUrls: string[], options?: { templateKey?: 
         const sameDomain = productHrefs.map(h => new URL(h, ORIGIN).toString()).filter(isOnDomain)
         const unique = Array.from(new Set(sameDomain))
         if (unique.length) {
-          await Promise.all(unique.map(u => upsertProductSource('batson', u, 'discovered')))
+          await Promise.all(unique.map(u => upsertProductSource(SUPPLIER, u, 'discovered')))
           await enqueueLinks({ urls: unique })
         }
       }
@@ -146,7 +150,7 @@ export async function crawlBatson(seedUrls: string[], options?: { templateKey?: 
             .map(h => new URL(h, ORIGIN).toString())
             .filter(isOnDomain)
           if (urls.length) {
-            await Promise.all(urls.map(u => upsertProductSource('batson', u, 'discovered')))
+            await Promise.all(urls.map(u => upsertProductSource(SUPPLIER, u, 'discovered')))
             await enqueueLinks({ urls })
           }
         } catch {
@@ -184,22 +188,40 @@ export async function crawlBatson(seedUrls: string[], options?: { templateKey?: 
 
       const uniqueProducts = Array.from(new Set(productAnchors))
       if (uniqueProducts.length) {
-        await Promise.all(uniqueProducts.map(u => upsertProductSource('batson', u, 'discovered')))
+        await Promise.all(uniqueProducts.map(u => upsertProductSource(SUPPLIER, u, 'discovered')))
         await enqueueLinks({ urls: uniqueProducts })
       }
       const uniquePages = Array.from(new Set(pageAnchors))
       if (uniquePages.length) {
-        await Promise.all(uniquePages.map(u => upsertProductSource('batson', u, 'discovered')))
+        await Promise.all(uniquePages.map(u => upsertProductSource(SUPPLIER, u, 'discovered')))
         await enqueueLinks({ urls: uniquePages })
       }
 
       // 7) Treat product-detail pages (including /ecom/ detail) as detail and stage
       const rec = await extractProduct(page, { templateKey: options?.templateKey })
-      if (rec?.externalId && !seen.has(rec.externalId)) {
-        seen.add(rec.externalId)
-        await upsertStaging('batson', rec)
-        await linkExternalIdForSource('batson', currentUrl, rec.externalId)
-        log.info(`staged ${rec.externalId}`)
+      if (rec?.externalId) {
+        // Skip staging for obvious series/listing pages (e.g., /rod-blanks/<series>) to avoid a spurious aggregate row
+        try {
+          const u = new URL(currentUrl)
+          const isSeriesPath = /\/rod-blanks\//i.test(u.pathname) && !/\/(products|product|ecom)\//i.test(u.pathname)
+          const lastSeg = u.pathname.split('/').filter(Boolean).pop() || ''
+          const slugLike = lastSeg.toUpperCase().replace(/[^A-Z0-9-]+/g, '')
+          if (isSeriesPath && rec.externalId === slugLike) {
+            // Do not stage a synthetic series record
+          } else if (!seen.has(rec.externalId)) {
+            seen.add(rec.externalId)
+            await upsertStaging(SUPPLIER, rec)
+            await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId)
+            log.info(`staged ${rec.externalId}`)
+          }
+        } catch {
+          if (!seen.has(rec.externalId)) {
+            seen.add(rec.externalId)
+            await upsertStaging(SUPPLIER, rec)
+            await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId)
+            log.info(`staged ${rec.externalId}`)
+          }
+        }
       }
 
       // Jitter delay between requests to reduce server load

@@ -67,6 +67,7 @@ export default function ImportSettings() {
   // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
   const [saveLoading, setSaveLoading] = React.useState<boolean>(false)
   const [saveError, setSaveError] = React.useState<string | null>(null)
+  const [crawlLoading, setCrawlLoading] = React.useState<boolean>(false)
   // <!-- END RBP GENERATED: importer-save-settings-v1 -->
   const seeds = (seedsOverride ?? seedsFetched) as string[]
   const [importName, setImportName] = React.useState<string>('')
@@ -192,7 +193,7 @@ export default function ImportSettings() {
   }
   // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
   // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
-  async function onSave() {
+  async function saveSettings() {
     setSaveError(null)
     setSaveLoading(true)
     try {
@@ -205,11 +206,49 @@ export default function ImportSettings() {
       if (!res.ok || !data?.ok) {
         throw new Error(String(data?.error || 'Failed to save settings'))
       }
-      setShowSavedToast(true)
+      return true
     } catch (err) {
       setSaveError((err as Error)?.message || 'Failed to save settings')
+      return false
     } finally {
       setSaveLoading(false)
+    }
+  }
+  async function onSaveAndCrawl() {
+    if (!templateId) return
+    setCrawlLoading(true)
+    try {
+      const ok = await saveSettings()
+      if (!ok) return
+      // Kick off background prepare to crawl and stage
+      const resp = await fetch('/api/importer/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateId }),
+      })
+      const data = (await resp.json()) as {
+        runId?: string
+        error?: string
+        candidates?: number
+        etaSeconds?: number
+        expectedItems?: number
+      }
+      if (!resp.ok || !data?.runId) throw new Error(String(data?.error || 'Save and Crawl failed'))
+      const c = typeof data.candidates === 'number' ? data.candidates : undefined
+      const eta = typeof data.etaSeconds === 'number' ? data.etaSeconds : undefined
+      const exp = typeof data.expectedItems === 'number' ? data.expectedItems : undefined
+      const qs = new URLSearchParams(location.search)
+      qs.set('started', '1')
+      qs.set('tpl', templateId)
+      if (typeof c === 'number') qs.set('c', String(c))
+      if (typeof eta === 'number') qs.set('eta', String(eta))
+      if (typeof exp === 'number') qs.set('exp', String(exp))
+      // Navigate to Imports list with ephemeral banner
+      window.location.assign(`/app/imports?${qs.toString()}`)
+    } catch (e) {
+      alert((e as Error).message || 'Save and Crawl failed')
+    } finally {
+      setCrawlLoading(false)
     }
   }
   // <!-- END RBP GENERATED: importer-save-settings-v1 -->
@@ -218,7 +257,13 @@ export default function ImportSettings() {
     <Page
       title="Import Settings"
       subtitle="Target → Seeds → Preview → Debug"
-      primaryAction={{ content: 'Save settings', onAction: onSave, loading: saveLoading, disabled: saveLoading }}
+      primaryAction={{
+        content: 'Save and Crawl',
+        onAction: onSaveAndCrawl,
+        loading: crawlLoading || saveLoading,
+        disabled: crawlLoading || saveLoading,
+      }}
+      secondaryActions={[]}
       backAction={{ content: 'Back to Imports', url: `/app/imports${location.search}` }}
     >
       <BlockStack gap="400">

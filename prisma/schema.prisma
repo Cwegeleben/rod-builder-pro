@@ -10,7 +10,8 @@ generator client {
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
   provider = "sqlite"
-  url      = "file:dev.sqlite"
+  // Use env-based URL so production can point at a persistent volume (e.g., file:/data/dev.sqlite)
+  url      = env("DATABASE_URL")
 }
 
 model Session {
@@ -234,6 +235,13 @@ model PartStaging {
   priceWh     Decimal?
   hashContent String   @default("")
   fetchedAt   DateTime @default(now())
+
+  // Back-writes from publish pipeline
+  shopifyProductId String?
+  shopifyVariantIds Json?
+  publishedAt      DateTime?
+  publishStatus    String?   // created | updated | skipped | error
+  publishResult    Json?
 
   @@unique([supplierId, externalId])
 }

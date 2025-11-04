@@ -6,7 +6,7 @@ import RowExpandPanel from './RowExpandPanel'
 export default function ReviewIndexTable({
   runId,
   rows,
-  columns,
+  columns: _columns,
   page,
   pageSize,
   totalPages,
@@ -48,9 +48,12 @@ export default function ReviewIndexTable({
   onApproveSelected: () => void
   onRejectSelected: () => void
 }) {
+  // keep API stable; columns are now rendered in the expand panel rather than the main row
+  void _columns
   const resourceName = { singular: 'item', plural: 'items' }
   const bulkActive = selectedIds.length > 0
-  const visibleDynamic = columns.slice(0, 6)
+  // We keep the main row focused on core fields; attributes will be shown in the expanded panel
+  const visibleDynamic: Array<{ key: string; label: string; type: string }> = []
 
   const headings = useMemo(() => {
     return [
@@ -61,10 +64,8 @@ export default function ReviewIndexTable({
       { title: 'Price' },
       { title: 'Availability' },
       { title: 'Status' },
-      ...visibleDynamic.map(c => ({ title: c.label })),
-      { title: '' },
     ]
-  }, [columns])
+  }, [])
 
   const allIds = rows.map(r => r.core.id)
   const allSelected = allIds.length > 0 && selectedIds.length === allIds.length
@@ -105,23 +106,42 @@ export default function ReviewIndexTable({
           const isExpanded = expandedRowId === r.core.id
           return (
             <IndexTable.Row id={r.core.id} key={r.core.id} position={index} selected={selectedIds.includes(r.core.id)}>
-              <IndexTable.Cell>{r.core.title || '—'}</IndexTable.Cell>
-              <IndexTable.Cell>{r.core.externalId}</IndexTable.Cell>
-              <IndexTable.Cell>{r.core.vendor}</IndexTable.Cell>
+              <IndexTable.Cell>
+                <span style={{ cursor: 'pointer' }} onClick={() => onExpand(isExpanded ? null : r.core.id)}>
+                  {r.core.title || '—'}
+                </span>
+              </IndexTable.Cell>
+              <IndexTable.Cell>
+                <span style={{ cursor: 'pointer' }} onClick={() => onExpand(isExpanded ? null : r.core.id)}>
+                  {r.core.externalId}
+                </span>
+              </IndexTable.Cell>
+              <IndexTable.Cell>
+                <span style={{ cursor: 'pointer' }} onClick={() => onExpand(isExpanded ? null : r.core.id)}>
+                  {r.core.vendor}
+                </span>
+              </IndexTable.Cell>
               <IndexTable.Cell>
                 {r.core.confidence != null ? Math.round(r.core.confidence * 100) + '%' : '—'}
               </IndexTable.Cell>
-              <IndexTable.Cell>{r.core.price != null ? `$${r.core.price}` : '—'}</IndexTable.Cell>
-              <IndexTable.Cell>{r.core.availability || '—'}</IndexTable.Cell>
-              <IndexTable.Cell>{r.core.status}</IndexTable.Cell>
+              <IndexTable.Cell>
+                <span style={{ cursor: 'pointer' }} onClick={() => onExpand(isExpanded ? null : r.core.id)}>
+                  {r.core.price != null ? `$${r.core.price}` : '—'}
+                </span>
+              </IndexTable.Cell>
+              <IndexTable.Cell>
+                <span style={{ cursor: 'pointer' }} onClick={() => onExpand(isExpanded ? null : r.core.id)}>
+                  {r.core.availability || '—'}
+                </span>
+              </IndexTable.Cell>
+              <IndexTable.Cell>
+                <span style={{ cursor: 'pointer' }} onClick={() => onExpand(isExpanded ? null : r.core.id)}>
+                  {r.core.status}
+                </span>
+              </IndexTable.Cell>
               {visibleDynamic.map(c => (
                 <IndexTable.Cell key={c.key}>{formatAttr(r.attributes[c.key])}</IndexTable.Cell>
               ))}
-              <IndexTable.Cell>
-                <Button onClick={() => onExpand(isExpanded ? null : r.core.id)}>
-                  {isExpanded ? 'Collapse' : 'Expand'}
-                </Button>
-              </IndexTable.Cell>
               {isExpanded ? (
                 <IndexTable.Cell colSpan={headings.length}>
                   <RowExpandPanel

@@ -38,20 +38,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Kick off crawl+stage using run options helper; MUST use saved settings seeds to match Preview behavior
   const { startImportFromOptions } = await import('../services/importer/runOptions.server')
   const manualUrls = discoverSeedUrls.filter(Boolean)
-  if (!manualUrls.length) {
-    // No saved seeds; redirect back to settings to configure seeds via Discover/Preview
-    const url = new URL(request.url)
-    url.searchParams.set('reviewError', 'need-seeds')
-    return redirect(`/app/imports/${templateId}${url.search}`)
-  }
 
   // Map target -> templateKey used by extractor so crawl matches Preview
   function templateKeyForTarget(id: string): string | undefined {
     if (/^batson-/.test(id)) return 'batson.product.v2'
     return undefined
   }
+  function supplierIdForTarget(id: string): string {
+    // Prefer the target.siteId when available (e.g., "batson-rod-blanks"); fallback to a generic slug
+    try {
+      const t = getTargetById(id)
+      if (t?.siteId) return t.siteId
+    } catch {
+      /* ignore */
+    }
+    return (id || 'batson').toLowerCase()
+  }
+  function useSeriesParserForTarget(id: string): boolean {
+    // Enable the attribute-grid parser for Batson rod blanks
+    return id === 'batson-rod-blanks'
+  }
   const options = {
-    mode: 'price_avail' as const,
+    mode: 'discover' as const,
     includeSeeds: true,
     manualUrls,
     skipSuccessful: false,
@@ -59,6 +67,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     templateKey: templateKeyForTarget(targetId),
     variantTemplateId: undefined,
     scraperId: undefined,
+    supplierId: supplierIdForTarget(targetId),
+    useSeriesParser: useSeriesParserForTarget(targetId),
   }
 
   // Helper: timeout wrapper to avoid long-running crawling in a request cycle
@@ -67,7 +77,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // Pre-create a run so we can attach logs and have a stable runId even if crawl fails
-  const supplierId = 'batson'
+  const supplierId = options.supplierId || 'batson'
   const preRun = await prisma.importRun.create({
     data: { supplierId, status: 'started', summary: { options, seedCount: manualUrls.length } as unknown as object },
   })

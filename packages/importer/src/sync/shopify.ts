@@ -15,6 +15,7 @@ export type ShopCfg = {
   apiVersion?: string
   approvedOnly?: boolean
   deleteOverride?: boolean
+  addsOnly?: boolean
 }
 
 function mkClient(cfg: ShopCfg) {
@@ -134,7 +135,9 @@ export async function upsertShopifyForRun(
   const db: any = prisma as any
   const where: any = {
     importRunId: runId,
-    diffType: { in: cfg.deleteOverride ? ['add', 'change', 'delete'] : ['add', 'change'] },
+    diffType: cfg.addsOnly
+      ? { in: ['add'] }
+      : { in: cfg.deleteOverride ? ['add', 'change', 'delete'] : ['add', 'change'] },
   }
   if (cfg.approvedOnly) {
     where.resolution = 'approve'
@@ -146,97 +149,172 @@ export async function upsertShopifyForRun(
 
   for (const d of diffs) {
     const after: any = d.after
-    // Handle delete overrides separately using `before`
-    if (d.diffType === 'delete' && cfg.deleteOverride) {
-      const before: any = d.before
-      if (!before) continue
-      const supplierId = String(before.supplierId || 'batson')
-      const externalId = String(before.externalId)
-      const handle = buildHandle(supplierId, externalId)
-      const product = await findProductByHandle(shopify, handle)
-      if (!product) continue
-      const pid = Number(product.id)
-      // Skip if already archived or already marked for deletion
-      const mfs = await listProductMetafields(shopify, pid)
-      const delMark = mfs.find((m: any) => m.namespace === NS && m.key === 'delete_mark')
-      const alreadyMarked = delMark?.value === '1'
-      const alreadyArchived = product.status === 'archived'
-      if (alreadyMarked && alreadyArchived) {
+    try {
+      // Handle delete overrides separately using `before`
+      if (d.diffType === 'delete' && cfg.deleteOverride) {
+        const before: any = d.before
+        if (!before) continue
+        const supplierId = String(before.supplierId || 'batson')
+        const externalId = String(before.externalId)
+        const handle = buildHandle(supplierId, externalId)
+        const product = await findProductByHandle(shopify, handle)
+        if (!product) continue
+        const pid = Number(product.id)
+        // Skip if already archived or already marked for deletion
+        const mfs = await listProductMetafields(shopify, pid)
+        const delMark = mfs.find((m: any) => m.namespace === NS && m.key === 'delete_mark')
+        const alreadyMarked = delMark?.value === '1'
+        const alreadyArchived = product.status === 'archived'
+        if (alreadyMarked && alreadyArchived) {
+          continue
+        }
+        // Archive product and set delete_mark metafield
+        await withRetry(() => shopify.product.update(pid, { status: 'archived' }))
+        await upsertProductMetafield(shopify, pid, NS, 'delete_mark', 'single_line_text_field', '1')
+        results.push({ externalId, productId: pid, handle, action: 'updated' })
         continue
       }
-      // Archive product and set delete_mark metafield
-      await withRetry(() => shopify.product.update(pid, { status: 'archived' }))
-      await upsertProductMetafield(shopify, pid, NS, 'delete_mark', 'single_line_text_field', '1')
-      results.push({ externalId, productId: pid, handle, action: 'updated' })
+      if (!after) continue
+
+      const supplierId = String(after.supplierId || 'batson')
+      const externalId = String(after.externalId)
+      const title = String(after.title || externalId)
+      const body_html = String(after.description || '')
+      const product_type = String(after.partType || 'part')
+      const vendor = supplierId.charAt(0).toUpperCase() + supplierId.slice(1)
+      const handle = buildHandle(supplierId, externalId)
+      const specs = (after.normSpecs as any) || (after.rawSpecs as any) || {}
+      const contentHash = String(after.hashContent || '')
+
+      let product = await findProductByHandle(shopify, handle)
+      // Shopify REST expects a comma-separated string for tags. Build a stable set.
+      const tagsArr = [product_type, supplierId, `importRun:${runId}`]
+      const tags = tagsArr.join(', ')
+
+      if (!product) {
+        product = await withRetry(() =>
+          shopify.product.create({ title, body_html, vendor, product_type, handle, tags }),
+        )
+        const pid = Number(product.id)
+        results.push({ externalId, productId: pid, handle, action: 'created' })
+        try {
+          await db.importDiff.update({
+            where: { id: d.id },
+            data: {
+              validation: {
+                ...(d.validation as any),
+                publish: {
+                  at: new Date().toISOString(),
+                  action: 'created',
+                  productId: pid,
+                  handle,
+                },
+              } as any,
+            },
+          })
+        } catch {
+          // non-fatal
+        }
+      } else {
+        // Check rbp.hash metafield; skip if unchanged
+        const mfs = await listProductMetafields(shopify, Number(product.id))
+        const mfHash = mfs.find((m: any) => m.namespace === NS && m.key === 'hash')
+        const prevHash = mfHash?.value || ''
+        if (prevHash === contentHash) {
+          continue
+        }
+        await withRetry(() =>
+          shopify.product.update(Number(product.id), { title, body_html, vendor, product_type, tags }),
+        )
+        const pid = Number(product.id)
+        results.push({ externalId, productId: pid, handle, action: 'updated' })
+        try {
+          await db.importDiff.update({
+            where: { id: d.id },
+            data: {
+              validation: {
+                ...(d.validation as any),
+                publish: {
+                  at: new Date().toISOString(),
+                  action: 'updated',
+                  productId: pid,
+                  handle,
+                },
+              } as any,
+            },
+          })
+        } catch {
+          // non-fatal
+        }
+      }
+
+      const pid = Number(product.id)
+      await upsertProductMetafield(shopify, pid, NS, 'specs', 'json', JSON.stringify(specs))
+      await upsertProductMetafield(shopify, pid, NS, 'supplier_external_id', 'single_line_text_field', externalId)
+      await upsertProductMetafield(shopify, pid, NS, 'hash', 'single_line_text_field', contentHash)
+
+      // <!-- BEGIN RBP GENERATED: shopify-sync-images-v1 -->
+      // Images v1: pass-through by src, dedupe by remembered source URLs
+      const imageSrcs: string[] = (Array.isArray(after.images) ? after.images : [])
+        .map((u: any) => toAbsolute(String(u)))
+        .filter(Boolean) as string[]
+      if (imageSrcs.length) {
+        // Read previous image sources metafield (if any)
+        const sourcesMf = await readImageSourcesMetafield(shopify, pid, NS)
+        const prevSources: string[] = sourcesMf?.value ? JSON.parse(sourcesMf.value) : []
+
+        // Only upload images with source URLs not seen before
+        const toCreate = imageSrcs.filter(src => !prevSources.includes(src))
+
+        if (toCreate.length) {
+          // Optional: set alt text from title / externalId
+          const altBase = `${title} (${externalId})`
+          for (const src of toCreate) {
+            try {
+              await createProductImageFromSrc(shopify, pid, src, altBase)
+            } catch {
+              // Non-fatal: continue with next image
+            }
+          }
+          const newSources = Array.from(new Set([...prevSources, ...toCreate]))
+          await writeImageSourcesMetafield(shopify, pid, NS, newSources)
+        }
+      }
+      // <!-- END RBP GENERATED: shopify-sync-images-v1 -->
+    } catch (err: any) {
+      // Capture publish error details on the diff and continue
+      try {
+        await db.importDiff.update({
+          where: { id: d.id },
+          data: {
+            validation: {
+              ...(d.validation as any),
+              publish: {
+                ...(d.validation as any)?.publish,
+                at: new Date().toISOString(),
+                error: String(err?.message || err),
+                status: err?.statusCode || err?.response?.status || null,
+              },
+            } as any,
+          },
+        })
+      } catch {
+        /* ignore */
+      }
+      try {
+        // Also mark staging row for quick triage if available
+        const exId = String(after?.externalId || (d.before as any)?.externalId || '')
+        if (exId) {
+          await db.partStaging.updateMany({
+            where: { supplierId: String(after?.supplierId || 'batson'), externalId: exId },
+            data: { publishStatus: 'error', publishResult: { error: String(err?.message || err) } as any },
+          })
+        }
+      } catch {
+        /* ignore */
+      }
       continue
     }
-    if (!after) continue
-
-    const supplierId = String(after.supplierId || 'batson')
-    const externalId = String(after.externalId)
-    const title = String(after.title || externalId)
-    const body_html = String(after.description || '')
-    const product_type = String(after.partType || 'part')
-    const vendor = supplierId.charAt(0).toUpperCase() + supplierId.slice(1)
-    const handle = buildHandle(supplierId, externalId)
-    const specs = (after.normSpecs as any) || (after.rawSpecs as any) || {}
-    const contentHash = String(after.hashContent || '')
-
-    let product = await findProductByHandle(shopify, handle)
-    const tags = [product_type, supplierId]
-
-    if (!product) {
-      product = await withRetry(() => shopify.product.create({ title, body_html, vendor, product_type, handle, tags }))
-      const pid = Number(product.id)
-      results.push({ externalId, productId: pid, handle, action: 'created' })
-    } else {
-      // Check rbp.hash metafield; skip if unchanged
-      const mfs = await listProductMetafields(shopify, Number(product.id))
-      const mfHash = mfs.find((m: any) => m.namespace === NS && m.key === 'hash')
-      const prevHash = mfHash?.value || ''
-      if (prevHash === contentHash) {
-        continue
-      }
-      await withRetry(() =>
-        shopify.product.update(Number(product.id), { title, body_html, vendor, product_type, tags }),
-      )
-      const pid = Number(product.id)
-      results.push({ externalId, productId: pid, handle, action: 'updated' })
-    }
-
-    const pid = Number(product.id)
-    await upsertProductMetafield(shopify, pid, NS, 'specs', 'json', JSON.stringify(specs))
-    await upsertProductMetafield(shopify, pid, NS, 'supplier_external_id', 'single_line_text_field', externalId)
-    await upsertProductMetafield(shopify, pid, NS, 'hash', 'single_line_text_field', contentHash)
-
-    // <!-- BEGIN RBP GENERATED: shopify-sync-images-v1 -->
-    // Images v1: pass-through by src, dedupe by remembered source URLs
-    const imageSrcs: string[] = (Array.isArray(after.images) ? after.images : [])
-      .map((u: any) => toAbsolute(String(u)))
-      .filter(Boolean) as string[]
-    if (imageSrcs.length) {
-      // Read previous image sources metafield (if any)
-      const sourcesMf = await readImageSourcesMetafield(shopify, pid, NS)
-      const prevSources: string[] = sourcesMf?.value ? JSON.parse(sourcesMf.value) : []
-
-      // Only upload images with source URLs not seen before
-      const toCreate = imageSrcs.filter(src => !prevSources.includes(src))
-
-      if (toCreate.length) {
-        // Optional: set alt text from title / externalId
-        const altBase = `${title} (${externalId})`
-        for (const src of toCreate) {
-          try {
-            await createProductImageFromSrc(shopify, pid, src, altBase)
-          } catch {
-            // Non-fatal: continue with next image
-          }
-        }
-        const newSources = Array.from(new Set([...prevSources, ...toCreate]))
-        await writeImageSourcesMetafield(shopify, pid, NS, newSources)
-      }
-    }
-    // <!-- END RBP GENERATED: shopify-sync-images-v1 -->
   }
   return results
 }

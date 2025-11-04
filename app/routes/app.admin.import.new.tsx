@@ -16,17 +16,10 @@ import {
   Select,
   DataTable,
 } from '@shopify/polaris'
-import {
-  loadRunOptions,
-  parseRunOptions,
-  startImportFromOptions,
-  type RunOptions,
-} from '../services/importer/runOptions.server'
+import { parseRunOptions, startImportFromOptions, type RunOptions } from '../services/importer/runOptions.server'
 import { authenticate } from '../shopify.server'
 // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
-import { listTemplatesSummary } from '../models/specTemplate.server'
-import { listScrapers, type Scraper } from '../services/importer/scrapers.server'
-import { shouldRunAutoSync, markAutoSyncRun, syncOrphanTemplates } from '../models/orphanSync.server'
+import type { Scraper } from '../services/importer/scrapers.server'
 // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
 
 type LoaderData = {
@@ -38,34 +31,9 @@ type LoaderData = {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireHqShopOr404(request)
-  const options = await loadRunOptions(null)
-  const { admin, session } = await authenticate.admin(request)
-  // Optional auto-sync: keep template list fresh when user opens New Import
-  let syncSummary: { adopted: number; at: string } | undefined
-  try {
-    const shop = (session as unknown as { shop?: string }).shop || ''
-    if (shouldRunAutoSync(shop)) {
-      const { adopted } = await syncOrphanTemplates(
-        admin as unknown as {
-          graphql: (q: string, init?: { variables?: Record<string, unknown> }) => Promise<Response>
-        },
-      )
-      markAutoSyncRun(shop)
-      if (adopted > 0) syncSummary = { adopted, at: new Date().toISOString() }
-    }
-  } catch {
-    // ignore auto-sync errors; non-blocking
-  }
-  // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
-  const vtpls = await listTemplatesSummary()
-  const scrapers = await listScrapers()
-  return json<LoaderData>({
-    options,
-    variantTemplates: vtpls.map(t => ({ id: t.id, name: t.name })),
-    scrapers,
-    syncSummary,
-  })
-  // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
+  const url = new URL(request.url)
+  const search = url.search
+  return redirect(`/app/imports/new${search}`)
 }
 
 export async function action({ request }: ActionFunctionArgs) {

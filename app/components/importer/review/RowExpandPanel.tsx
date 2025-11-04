@@ -29,6 +29,9 @@ export default function RowExpandPanel({
     sourceUrl?: string | null
     images?: string[]
     attributesSubset?: Record<string, unknown>
+    priceWh?: number | null
+    priceMsrp?: number | null
+    availability?: string | null
   }
   const fields = data.changedFields || []
   return (
@@ -65,13 +68,43 @@ export default function RowExpandPanel({
               Source
             </PolarisLink>
           ) : null}
+          <InlineStack gap="400">
+            {data.priceWh != null ? (
+              <Text as="span">Wholesale: ${data.priceWh?.toFixed?.(2) ?? String(data.priceWh)}</Text>
+            ) : null}
+            {data.priceMsrp != null ? (
+              <Text as="span">MSRP: ${data.priceMsrp?.toFixed?.(2) ?? String(data.priceMsrp)}</Text>
+            ) : null}
+            {data.availability ? <Text as="span">Availability: {data.availability}</Text> : null}
+          </InlineStack>
           {Array.isArray(data.images) && data.images.length ? (
             <InlineStack gap="200">
-              {data.images.slice(0, 4).map((src, i) => (
+              {data.images.slice(0, 8).map((src, i) => (
                 <img key={i} src={src} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }} />
               ))}
             </InlineStack>
           ) : null}
+        </BlockStack>
+        <BlockStack gap="100">
+          <Text as="h3" variant="headingSm">
+            Attributes
+          </Text>
+          {data.attributesSubset && Object.keys(data.attributesSubset).length ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8 }}>
+              {Object.entries(data.attributesSubset).map(([k, v]) => (
+                <>
+                  <Text as="span" tone="subdued">
+                    {k}
+                  </Text>
+                  <Text as="span">{formatVal(v)}</Text>
+                </>
+              ))}
+            </div>
+          ) : (
+            <Text as="p" tone="subdued">
+              No attributes available.
+            </Text>
+          )}
         </BlockStack>
         <InlineStack gap="200">
           {onApprove ? <Button onClick={onApprove}>Approve</Button> : null}
@@ -84,5 +117,15 @@ export default function RowExpandPanel({
       </BlockStack>
     </Card>
   )
+}
+
+function formatVal(v: unknown): string {
+  if (v == null) return '—'
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v)
+  try {
+    return JSON.stringify(v)
+  } catch {
+    return '—'
+  }
 }
 // <!-- END RBP GENERATED: importer-review-inline-v1 -->

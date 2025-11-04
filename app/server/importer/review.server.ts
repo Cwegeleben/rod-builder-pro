@@ -191,6 +191,9 @@ export async function getRowDetails(
   sourceUrl?: string | null
   images?: string[]
   attributesSubset?: Record<string, unknown>
+  priceWh?: number | null
+  priceMsrp?: number | null
+  availability?: string | null
 }> {
   const d = await prisma.importDiff.findUnique({ where: { id: rowId } })
   if (!d || d.importRunId !== runId) return { changedFields: [] }
@@ -200,7 +203,19 @@ export async function getRowDetails(
   const images = (after?.images as string[]) || []
   const sourceUrl = (after?.sourceUrl as string) || null
   const attributesSubset = (after?.normSpecs as Record<string, unknown>) || {}
-  return { changedFields, sourceUrl, images, attributesSubset }
+  const priceWh = extractPrice(after)
+  const priceMsrp = ((): number | null => {
+    const v = after?.priceMsrp
+    if (v == null) return null
+    if (typeof v === 'number') return v
+    if (typeof v === 'string') {
+      const n = Number(v)
+      return Number.isFinite(n) ? n : null
+    }
+    return null
+  })()
+  const availability = extractAvailability(after)
+  return { changedFields, sourceUrl, images, attributesSubset, priceWh, priceMsrp, availability }
 }
 
 function mapResolutionToStatus(r: string | null | undefined): 'staged' | 'approved' | 'rejected' {

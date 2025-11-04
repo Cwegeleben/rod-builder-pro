@@ -16,12 +16,15 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const templateId = typeof body.templateId === 'string' ? (body.templateId as string) : ''
+  const confirmOverwrite = Boolean(body.confirmOverwrite) || /\bconfirm(=|:)?(1|true|yes)\b/i.test(JSON.stringify(body))
+  const overwriteExisting = Boolean(body.overwriteExisting) || false
   if (!templateId) return json({ error: 'templateId required' }, { status: 400 })
 
   const { prisma } = await import('../db.server')
   const { getTargetById } = await import('../server/importer/sites/targets')
   const { getSiteConfigForUrlDiscoverV1 } = await import('../server/importer/sites')
   const { renderHeadlessHtml } = await import('../server/headless/renderHeadlessHtml')
+  const { PRODUCT_MODELS } = await import('../server/importer/products/models')
 
   // Load saved settings for this template
   const tpl = await prisma.importTemplate.findUnique({ where: { id: templateId } })
@@ -29,15 +32,51 @@ export async function action({ request }: ActionFunctionArgs) {
   const cfg = (tpl.importConfig as Record<string, unknown>) || {}
   const settings = (cfg['settings'] as Record<string, unknown>) || {}
   const targetId = typeof settings['target'] === 'string' ? (settings['target'] as string) : ''
-  const seedUrls: string[] = Array.isArray(settings['discoverSeedUrls'])
+  const rawSeeds: string[] = Array.isArray(settings['discoverSeedUrls'])
     ? (settings['discoverSeedUrls'] as unknown[]).filter((x): x is string => typeof x === 'string')
     : []
+  // Normalize/validate seeds: absolute HTTPS urls only
+  const seedUrls: string[] = rawSeeds
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(s => {
+      try {
+        const u = new URL(s)
+        if (!u.protocol.startsWith('http')) return ''
+        // force https
+        u.protocol = 'https:'
+        return u.toString()
+      } catch {
+        return ''
+      }
+    })
+    .filter(Boolean)
   if (!targetId || seedUrls.length === 0) {
     return json({ error: 'Missing target or seeds' }, { status: 400 })
   }
 
   const target = getTargetById(targetId)
   const supplierId = target?.siteId || targetId
+
+  // If this prepare would overwrite existing staged data for the supplier, prompt for confirmation
+  try {
+    const stagedCount = await (await import('../db.server')).prisma.partStaging.count({ where: { supplierId } })
+    if (stagedCount > 0 && !confirmOverwrite) {
+      return json(
+        {
+          ok: false,
+          code: 'confirm_overwrite',
+          supplierId,
+          stagedCount,
+          message:
+            'This action will overwrite existing staged items for this supplier. Re-run with confirmOverwrite to proceed.',
+        },
+        { status: 409 },
+      )
+    }
+  } catch {
+    /* ignore confirm probe errors */
+  }
 
   // Quick discover to validate and estimate scope
   const headers: Record<string, string> = {
@@ -51,7 +90,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   async function fetchStatic(url: string): Promise<string | null> {
     const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 10_000)
+    const timer = setTimeout(() => ctrl.abort(), 15_000)
     try {
       const r = await fetch(url, { headers, signal: ctrl.signal })
       if (!r.ok) return null
@@ -85,7 +124,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const fetchHtml: (mode: 'static' | 'headless') => Promise<string | null> = async (mode: 'static' | 'headless') => {
       if (mode === 'static') return staticHtml
       try {
-        return await renderHeadlessHtml(src, { timeoutMs: 15_000 })
+        return await renderHeadlessHtml(src, { timeoutMs: 20_000 })
       } catch {
         return null
       }
@@ -100,6 +139,49 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const candidates = discovered.size
+  // Optional quick estimate: for series-parser targets, count expected item rows per seed.
+  let expectedItems: number | undefined = undefined
+  try {
+    if (useSeriesParserForTarget(targetId)) {
+      const parse = PRODUCT_MODELS['batson-attribute-grid']
+      let total = 0
+      // Compute base once
+      const getBase = (u: string) => {
+        try {
+          const x = new URL(u)
+          return `${x.protocol}//${x.hostname}`
+        } catch {
+          return 'https://batsonenterprises.com'
+        }
+      }
+      for (const seed of seedUrls) {
+        let html: string | null = null
+        try {
+          html = await fetchStatic(seed)
+        } catch {
+          html = null
+        }
+        if (!html) {
+          try {
+            html = await renderHeadlessHtml(seed, { timeoutMs: 20_000 })
+          } catch {
+            html = null
+          }
+        }
+        if (!html) continue
+        try {
+          const base = getBase(seed)
+          const res = parse(html, base)
+          total += Array.isArray(res?.rows) ? res.rows.length : 0
+        } catch {
+          /* ignore bad page */
+        }
+      }
+      expectedItems = total
+    }
+  } catch {
+    /* ignore estimate errors */
+  }
   // ETA heuristic: requests per minute ~30, with per-product ~1.2x overhead and diffing constant
   const rpm = 30
   const seconds = Math.ceil((candidates / Math.max(1, rpm)) * 60 * 1.2 + 20)
@@ -111,28 +193,41 @@ export async function action({ request }: ActionFunctionArgs) {
     if (/^batson-/.test(id)) return 'batson.product.v2'
     return undefined
   }
-  const options = {
-    mode: 'price_avail' as const,
+  function useSeriesParserForTarget(id: string): boolean {
+    // Enable parser-driven staging for Batson Rod Blanks target only
+    return id === 'batson-rod-blanks'
+  }
+  // Sanitize options for JSON storage (strip undefined)
+  const optsRaw = {
+    mode: 'discover' as const,
     includeSeeds: true,
     manualUrls: seedUrls,
     skipSuccessful: false,
     notes: `prepare:${templateId}`,
+    supplierId: supplierId || 'batson',
     templateKey: templateKeyForTarget(targetId),
     variantTemplateId: undefined,
     scraperId: undefined,
+    useSeriesParser: useSeriesParserForTarget(targetId),
   }
+  const options = Object.fromEntries(Object.entries(optsRaw).filter(([, v]) => v !== undefined)) as typeof optsRaw
 
   const run = await prisma.importRun.create({
     data: {
       supplierId: supplierId || 'batson',
       status: 'preparing',
-      summary: { preflight: { candidates, etaSeconds }, options } as unknown as object,
+      summary: { preflight: { candidates, etaSeconds, expectedItems }, options } as unknown as object,
     },
   })
 
   // Log and start background job (fire-and-forget)
   await prisma.importLog.create({
-    data: { templateId, runId: run.id, type: 'prepare:start', payload: { candidates, etaSeconds, options } },
+    data: {
+      templateId,
+      runId: run.id,
+      type: 'prepare:start',
+      payload: { candidates, etaSeconds, expectedItems, options },
+    },
   })
   // Persist preparing run on template for UI polling
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -141,17 +236,31 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const sample = Array.from(discovered).slice(0, 10)
     await prisma.importLog.create({
-      data: { templateId, runId: run.id, type: 'prepare:report', payload: { candidates, etaSeconds, sample } },
+      data: {
+        templateId,
+        runId: run.id,
+        type: 'prepare:report',
+        payload: { candidates, etaSeconds, expectedItems, sample },
+      },
     })
   } catch {
     /* ignore */
   }
 
-  import('../services/importer/runOptions.server').then(({ startImportFromOptions }) => {
+  import('../services/importer/runOptions.server').then(async ({ startImportFromOptions }) => {
     setTimeout(() => {
-      startImportFromOptions(options, run.id)
+      ;(async () => {
+        if (confirmOverwrite && overwriteExisting) {
+          // Optional wipe of existing staged rows to ensure a clean slate (best-effort)
+          try {
+            await prisma.partStaging.deleteMany({ where: { supplierId } })
+          } catch {
+            /* ignore */
+          }
+        }
+        await startImportFromOptions(options, run.id)
+      })()
         .then(async () => {
-          await prisma.importRun.update({ where: { id: run.id }, data: { status: 'started' } })
           // Clear preparing run pointer
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
@@ -173,7 +282,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }, 0)
   })
 
-  return json({ runId: run.id, candidates, etaSeconds })
+  return json({ runId: run.id, candidates, etaSeconds, expectedItems })
 }
 
 export default function ImporterPrepareApi() {

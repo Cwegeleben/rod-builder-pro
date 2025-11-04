@@ -165,6 +165,23 @@
       "label": "Typecheck importer normalization and diff",
       "type": "shell",
       "command": "npm run -s typecheck"
+    },
+    {
+      "label": "Typecheck importer normalization and diff",
+      "type": "shell",
+      "command": "npm run -s typecheck"
+    },
+    {
+      "label": "Typecheck and build (final)",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build",
+      "group": "build"
+    },
+    {
+      "label": "Typecheck and build",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build",
+      "group": "build"
     }
   ]
 }

@@ -9,7 +9,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const search = url.search
   const runId = String(params.runId)
-  return redirect(`/app/admin/import/runs/${runId}${search}`)
+  // New canonical path under /app/imports
+  return redirect(`/app/imports/runs/${runId}/review${search}`)
 }
 
 export default function ImportRunDetailAlias() {

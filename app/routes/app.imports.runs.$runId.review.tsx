@@ -20,6 +20,7 @@ import { prisma } from '../db.server'
 import { isHqShop } from '../lib/access.server'
 import ReviewFilters from 'app/components/importer/review/ReviewFilters'
 import ReviewIndexTable from 'app/components/importer/review/ReviewIndexTable'
+import RunLogList from 'app/components/importer/review/RunLogList'
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const url = new URL(request.url)
@@ -65,9 +66,28 @@ export default function ReviewRunRoute() {
     failed: number
   } | null>(null)
   const [publishProgress, setPublishProgress] = useState<number>(0)
+  const [publishEtaMs, setPublishEtaMs] = useState<number | null>(null)
   type DebugLog = { id: string; type: string; at: string; payload: unknown }
   const debugFetcher = useFetcher<{ run?: unknown; logs?: DebugLog[] }>()
   const [showDebug, setShowDebug] = useState(false)
+  // Auto-poll logs while debug panel is visible
+  useEffect(() => {
+    if (!showDebug) return
+    let active = true
+    const tick = async () => {
+      try {
+        debugFetcher.load(`/api/importer/runs/${run.id}/debug?nocache=${Date.now()}`)
+      } catch {
+        /* ignore */
+      }
+      if (active) setTimeout(tick, 2000)
+    }
+    // prime immediately
+    tick()
+    return () => {
+      active = false
+    }
+  }, [showDebug, run.id])
   // const navigate = useNavigate()
   // const location = useLocation()
 
@@ -184,10 +204,13 @@ export default function ReviewRunRoute() {
           <Banner tone="critical" title="Resolve conflicts before publishing to Shopify."></Banner>
         ) : null}
         {showDebug ? (
-          <div style={{ border: '1px solid #eee', padding: 12, borderRadius: 6 }}>
-            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>
-              {JSON.stringify(debugFetcher.data || {}, null, 2)}
-            </pre>
+          <div style={{ padding: 4 }}>
+            <BlockStack gap="200">
+              <Text as="h3" variant="headingSm">
+                Activity
+              </Text>
+              <RunLogList logs={(debugFetcher.data?.logs as DebugLog[]) || []} />
+            </BlockStack>
           </div>
         ) : null}
         <InlineStack align="space-between">
@@ -213,10 +236,12 @@ export default function ReviewRunRoute() {
                       progress: number
                       state: string
                       totals?: { created: number; updated: number; skipped: number; failed: number }
+                      etaMs?: number | null
                     }
                     if (s?.ok) {
                       setPublishProgress(s.progress || 0)
                       if (s.totals) setPublishTotals(s.totals)
+                      setPublishEtaMs(typeof s.etaMs === 'number' ? s.etaMs : null)
                       if (s.state === 'published') {
                         // Redirect once complete; prefer server totals
                         const t = s.totals || publishTotals || { created: 0, updated: 0, skipped: 0, failed: 0 }
@@ -242,7 +267,7 @@ export default function ReviewRunRoute() {
                 const resp = await fetch(`/api/importer/runs/${run.id}/publish/shopify`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ dryRun: true }),
+                  body: JSON.stringify({ dryRun: false }),
                 })
                 if (!resp.ok) throw new Error('Publish failed')
                 const jr = (await resp.json()) as {
@@ -283,6 +308,7 @@ export default function ReviewRunRoute() {
             <BlockStack gap="200">
               <Text as="p">This may take a minute. You can safely leave this page.</Text>
               <ProgressBar progress={publishProgress || 10} size="small" />
+              {publishEtaMs != null ? <Text as="p">ETA: ~{Math.max(0, Math.ceil(publishEtaMs / 1000))}s</Text> : null}
               {publishTotals ? (
                 <Text as="p">
                   Created {publishTotals.created}, Updated {publishTotals.updated}, Skipped {publishTotals.skipped},

@@ -1,10 +1,9 @@
 // <!-- BEGIN RBP GENERATED: hq-run-detail-tabs-v1 -->
-import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from '@remix-run/node'
+import { json, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from '@remix-run/node'
 import { useEffect, useMemo, useState } from 'react'
 import { useLoaderData, useFetcher, useSearchParams, useNavigation, Link, useLocation } from '@remix-run/react'
 import { requireHQAccess } from '../services/auth/guards.server'
 import { prisma } from '../db.server'
-import { authenticate } from '../shopify.server'
 import {
   Card,
   BlockStack,
@@ -37,17 +36,7 @@ type DiffRow = {
   specsPreview: Array<{ key: string; value: string }>
 }
 
-type PartLike = {
-  title?: string
-  name?: string
-  partType?: string
-  productType?: string
-  images?: unknown
-  normSpecs?: Record<string, unknown>
-  rawSpecs?: Record<string, unknown>
-  priceMsrp?: unknown
-  priceWh?: unknown
-}
+// legacy types and imports pruned; route now redirects
 
 type LoaderData = {
   runId: string
@@ -63,114 +52,10 @@ type LoaderData = {
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireHQAccess(request)
-  const { session } = await authenticate.admin(request)
-  const shop = (session as unknown as { shop?: string }).shop || ''
-  const runId = String(params.runId)
   const url = new URL(request.url)
-  const tabParam = (url.searchParams.get('tab') || 'adds') as LoaderData['selectedTab']
-  const selectedTab: LoaderData['selectedTab'] = ['adds', 'changes', 'deletes', 'conflicts'].includes(tabParam)
-    ? tabParam
-    : 'adds'
-  const page = Math.max(1, Number(url.searchParams.get('page') || '1') || 1)
-  const pageSize = Math.min(100, Math.max(10, Number(url.searchParams.get('pageSize') || '50') || 50))
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db: any = prisma as any
-  const run = (await db.importRun.findUnique({ where: { id: runId }, select: { supplierId: true } })) as {
-    supplierId: string
-  } | null
-  // Counts per type and unresolved adds
-  const [addCount, changeCount, deleteCount, conflictCount, unresolvedAdds] = await Promise.all([
-    db.importDiff.count({ where: { importRunId: runId, diffType: 'add' } }),
-    db.importDiff.count({ where: { importRunId: runId, diffType: 'change' } }),
-    db.importDiff.count({ where: { importRunId: runId, diffType: 'delete' } }),
-    db.importDiff.count({ where: { importRunId: runId, diffType: 'conflict' } }),
-    db.importDiff.count({
-      where: { importRunId: runId, diffType: 'add', OR: [{ resolution: null }, { resolution: 'pending' }] },
-    }),
-  ])
-
-  const typeMap: Record<LoaderData['selectedTab'], DiffRow['diffType']> = {
-    adds: 'add',
-    changes: 'change',
-    deletes: 'delete',
-    conflicts: 'conflict',
-  }
-  const diffs = (await db.importDiff.findMany({
-    where: { importRunId: runId, diffType: typeMap[selectedTab] },
-    select: { id: true, externalId: true, diffType: true, before: true, after: true, resolution: true },
-    orderBy: { id: 'asc' },
-    skip: (page - 1) * pageSize,
-    take: pageSize,
-  })) as Array<{
-    id: string
-    externalId: string
-    diffType: DiffRow['diffType']
-    before: unknown
-    after: unknown
-    resolution: string | null
-  }>
-
-  const rows: DiffRow[] = diffs.map(d => {
-    const disp: PartLike = ((d.after ?? d.before) as PartLike) || {}
-    const title: string = disp.title || disp.name || d.externalId || '—'
-    const partType: string | null = disp.partType ?? disp.productType ?? null
-    const toNumber = (v: unknown): number | null =>
-      typeof v === 'number' ? v : v && typeof v === 'string' ? Number(v) || null : null
-    const priceMsrp = toNumber(disp.priceMsrp)
-    const priceWh = toNumber(disp.priceWh)
-
-    // Extract first image url
-    let thumb: string | null = null
-    const imgs = disp.images as unknown
-    if (Array.isArray(imgs) && imgs.length) {
-      const first = imgs[0]
-      if (typeof first === 'string') thumb = first
-      else if (first && typeof first === 'object') thumb = (first.src || first.url || first.href) ?? null
-    }
-
-    // Build a small specs preview (up to 3 entries)
-    const specs = (disp.normSpecs || disp.rawSpecs || {}) as Record<string, unknown>
-    const specsPreview: Array<{ key: string; value: string }> = []
-    for (const [k, v] of Object.entries(specs)) {
-      if (specsPreview.length >= 3) break
-      if (v == null) continue
-      const val = typeof v === 'string' ? v : typeof v === 'number' ? String(v) : JSON.stringify(v)
-      specsPreview.push({ key: k, value: val.slice(0, 60) })
-    }
-
-    return {
-      id: d.id,
-      externalId: d.externalId,
-      diffType: d.diffType,
-      resolution: d.resolution,
-      title,
-      partType,
-      priceMsrp,
-      priceWh,
-      thumb,
-      specsPreview,
-    }
-  })
-
-  const missingImagesOnPage = rows.filter(r => r.diffType === 'add' && !r.thumb).length
-
-  return json<LoaderData>({
-    runId,
-    shop,
-    supplierId: run?.supplierId,
-    counts: {
-      add: addCount,
-      change: changeCount,
-      delete: deleteCount,
-      conflict: conflictCount,
-      unresolvedAdds,
-    },
-    rows,
-    selectedTab,
-    page,
-    pageSize,
-    missingImagesOnPage,
-  })
+  const search = url.search
+  const runId = String(params.runId)
+  return redirect(`/app/imports/runs/${runId}/review${search}`)
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {

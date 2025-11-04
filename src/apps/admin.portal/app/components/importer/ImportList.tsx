@@ -25,6 +25,8 @@ type Row = {
   nextRunAt?: string
   hadFailures?: boolean
   preparing?: { runId: string; startedAt?: string; etaSeconds?: number }
+  hasSeeds?: boolean
+  hasStaged?: boolean
 }
 
 type InitialDbTemplate = {
@@ -79,6 +81,8 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
               hadFailures?: boolean
               lastRunAt?: string | null
               preparing?: { runId: string; startedAt?: string; etaSeconds?: number } | null
+              hasSeeds?: boolean
+              hasStaged?: boolean
             }>
           }
           const list = Array.isArray(jr.templates) ? jr.templates : []
@@ -93,6 +97,8 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
               nextRunAt: undefined,
               hadFailures: !!t.hadFailures,
               preparing: t.preparing || undefined,
+              hasSeeds: !!t.hasSeeds,
+              hasStaged: !!t.hasStaged,
             })),
           )
           return
@@ -251,38 +257,7 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
     )
   }
 
-  async function doPrepare(r: Row) {
-    setBusy(r.templateId)
-    try {
-      const resp = await fetch('/api/importer/prepare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId: r.templateId }),
-      })
-      if (!resp.ok) throw new Error('Prepare failed')
-      const data = (await resp.json()) as { runId: string; candidates?: number; etaSeconds?: number }
-      // Optimistically attach preparing snapshot so progress UI starts immediately
-      setRows(cur =>
-        cur.map(x =>
-          x.templateId === r.templateId
-            ? {
-                ...x,
-                preparing: {
-                  runId: data.runId,
-                  startedAt: new Date().toISOString(),
-                  etaSeconds: typeof data.etaSeconds === 'number' ? data.etaSeconds : 60,
-                },
-              }
-            : x,
-        ),
-      )
-      setToast('Review prep started')
-    } catch (e) {
-      setError((e as Error)?.message || 'Prepare failed')
-    } finally {
-      setBusy(null)
-    }
-  }
+  // doPrepare removed: Full Discover is launched from Settings page header
 
   const resourceName = { singular: 'import', plural: 'imports' }
 
@@ -358,12 +333,19 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   <ButtonGroup>
-                    {/* Prepare Review starts async preflight + staging in-place */}
-                    <Button variant="primary" tone="success" loading={isBusy} onClick={() => doPrepare(r)}>
-                      Prepare review
-                    </Button>
-                    {/* Review disabled during prepare */}
-                    <Button url={`/app/imports/${r.templateId}/review${location.search}`} disabled={!!r.preparing}>
+                    {/* Prepare removed from Imports list; launch Full Discover from Settings page */}
+                    {/* Review disabled during prepare, when no seeds configured, or when nothing discovered yet */}
+                    <Button
+                      url={`/app/imports/${r.templateId}/review${location.search}`}
+                      disabled={!!r.preparing || r.hasSeeds === false || r.hasStaged === false}
+                      accessibilityLabel={
+                        r.hasSeeds === false
+                          ? 'Add seeds in settings to enable Review'
+                          : r.hasStaged === false
+                            ? 'Run Prepare review to discover items before reviewing'
+                            : undefined
+                      }
+                    >
                       Review
                     </Button>
                     {r.state === ImportState.NEEDS_SETTINGS && (

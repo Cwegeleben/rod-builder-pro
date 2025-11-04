@@ -4,30 +4,36 @@ import type { Prisma } from '@prisma/client'
 import { markSkipSuccessfulForRun } from '../../../packages/importer/src/pipelines/diffWithSkip'
 // <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 -->
 import { crawlBatson } from '../../../packages/importer/src/crawlers/batsonCrawler'
+import type { BatsonGridRowRaw, BlankSpec } from '../../server/importer/products/batsonAttributeGrid'
 import { fetchActiveSources, upsertProductSource } from '../../../packages/importer/src/seeds/sources'
 
 export type RunOptions = {
-  mode: 'price_avail'
+  mode: 'discover' | 'price_avail'
   includeSeeds: boolean
   manualUrls: string[]
   skipSuccessful: boolean
   notes?: string
+  // Supplier identifier (matches ImportTarget.siteId); used for staging/seeds/diffs
+  supplierId?: string
   // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
   templateKey?: string
   // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
   // hq-importer-new-import-v2
   variantTemplateId?: string
   scraperId?: string
+  // Parser-driven staging switch (series page parser instead of full crawler)
+  useSeriesParser?: boolean
 }
 
 type ImportRunSummary = { counts?: Record<string, number>; options?: RunOptions }
 
 const DEFAULT_OPTIONS: RunOptions = {
-  mode: 'price_avail',
+  mode: 'discover',
   includeSeeds: true,
   manualUrls: [],
   skipSuccessful: false,
   notes: '',
+  useSeriesParser: false,
 }
 
 export function parseRunOptions(formData: FormData): RunOptions {
@@ -40,6 +46,7 @@ export function parseRunOptions(formData: FormData): RunOptions {
   // hq-importer-new-import-v2
   const variantTemplateId = String(formData.get('variantTemplateId') || '').trim() || undefined
   const scraperId = String(formData.get('scraperId') || '').trim() || undefined
+  const useSeriesParser = formData.get('useSeriesParser') === 'on'
   const manualStr = String(formData.get('manualUrls') || '')
   const manualUrls = manualStr
     .split(/\r?\n|,/) // allow CSV or newline list
@@ -54,6 +61,7 @@ export function parseRunOptions(formData: FormData): RunOptions {
     templateKey,
     variantTemplateId,
     scraperId,
+    useSeriesParser,
   }
 }
 
@@ -83,22 +91,142 @@ export async function startImportFromOptions(
   runId?: string,
   admin?: AdminClient,
 ): Promise<string> {
-  const supplierId = 'batson'
+  // <!-- BEGIN RBP GENERATED: importer-prepare-review-wirefix-v1 -->
+  // Force Prepare Review launcher to discovery mode (never short-circuit as price_avail)
+  if (options.mode !== 'discover') options.mode = 'discover'
+  const supplierId = options.supplierId || 'batson'
+  // Helper to stage from series parser (Batson attribute grid)
+  async function stageFromSeriesParser(seedUrls: string[]) {
+    const { renderHeadlessHtml } = await import('../../server/headless/renderHeadlessHtml')
+    const { PRODUCT_MODELS } = await import('../../server/importer/products/models')
+    const { upsertStaging } = await import('../../../packages/importer/src/staging/upsert')
+    const { upsertProductSource } = await import('../../../packages/importer/src/seeds/sources')
+    const headers: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    }
+    async function fetchStatic(url: string): Promise<string | null> {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 20_000)
+      try {
+        const r = await fetch(url, { headers, signal: ctrl.signal })
+        if (!r.ok) return null
+        return await r.text()
+      } catch {
+        return null
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+    const parse = PRODUCT_MODELS['batson-attribute-grid']
+    for (const src of seedUrls) {
+      let html: string | null = await fetchStatic(src)
+      if (!html) {
+        try {
+          html = await renderHeadlessHtml(src, { timeoutMs: 20_000 })
+        } catch {
+          html = null
+        }
+      }
+      if (!html) continue
+      const base = (() => {
+        try {
+          const u = new URL(src)
+          return `${u.protocol}//${u.hostname}`
+        } catch {
+          return 'https://batsonenterprises.com'
+        }
+      })()
+      const parsed = parse(html, base)
+      const rows = (parsed.rows as Array<{ raw: BatsonGridRowRaw; spec: BlankSpec }>) || []
+      for (const r of rows) {
+        const externalId = String(r.raw.code || r.raw.model || '')
+        if (!externalId) continue
+        const title = String(r.raw.model || r.raw.code || '')
+        const partType = 'Rod Blank'
+        const description = ''
+        const images: string[] = []
+        const rawSpecs = { raw: r.raw, spec: r.spec }
+        const normSpecs = { ...r.spec, availability: r.raw.availability }
+        // Sanitize price fields: accept only numeric; strip currency and fallback to null
+        const toNumberOrNull = (v: unknown): number | null => {
+          if (v === null || v === undefined) return null
+          if (typeof v === 'number') return isNaN(v) ? null : v
+          if (typeof v === 'string') {
+            const cleaned = v.replace(/[^\d.-]/g, '')
+            if (!cleaned) return null
+            const n = Number(cleaned)
+            return isNaN(n) ? null : n
+          }
+          return null
+        }
+        const priceWh = toNumberOrNull((r.raw as { price?: unknown }).price)
+        const priceMsrp = toNumberOrNull((r.raw as { msrp?: unknown }).msrp)
+        const availability = r.raw.availability ?? null
+        await upsertStaging(supplierId, {
+          externalId,
+          title,
+          partType,
+          description,
+          images,
+          rawSpecs,
+          normSpecs,
+          priceWh,
+          priceMsrp,
+          availability,
+        })
+        // Proactively seed a search URL to reach detail pages for image extraction
+        try {
+          const searchUrl = `${base}/ecom/purchaselistsearch?keywords=${encodeURIComponent(externalId)}`
+          await upsertProductSource(supplierId, searchUrl, 'discovered', 'seeded-from-series')
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
   // Record manual URLs as sources
   for (const url of options.manualUrls) {
     await upsertProductSource(supplierId, url, 'manual', options.notes)
   }
   // Compose seeds
-  const saved = options.includeSeeds ? (await fetchActiveSources(supplierId)).map((s: { url: string }) => s.url) : []
+  // When using the series parser, restrict crawl seeds to only the manual URLs for this run
+  const saved =
+    options.includeSeeds && !options.useSeriesParser
+      ? (await fetchActiveSources(supplierId)).map((s: { url: string }) => s.url)
+      : []
   const seeds = Array.from(new Set([...saved, ...options.manualUrls]))
-  // Crawl and stage (honor template + polite defaults)
-  await crawlBatson(seeds, {
-    templateKey: options.templateKey,
-    // Conservative defaults for Fly Machines with headless Chromium
-    politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
-  })
+  // Stage products: for Batson, run the reliable series parser first, then follow with the crawler to backfill any misses
+  if (options.useSeriesParser) {
+    await stageFromSeriesParser(seeds)
+    await crawlBatson(seeds, {
+      templateKey: options.templateKey,
+      politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
+      supplierId,
+      // Do not include previously saved seeds for series-targeted runs to avoid cross-series noise
+      ignoreSavedSources: true,
+    })
+  } else {
+    await crawlBatson(seeds, {
+      templateKey: options.templateKey,
+      // Conservative defaults for Fly Machines with headless Chromium
+      politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
+      supplierId,
+    })
+  }
   // Generate diffs
   if (runId) {
+    try {
+      const stagingCount = await prisma.partStaging.count({ where: { supplierId } })
+      const seedCount = seeds.length
+      console.log('[prepare-review-wirefix] before-diff', { supplierId, seedCount, stagingCount, runId })
+    } catch {
+      /* noop */
+    }
     await prisma.importDiff.deleteMany({ where: { importRunId: runId } })
     await createDiffRowsForRun(supplierId, runId, { options, admin })
     if (options.skipSuccessful) {
@@ -109,12 +237,44 @@ export async function startImportFromOptions(
     await writeOptionsToRun(runId, options)
     await prisma.importRun.update({
       where: { id: runId },
-      data: { status: 'started', summary: { counts, options } as unknown as object },
+      // Mark run as staged after diffs are materialized so Review can immediately show rows
+      data: { status: 'staged', summary: { counts, options } as unknown as object },
     })
+    // Post-run consistency log: expectedItems (preflight) vs staged and diffs
+    try {
+      const run = await prisma.importRun.findUnique({ where: { id: runId } })
+      const pre = ((run?.summary as unknown as { preflight?: { expectedItems?: number } }) || {}).preflight || {}
+      const expectedItems = typeof pre.expectedItems === 'number' ? pre.expectedItems : undefined
+      const stagedCount = await prisma.partStaging.count({ where: { supplierId } })
+      const diffCount = await prisma.importDiff.count({ where: { importRunId: runId } })
+      await prisma.importLog.create({
+        data: {
+          templateId: options.notes?.replace(/^prepare:/, '') || 'n/a',
+          runId,
+          type: 'prepare:consistency',
+          payload: { expectedItems, stagedCount, diffCount },
+        },
+      })
+    } catch {
+      /* ignore */
+    }
+    try {
+      const diffCount = await prisma.importDiff.count({ where: { importRunId: runId } })
+      console.log('[prepare-review-wirefix] after-diff', { supplierId, diffCount, runId })
+    } catch {
+      /* noop */
+    }
     return runId
   } else {
     // Create a new run and then update with options merged
     const newRunId = await createRunFromStaging(supplierId)
+    try {
+      const stagingCount = await prisma.partStaging.count({ where: { supplierId } })
+      const seedCount = seeds.length
+      console.log('[prepare-review-wirefix] before-diff', { supplierId, seedCount, stagingCount, runId: newRunId })
+    } catch {
+      /* noop */
+    }
     await prisma.importDiff.deleteMany({ where: { importRunId: newRunId } })
     await createDiffRowsForRun(supplierId, newRunId, { options, admin })
     if (options.skipSuccessful) {
@@ -123,8 +283,33 @@ export async function startImportFromOptions(
     const counts = await countDiffsForRun(newRunId)
     await prisma.importRun.update({
       where: { id: newRunId },
-      data: { status: 'started', summary: { counts, options } as unknown as object },
+      // Mark run as staged after diffs are materialized
+      data: { status: 'staged', summary: { counts, options } as unknown as object },
     })
+    // Post-run consistency log for new run
+    try {
+      const run = await prisma.importRun.findUnique({ where: { id: newRunId } })
+      const pre = ((run?.summary as unknown as { preflight?: { expectedItems?: number } }) || {}).preflight || {}
+      const expectedItems = typeof pre.expectedItems === 'number' ? pre.expectedItems : undefined
+      const stagedCount = await prisma.partStaging.count({ where: { supplierId } })
+      const diffCount = await prisma.importDiff.count({ where: { importRunId: newRunId } })
+      await prisma.importLog.create({
+        data: {
+          templateId: options.notes?.replace(/^prepare:/, '') || 'n/a',
+          runId: newRunId,
+          type: 'prepare:consistency',
+          payload: { expectedItems, stagedCount, diffCount },
+        },
+      })
+    } catch {
+      /* ignore */
+    }
+    try {
+      const diffCount = await prisma.importDiff.count({ where: { importRunId: newRunId } })
+      console.log('[prepare-review-wirefix] after-diff', { supplierId, diffCount, runId: newRunId })
+    } catch {
+      /* noop */
+    }
     return newRunId
   }
 }
@@ -148,7 +333,10 @@ export async function diffStagingIntoExistingRun(supplierId: string, runId: stri
   await writeOptionsToRun(runId, opts?.options || DEFAULT_OPTIONS)
   await prisma.importRun.update({
     where: { id: runId },
-    data: { status: 'started', summary: { counts, options: opts?.options || DEFAULT_OPTIONS } as unknown as object },
+    // <!-- BEGIN RBP GENERATED: importer-prepare-review-wirefix-v1 -->
+    // Ensure existing run moves to staged once diffs are recomputed
+    data: { status: 'staged', summary: { counts, options: opts?.options || DEFAULT_OPTIONS } as unknown as object },
+    // <!-- END RBP GENERATED: importer-prepare-review-wirefix-v1 -->
   })
   return counts
 }
@@ -226,7 +414,12 @@ async function createDiffRowsForRun(
     ? await prisma.$queryRawUnsafe<Record<string, unknown>[]>(`SELECT * FROM Part WHERE supplierId = ?`, supplierId)
     : []
   const existingByExt = new Map(existing.map(p => [String((p as Record<string, unknown>)['externalId'] || ''), p]))
-  const rows: { externalId: string; diffType: 'add' | 'change' | 'delete'; before: unknown; after: unknown }[] = []
+  const rows: {
+    externalId: string
+    diffType: 'add' | 'change' | 'delete'
+    before: Prisma.InputJsonValue | null
+    after: Prisma.InputJsonValue | null
+  }[] = []
   const useSkip = Boolean(ctx?.options?.skipSuccessful && ctx?.admin)
   for (const s of staging) {
     const before = existingByExt.get(s.externalId) || null
@@ -238,7 +431,20 @@ async function createDiffRowsForRun(
           continue
         }
       }
-      rows.push({ externalId: s.externalId, diffType: 'add', before: null, after: s })
+      // Shape JSON payloads to avoid non-serializable fields (e.g., Dates)
+      const after: Prisma.JsonObject = {
+        title: s.title,
+        partType: s.partType,
+        description: s.description ?? null,
+        images: (s.images as unknown as Prisma.JsonValue) ?? null,
+        rawSpecs: (s.rawSpecs as unknown as Prisma.JsonValue) ?? null,
+        normSpecs: (s.normSpecs as unknown as Prisma.JsonValue) ?? null,
+        priceMsrp: (s.priceMsrp as unknown as Prisma.JsonValue) ?? null,
+        priceWh: (s.priceWh as unknown as Prisma.JsonValue) ?? null,
+        // Avoid undefined in JSON payloads; use null or omit
+        sourceUrl: null,
+      }
+      rows.push({ externalId: s.externalId, diffType: 'add', before: null, after })
     } else if (s.hashContent !== (before.hashContent || '')) {
       if (useSkip) {
         const handle = buildHandle(supplierId, s.externalId)
@@ -247,14 +453,50 @@ async function createDiffRowsForRun(
           continue
         }
       }
-      rows.push({ externalId: s.externalId, diffType: 'change', before, after: s })
+      const beforeObj = before as Record<string, unknown>
+      const beforeJson: Prisma.JsonObject = {
+        title: (beforeObj['title'] as string) ?? null,
+        partType: (beforeObj['partType'] as string) ?? null,
+        description: (beforeObj['description'] as string) ?? null,
+        images: (beforeObj['images'] as unknown as Prisma.JsonValue) ?? null,
+        rawSpecs: (beforeObj['rawSpecs'] as unknown as Prisma.JsonValue) ?? null,
+        normSpecs: (beforeObj['normSpecs'] as unknown as Prisma.JsonValue) ?? null,
+        priceMsrp: (beforeObj['priceMsrp'] as unknown as Prisma.JsonValue) ?? null,
+        priceWh: (beforeObj['priceWh'] as unknown as Prisma.JsonValue) ?? null,
+        sourceUrl: (beforeObj['sourceUrl'] as string) ?? null,
+      }
+      const after: Prisma.JsonObject = {
+        title: s.title,
+        partType: s.partType,
+        description: s.description ?? null,
+        images: (s.images as unknown as Prisma.JsonValue) ?? null,
+        rawSpecs: (s.rawSpecs as unknown as Prisma.JsonValue) ?? null,
+        normSpecs: (s.normSpecs as unknown as Prisma.JsonValue) ?? null,
+        priceMsrp: (s.priceMsrp as unknown as Prisma.JsonValue) ?? null,
+        priceWh: (s.priceWh as unknown as Prisma.JsonValue) ?? null,
+        // omit undefined fields to keep JSON serializable
+      }
+      rows.push({ externalId: s.externalId, diffType: 'change', before: beforeJson, after })
     }
   }
   for (const ex of existing) {
     const exId = String((ex as Record<string, unknown>)['externalId'] || '')
     if (!exId) continue
-    if (!staging.find(s => s.externalId === exId))
-      rows.push({ externalId: exId, diffType: 'delete', before: ex, after: null })
+    if (!staging.find(s => s.externalId === exId)) {
+      const exObj = ex as Record<string, unknown>
+      const beforeJson: Prisma.JsonObject = {
+        title: (exObj['title'] as string) ?? null,
+        partType: (exObj['partType'] as string) ?? null,
+        description: (exObj['description'] as string) ?? null,
+        images: (exObj['images'] as unknown as Prisma.JsonValue) ?? null,
+        rawSpecs: (exObj['rawSpecs'] as unknown as Prisma.JsonValue) ?? null,
+        normSpecs: (exObj['normSpecs'] as unknown as Prisma.JsonValue) ?? null,
+        priceMsrp: (exObj['priceMsrp'] as unknown as Prisma.JsonValue) ?? null,
+        priceWh: (exObj['priceWh'] as unknown as Prisma.JsonValue) ?? null,
+        sourceUrl: (exObj['sourceUrl'] as string) ?? null,
+      }
+      rows.push({ externalId: exId, diffType: 'delete', before: beforeJson, after: null })
+    }
   }
   if (rows.length) {
     await prisma.importDiff.createMany({
@@ -266,6 +508,11 @@ async function createDiffRowsForRun(
         after: r.after as unknown as Prisma.InputJsonValue,
       })),
     })
+  }
+  try {
+    console.log('[createDiffRowsForRun] created rows', { supplierId, runId, count: rows.length })
+  } catch {
+    /* noop */
   }
 }
 

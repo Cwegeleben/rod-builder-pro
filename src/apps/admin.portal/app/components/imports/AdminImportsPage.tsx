@@ -187,18 +187,33 @@ export default function AdminImportsPage({ initialSearch }: AdminImportsPageProp
     { resourceIDResolver: i => i.id },
   )
 
-  const onDeleteSelected = () => {
+  const onDeleteSelected = async () => {
     if (selectedResources.length === 0) return
     const ok = window.confirm(
-      `Delete ${selectedResources.length} selected imports? This is idempotent and affects only current run artifacts.`,
+      `Delete ${selectedResources.length} selected imports? This will remove their settings, logs, and any staged items for their supplier.`,
     )
     if (!ok) return
     // Optimistic update with rollback
     setBackupRows(rows)
     setRows(prev => prev.filter(r => !selectedResources.includes(r.id)))
     clearSelection()
-    // No backend call (contracts unchanged). Consider showing info toast.
-    setToast({ content: 'Deleted selected (client-only)', error: false })
+    try {
+      const resp = await fetch('/api/importer/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateIds: selectedResources }),
+      })
+      if (!resp.ok) {
+        const jr = (await resp.json().catch(() => ({}))) as { error?: string }
+        throw new Error(String(jr?.error || 'Delete failed'))
+      }
+      setToast({ content: 'Deleted selected imports' })
+    } catch (e) {
+      // Rollback on error
+      if (backupRows) setRows(backupRows)
+      setBackupRows(null)
+      setToast({ content: (e as Error)?.message || 'Delete failed', error: true })
+    }
   }
 
   const filters = [

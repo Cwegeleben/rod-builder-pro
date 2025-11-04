@@ -1,6 +1,6 @@
 {
   "id": "VBg2CEUnX37eZDc",
-  "json": "{\"id\":\"VBg2CEUnX37eZDc\",\"url\":\"https://batsonenterprises.com/collections/blanks\",\"loadedUrl\":\"https://batsonenterprises.com/collections/blanks\",\"uniqueKey\":\"https://batsonenterprises.com/collections/blanks\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"state\":4}},\"handledAt\":\"2025-11-02T06:21:08.323Z\"}",
+  "json": "{\"id\":\"VBg2CEUnX37eZDc\",\"url\":\"https://batsonenterprises.com/collections/blanks\",\"loadedUrl\":\"https://batsonenterprises.com/collections/blanks\",\"uniqueKey\":\"https://batsonenterprises.com/collections/blanks\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"state\":4}},\"handledAt\":\"2025-11-03T05:17:46.197Z\"}",
   "method": "GET",
   "orderNo": null,
   "retryCount": 0,

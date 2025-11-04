@@ -32,10 +32,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
   if (kind === 'import-templates' || kind === 'imports') {
     const { prisma } = await import('../db.server')
+    const { getTargetById } = await import('../server/importer/sites/targets')
     try {
       const rows = await (prisma as any).importTemplate.findMany({
         orderBy: { name: 'asc' },
-        select: { id: true, name: true, state: true, hadFailures: true, lastRunAt: true, preparingRunId: true },
+        select: {
+          id: true,
+          name: true,
+          state: true,
+          hadFailures: true,
+          lastRunAt: true,
+          preparingRunId: true,
+          // Include config so we can determine if seeds are configured
+          importConfig: true,
+        },
       })
       // Enrich with preparing snapshot from ImportRun
       const preparingIds = rows.filter((r: any) => r.preparingRunId).map((r: any) => r.preparingRunId as string)
@@ -48,20 +58,47 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const prepById = Object.fromEntries(
         prepRuns.map((r: any) => [r.id, { startedAt: r.startedAt, preflight: (r.summary as any)?.preflight || null }]),
       )
-      const out = rows.map((r: any) => {
-        const prep = r.preparingRunId ? prepById[r.preparingRunId] || null : null
-        const preparing =
-          r.preparingRunId && prep
-            ? {
-                runId: r.preparingRunId as string,
-                startedAt: prep.startedAt as Date,
-                etaSeconds: (prep.preflight?.etaSeconds as number) || undefined,
+      const out = await Promise.all(
+        rows.map(async (r: any) => {
+          const prep = r.preparingRunId ? prepById[r.preparingRunId] || null : null
+          const preparing =
+            r.preparingRunId && prep
+              ? {
+                  runId: r.preparingRunId as string,
+                  startedAt: prep.startedAt as Date,
+                  etaSeconds: (prep.preflight?.etaSeconds as number) || undefined,
+                }
+              : null
+          // Determine if template has saved discovery seeds and staged items
+          let hasSeeds = false
+          let seedCount = 0
+          let hasStaged = false
+          try {
+            const cfg = (r.importConfig as Record<string, unknown>) || {}
+            const settings = (cfg['settings'] as Record<string, unknown>) || {}
+            const discoverSeedUrls = Array.isArray(settings['discoverSeedUrls'])
+              ? (settings['discoverSeedUrls'] as unknown[]).filter((x): x is string => typeof x === 'string')
+              : []
+            seedCount = discoverSeedUrls.length
+            hasSeeds = seedCount > 0
+            const targetId = typeof settings['target'] === 'string' ? (settings['target'] as string) : ''
+            if (targetId) {
+              const target = getTargetById(targetId)
+              const supplierId = (target?.siteId as string) || targetId
+              if (supplierId) {
+                const count = await (prisma as any).partStaging.count({ where: { supplierId } })
+                hasStaged = count > 0
               }
-            : null
-        const rest = { ...r }
-        delete (rest as any).preparingRunId
-        return { ...rest, preparing }
-      })
+            }
+          } catch {
+            /* ignore */
+          }
+          const rest = { ...r }
+          delete (rest as any).preparingRunId
+          delete (rest as any).importConfig
+          return { ...rest, preparing, hasSeeds, seedCount, hasStaged }
+        }),
+      )
       return new Response(JSON.stringify({ templates: out }), {
         headers: new Headers({ 'Content-Type': 'application/json', ...Object.fromEntries(baseHeaders) }),
       })

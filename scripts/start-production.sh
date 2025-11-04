@@ -21,6 +21,11 @@ else
   fi
 fi
 
+# Best-effort: ensure critical columns exist in SQLite (production uses file:/data/dev.sqlite)
+# This guards against baseline drift when migration history is incomplete.
+echo "[startup] ensuring critical schema columns exist (best-effort)" >&2
+node -e "require('./scripts/preflight/ensure-schema.mjs').ensure().catch(()=>process.exit(0))" || true
+
 # Launch remix server binding to 0.0.0.0:$PORT
 export PORT="${PORT:-3000}"
 export HOST="${HOST:-0.0.0.0}"

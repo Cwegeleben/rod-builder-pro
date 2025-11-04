@@ -11,11 +11,41 @@ export async function upsertStaging(
     description?: string
     images: string[]
     rawSpecs: Record<string, unknown>
+    normSpecs?: Record<string, unknown>
+    priceMsrp?: number | null
+    priceWh?: number | null
+    availability?: string | null
   },
 ) {
+  // Defensive coercion: ensure decimals are numbers or null only
+  const toNumOrNull = (v: unknown): number | null | undefined => {
+    if (v === undefined) return undefined
+    if (v === null) return null
+    if (typeof v === 'number') return isNaN(v) ? null : v
+    if (typeof v === 'string') {
+      const cleaned = v.replace(/[^\d.-]/g, '')
+      if (!cleaned) return null
+      const n = Number(cleaned)
+      return isNaN(n) ? null : n
+    }
+    return null
+  }
+  const priceMsrp = toNumOrNull(rec.priceMsrp)
+  const priceWh = toNumOrNull(rec.priceWh)
   const hash = crypto
     .createHash('sha256')
-    .update(JSON.stringify([rec.title, rec.partType, rec.rawSpecs, rec.images]))
+    .update(
+      JSON.stringify([
+        rec.title,
+        rec.partType,
+        rec.rawSpecs,
+        rec.normSpecs || {},
+        rec.images,
+        priceMsrp ?? null,
+        priceWh ?? null,
+        rec.availability ?? null,
+      ]),
+    )
     .digest('hex')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const client: any = prisma
@@ -27,6 +57,9 @@ export async function upsertStaging(
       description: rec.description || '',
       images: rec.images,
       rawSpecs: rec.rawSpecs,
+      normSpecs: rec.normSpecs || undefined,
+      priceMsrp: priceMsrp ?? undefined,
+      priceWh: priceWh ?? undefined,
       hashContent: hash,
       fetchedAt: new Date(),
     },
@@ -38,6 +71,9 @@ export async function upsertStaging(
       description: rec.description || '',
       images: rec.images,
       rawSpecs: rec.rawSpecs,
+      normSpecs: rec.normSpecs || undefined,
+      priceMsrp: priceMsrp ?? undefined,
+      priceWh: priceWh ?? undefined,
       hashContent: hash,
     },
   })

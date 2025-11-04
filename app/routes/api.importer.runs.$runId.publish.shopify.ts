@@ -28,18 +28,43 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // Mark as publishing so status endpoint can reflect running state
   await prisma.importRun.update({ where: { id: runId }, data: { status: 'publishing' } })
 
-  const { totals, productIds } = await publishRunToShopify({ runId, dryRun: dryRun || true })
+  try {
+    const { totals, productIds } = await publishRunToShopify({ runId, dryRun })
 
-  // Store summary under run.summary.publish
-  const summary = (run.summary as unknown as Record<string, unknown>) || {}
-  summary.publish = { totals, at: new Date().toISOString() }
-  await prisma.importRun.update({
-    where: { id: runId },
-    data: { status: 'published', summary: summary as unknown as Prisma.InputJsonValue },
-  })
+    // Store summary under run.summary.publish
+    const summary = (run.summary as unknown as Record<string, unknown>) || {}
+    summary.publish = { totals, at: new Date().toISOString() }
+    await prisma.importRun.update({
+      where: { id: runId },
+      data: { status: 'published', summary: summary as unknown as Prisma.InputJsonValue },
+    })
 
-  const filter = { tag: `importRun:${runId}` }
-  return json({ ok: true, runId, totals, productIds, filter }, { headers: { 'Cache-Control': 'no-store' } })
+    const filter = { tag: `importRun:${runId}` }
+    return json({ ok: true, runId, totals, productIds, filter }, { headers: { 'Cache-Control': 'no-store' } })
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : typeof err === 'object' &&
+            err &&
+            'message' in err &&
+            typeof (err as { message?: unknown }).message === 'string'
+          ? (err as { message: string }).message
+          : 'Publish failed'
+    // Best-effort: record failure in run.summary.publishError and reset status
+    try {
+      const current = await prisma.importRun.findUnique({ where: { id: runId } })
+      const summary = (current?.summary as unknown as Record<string, unknown>) || {}
+      summary.publishError = { message, at: new Date().toISOString() }
+      await prisma.importRun.update({
+        where: { id: runId },
+        data: { status: 'review', summary: summary as unknown as Prisma.InputJsonValue },
+      })
+    } catch {
+      /* ignore */
+    }
+    return json({ ok: false, error: message }, { status: 500 })
+  }
 }
 
 export default function PublishRunShopifyApi() {

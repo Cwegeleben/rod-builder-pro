@@ -44,7 +44,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const skipped = Number(url.searchParams.get('skipped') || '0') || 0
   const failed = Number(url.searchParams.get('failed') || '0') || 0
   // Shop Admin tag query link
-  const adminTagQuery = tag ? `tag:${tag}` : ''
+  // When embedding a tag with a colon in Shopify's Admin search query, wrap in quotes
+  const safeTagForQuery = tag ? `"${String(tag).replace(/"/g, '\\"')}"` : ''
+  const adminTagQuery = tag ? `tag:${safeTagForQuery}` : ''
   // <!-- END RBP GENERATED: importer-publish-shopify-v1 -->
   const q = url.searchParams.get('q') || ''
   const statusParams = url.searchParams.getAll('status')
@@ -66,7 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } else if (statusParams.length > 1) {
     queryTokens.push(`(${statusParams.map(s => `status:${s}`).join(' OR ')})`)
   }
-  if (tag) queryTokens.unshift(`tag:${tag}`)
+  if (tag) queryTokens.unshift(`tag:${safeTagForQuery}`)
   const finalQuery = queryTokens.filter(Boolean).join(' ')
 
   const GQL = `#graphql

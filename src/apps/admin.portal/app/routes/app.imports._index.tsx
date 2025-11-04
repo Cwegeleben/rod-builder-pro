@@ -3,7 +3,7 @@ import ImportList from '../components/importer/ImportList'
 import GlobalLogList from '../components/importer/GlobalLogList'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from '@remix-run/react'
-import { Page, BlockStack, Card, InlineStack, Text } from '@shopify/polaris'
+import { Page, BlockStack, Card, InlineStack, Text, Banner } from '@shopify/polaris'
 
 type ImportsHomeProps = {
   search?: string
@@ -38,6 +38,29 @@ export default function ImportsHome(props: ImportsHomeProps = {}) {
   return (
     <Page title="Imports" primaryAction={{ content: 'Add import', url: addImportHref }}>
       <BlockStack gap="400">
+        {/* Ephemeral banner when a crawl is started from Settings */}
+        {(() => {
+          try {
+            const sp = new URLSearchParams(qs || '')
+            if (sp.get('started') !== '1') return null
+            const c = Number(sp.get('c') || '')
+            const eta = Number(sp.get('eta') || '')
+            const exp = Number(sp.get('exp') || '')
+            const etaMin = Number.isFinite(eta) ? Math.max(0, Math.round(eta / 60)) : undefined
+            return (
+              <Banner tone="success" title="Crawl started in background">
+                <p>
+                  {Number.isFinite(c) ? `${c} candidates` : 'Preparing'} queued
+                  {Number.isFinite(exp) ? ` • ~${exp} expected items` : ''}
+                  {Number.isFinite(eta) ? ` • ETA ~ ${etaMin}m` : ''}. You can leave this page; status updates will
+                  appear below.
+                </p>
+              </Banner>
+            )
+          } catch {
+            return null
+          }
+        })()}
         <Card>
           <BlockStack gap="300">
             <InlineStack align="space-between">

@@ -40,11 +40,13 @@ export const BatsonRodBlanksSite = {
     try {
       const u = new URL(url)
       // <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
-      // Accept both /rod-blanks and /collections/blanks as the canonical listing page
+      // Accept both /rod-blanks (root and subpaths) and /collections/blanks as the canonical listing page
       const path = u.pathname.replace(/\/+$/, '')
       return (
         u.hostname.endsWith('batsonenterprises.com') &&
-        (path === '/rod-blanks' || path === '/collections/blanks' || /^\/collections\/blanks\//i.test(u.pathname))
+        (/^\/rod-blanks(\/|$)/i.test(path) ||
+          path === '/collections/blanks' ||
+          /^\/collections\/blanks\//i.test(u.pathname))
       )
       // <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
     } catch {

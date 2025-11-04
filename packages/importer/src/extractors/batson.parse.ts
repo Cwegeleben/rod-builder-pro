@@ -28,9 +28,15 @@ export async function extractProduct(
     return null
   }
   // <!-- BEGIN RBP GENERATED: batson-extractor-id-v1 (utility-page-guard) -->
-  // Skip utility pages like login and track your order
-  if (titleText.includes('login') || bodyText.includes('track your order')) {
-    return null
+  // Skip obvious utility pages based on URL path only (avoid false positives on titles/body text)
+  const currentUrl = page.url()
+  try {
+    const { pathname } = new URL(currentUrl)
+    if (/\b(user-login|ordertrackingguest|account|checkout)\b/i.test(pathname)) {
+      return null
+    }
+  } catch {
+    /* ignore URL parse errors */
   }
   // <!-- END RBP GENERATED: batson-extractor-id-v1 (utility-page-guard) -->
   const jldAll = extractJsonLd(html)
@@ -46,7 +52,7 @@ export async function extractProduct(
     )?.trim() ||
     jld?.title ||
     'Product'
-  const currentUrl = page.url()
+  // currentUrl already computed above
   // <!-- BEGIN RBP GENERATED: batson-extractor-id-v1 (code-extraction-and-normalization) -->
   // Prefer on-page Code: value; fallback to normalized last slug segment
   // removed legacy on-page code finder; relying on standardized fallbacks instead

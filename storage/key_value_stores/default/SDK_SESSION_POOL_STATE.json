@@ -1,9 +1,9 @@
 {
-  "usableSessionsCount": 4,
-  "retiredSessionsCount": 0,
+  "usableSessionsCount": 29,
+  "retiredSessionsCount": 1,
   "sessions": [
     {
-      "id": "session_xPQxnAvpxM",
+      "id": "session_zKtcY2ShsY",
       "cookieJar": {
         "version": "tough-cookie@4.1.4",
         "storeType": "MemoryCookieStore",
@@ -16,14 +16,14 @@
       "userData": {},
       "maxErrorScore": 3,
       "errorScoreDecrement": 0.5,
-      "expiresAt": "2025-11-02T07:11:05.715Z",
-      "createdAt": "2025-11-02T06:21:05.715Z",
+      "expiresAt": "2025-11-03T06:07:42.928Z",
+      "createdAt": "2025-11-03T05:17:42.928Z",
       "usageCount": 0,
       "maxUsageCount": 50,
       "errorScore": 0
     },
     {
-      "id": "session_giTF9axRoh",
+      "id": "session_Ls55LwL7GK",
       "cookieJar": {
         "version": "tough-cookie@4.1.4",
         "storeType": "MemoryCookieStore",
@@ -35,115 +35,151 @@
           {
             "key": "kLng",
             "value": "en-US",
-            "expires": "2026-11-02T06:21:10.318Z",
+            "expires": "2026-11-03T05:29:09.633Z",
             "domain": "batsonenterprises.com",
             "path": "/",
             "secure": true,
             "hostOnly": false,
-            "creation": "2025-11-02T06:21:07.108Z",
-            "lastAccessed": "2025-11-02T06:21:10.522Z"
+            "creation": "2025-11-03T05:17:44.704Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
           },
           {
             "key": ".ASPXAUTH",
-            "value": "265F6FDFB72326AE5BB5F469A7613EC999F27FF22C1BF6FBA5DC4F8C7DBB56178A2854F500D0FB657DD946133B42C3AA60DE51FB2D8D8C0D7BF6D2A1A11CE65B61A94B47729D29E39981C190F9FEFCA39E2C9727EE6455FD93202756B978B50F9732AB5E48C1B7D704CF7D5CF0E83D98F6F70B573CD87470D87C13E590FC9A16599F72FF696B289C0536F8D3FB3083A1CAF445A323C4BC5DFF264A0E50CFB6216C87808BFEAC48BF7E79293BDD5401D3570660D7B48D154CB46A6EDF464023BD69AB202F5CD035C91FBF78E72840DF146D15BEA9FB834B7E0777C94F1E806A78",
-            "expires": "2025-11-02T07:11:10.522Z",
+            "value": "EDACB157E5E47F199A87AA8F27FBD32FEB36B8C3D110A373B00EDF183B9F699098416BE7EA912AACCAC834D1D0E1DCD1DBED35718C8978F3B16D30532FB998917640CAB8A74B9DBFBD3C5A8BBB9BD02F6F02C0E347DEDDB69C790532AE3C5E0886E407D69A6E43EFA6DDDF5EC4AD80D46E3A7D818415A42C7F1715D1253CFAFF8FDB70DBE67DD22A3D9241AE6E766C0D0771FCCCFE4787A3DBCE3F68BEA4F31541A99378E7B7ABBF7C1A9B47A7A4454CDC4EC0DA7ED5E09EB5997214AEE4EA3A5BE4E093CC8BEE20282D89D4D2CD04FCB8126224A69F3B302995175A20A3D93B",
+            "expires": "2025-11-03T06:19:10.058Z",
             "domain": "batsonenterprises.com",
             "path": "/",
             "secure": true,
             "httpOnly": true,
             "hostOnly": false,
-            "creation": "2025-11-02T06:21:07.108Z",
-            "lastAccessed": "2025-11-02T06:21:10.522Z"
+            "creation": "2025-11-03T05:17:44.704Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
           },
           {
             "key": "UserSessionId",
-            "value": "b1e0295b-87a6-4125-bc3b-2c29eec8776b",
-            "expires": "2026-11-02T06:21:06.361Z",
+            "value": "40063992-f897-41ea-bf4d-dfb5df08ac83",
+            "expires": "2026-11-03T05:17:43.841Z",
             "domain": "batsonenterprises.com",
             "path": "/",
             "secure": true,
             "httpOnly": true,
             "hostOnly": false,
-            "creation": "2025-11-02T06:21:07.108Z",
-            "lastAccessed": "2025-11-02T06:21:10.522Z"
+            "creation": "2025-11-03T05:17:44.704Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
           },
           {
             "key": "OrderId",
-            "value": "CpjEgxQv/V8uuKmMzw8LtA==",
-            "expires": "2026-11-02T06:21:06.361Z",
+            "value": "STukfN27VGZH/oIMmvCCzQ==",
+            "expires": "2026-11-03T05:17:43.841Z",
             "domain": "batsonenterprises.com",
             "path": "/",
             "secure": true,
             "httpOnly": true,
             "hostOnly": false,
-            "creation": "2025-11-02T06:21:07.108Z",
-            "lastAccessed": "2025-11-02T06:21:10.522Z"
+            "creation": "2025-11-03T05:17:44.704Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
           },
           {
             "key": "_gcl_au",
-            "value": "1.1.860698323.1762064467",
-            "expires": "2026-01-31T06:21:07.000Z",
+            "value": "1.1.1215492774.1762147064",
+            "expires": "2026-02-01T05:17:44.000Z",
             "domain": "batsonenterprises.com",
             "path": "/",
             "hostOnly": false,
-            "creation": "2025-11-02T06:21:07.108Z",
-            "lastAccessed": "2025-11-02T06:21:10.522Z"
+            "creation": "2025-11-03T05:17:44.704Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
           },
           {
             "key": "_ga",
-            "value": "GA1.1.857316456.1762064467",
-            "expires": "2026-12-07T06:21:10.399Z",
+            "value": "GA1.1.802619310.1762147064",
+            "expires": "2026-12-08T05:29:09.768Z",
             "domain": "batsonenterprises.com",
             "path": "/",
             "hostOnly": false,
-            "creation": "2025-11-02T06:21:07.108Z",
-            "lastAccessed": "2025-11-02T06:21:10.522Z"
+            "creation": "2025-11-03T05:17:44.704Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
           },
           {
             "key": "_ga_8SQ68HKHBT",
-            "value": "GS2.1.s1762064466$o1$g1$t1762064470$j56$l0$h0",
-            "expires": "2026-12-07T06:21:10.435Z",
+            "value": "GS2.1.s1762147064$o1$g1$t1762147749$j28$l0$h0",
+            "expires": "2026-12-08T05:29:09.775Z",
             "domain": "batsonenterprises.com",
             "path": "/",
             "hostOnly": false,
-            "creation": "2025-11-02T06:21:07.108Z",
-            "lastAccessed": "2025-11-02T06:21:10.522Z"
+            "creation": "2025-11-03T05:17:44.705Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
           },
           {
             "key": "_fbp",
-            "value": "fb.1.1762064466906.945396156271311332",
-            "expires": "2026-01-31T06:21:10.000Z",
+            "value": "fb.1.1762147064573.836636625272160112",
+            "expires": "2026-02-01T05:29:09.000Z",
             "domain": "batsonenterprises.com",
             "path": "/",
             "hostOnly": false,
-            "creation": "2025-11-02T06:21:07.109Z",
-            "lastAccessed": "2025-11-02T06:21:10.522Z"
+            "creation": "2025-11-03T05:17:44.705Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
           },
           {
             "key": "ASP.NET_SessionId",
-            "value": "kbwybujs0ewsug3ndaidvagy",
-            "expires": "2025-11-02T07:11:10.522Z",
+            "value": "s01nckobhjl1mrjo5tekwhy0",
+            "expires": "2025-11-03T06:07:48.540Z",
             "domain": "batsonenterprises.com",
             "path": "/",
             "secure": true,
             "httpOnly": true,
             "hostOnly": true,
-            "creation": "2025-11-02T06:21:10.522Z",
-            "lastAccessed": "2025-11-02T06:21:10.522Z"
+            "creation": "2025-11-03T05:17:48.541Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
+          },
+          {
+            "key": "ProductListing_DisplayMode",
+            "value": "Value=grid",
+            "expires": "2025-11-03T06:07:50.843Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "secure": true,
+            "httpOnly": true,
+            "hostOnly": false,
+            "creation": "2025-11-03T05:17:50.844Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
+          },
+          {
+            "key": "ProductListing_ResultPerPage",
+            "value": "Value=24",
+            "expires": "2025-11-03T06:07:50.843Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "secure": true,
+            "httpOnly": true,
+            "hostOnly": false,
+            "creation": "2025-11-03T05:17:50.844Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
+          },
+          {
+            "key": "ProductListing_SortBy",
+            "value": "Value=displayorder",
+            "expires": "2025-11-03T06:07:50.843Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "secure": true,
+            "httpOnly": true,
+            "hostOnly": false,
+            "creation": "2025-11-03T05:17:50.844Z",
+            "lastAccessed": "2025-11-03T05:29:10.058Z"
           }
         ]
       },
       "userData": {},
       "maxErrorScore": 3,
       "errorScoreDecrement": 0.5,
-      "expiresAt": "2025-11-02T07:11:05.716Z",
-      "createdAt": "2025-11-02T06:21:05.716Z",
-      "usageCount": 6,
+      "expiresAt": "2025-11-03T06:07:42.930Z",
+      "createdAt": "2025-11-03T05:17:42.930Z",
+      "usageCount": 51,
       "maxUsageCount": 50,
-      "errorScore": 0
+      "errorScore": 3
     },
     {
-      "id": "session_gkdEK0gQ4U",
+      "id": "session_xqdLsYitho",
       "cookieJar": {
         "version": "tough-cookie@4.1.4",
         "storeType": "MemoryCookieStore",
@@ -156,14 +192,14 @@
       "userData": {},
       "maxErrorScore": 3,
       "errorScoreDecrement": 0.5,
-      "expiresAt": "2025-11-02T07:11:08.330Z",
-      "createdAt": "2025-11-02T06:21:08.330Z",
+      "expiresAt": "2025-11-03T06:07:46.215Z",
+      "createdAt": "2025-11-03T05:17:46.215Z",
       "usageCount": 0,
       "maxUsageCount": 50,
       "errorScore": 0
     },
     {
-      "id": "session_KtmXflk6Nk",
+      "id": "session_f44GHENlps",
       "cookieJar": {
         "version": "tough-cookie@4.1.4",
         "storeType": "MemoryCookieStore",
@@ -176,8 +212,628 @@
       "userData": {},
       "maxErrorScore": 3,
       "errorScoreDecrement": 0.5,
-      "expiresAt": "2025-11-02T07:11:09.993Z",
-      "createdAt": "2025-11-02T06:21:09.993Z",
+      "expiresAt": "2025-11-03T06:07:47.979Z",
+      "createdAt": "2025-11-03T05:17:47.979Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_ektCP6S1c5",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:07:49.645Z",
+      "createdAt": "2025-11-03T05:17:49.645Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_g7AaZGaLvP",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:08:22.957Z",
+      "createdAt": "2025-11-03T05:18:22.957Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_oqcRbVvuwV",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:08:54.748Z",
+      "createdAt": "2025-11-03T05:18:54.748Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_NldkbMiHhf",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:09:26.628Z",
+      "createdAt": "2025-11-03T05:19:26.628Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_k5N5rcnVeX",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:09:58.719Z",
+      "createdAt": "2025-11-03T05:19:58.719Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_oZEkWdpVdc",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:10:31.360Z",
+      "createdAt": "2025-11-03T05:20:31.360Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_Rcizl5IDrq",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:11:03.430Z",
+      "createdAt": "2025-11-03T05:21:03.430Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_QpqbEAx0bj",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:11:35.664Z",
+      "createdAt": "2025-11-03T05:21:35.664Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_g4jiKEVmoG",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:12:08.530Z",
+      "createdAt": "2025-11-03T05:22:08.530Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_a9mAUeBgMm",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:12:40.775Z",
+      "createdAt": "2025-11-03T05:22:40.775Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_1x4DetAEYL",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:13:12.889Z",
+      "createdAt": "2025-11-03T05:23:12.889Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_4zuDNO1fkT",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:13:45.106Z",
+      "createdAt": "2025-11-03T05:23:45.106Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_WzHlD1wQff",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:14:17.646Z",
+      "createdAt": "2025-11-03T05:24:17.646Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_yRP5pJBV7x",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:14:50.180Z",
+      "createdAt": "2025-11-03T05:24:50.180Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_h1yDinD5ht",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:15:22.467Z",
+      "createdAt": "2025-11-03T05:25:22.467Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_ZfhQLW6gI1",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:15:54.535Z",
+      "createdAt": "2025-11-03T05:25:54.535Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_zUuz2pAlxC",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:16:27.050Z",
+      "createdAt": "2025-11-03T05:26:27.050Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_VngrouXfdi",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:16:59.407Z",
+      "createdAt": "2025-11-03T05:26:59.407Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_hJuhXZ7sJP",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:17:31.773Z",
+      "createdAt": "2025-11-03T05:27:31.773Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_NO1mlRZ2uu",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:18:04.402Z",
+      "createdAt": "2025-11-03T05:28:04.402Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_ZODjR4MJkJ",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:18:36.758Z",
+      "createdAt": "2025-11-03T05:28:36.758Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_6fhEhXQkuu",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:19:09.145Z",
+      "createdAt": "2025-11-03T05:29:09.145Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_0N4RB1f5Gw",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:19:41.243Z",
+      "createdAt": "2025-11-03T05:29:41.243Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_LIf5finsrd",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": [
+          {
+            "key": "kLng",
+            "value": "en-US",
+            "expires": "2026-11-03T05:30:46.032Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "secure": true,
+            "hostOnly": false,
+            "creation": "2025-11-03T05:29:42.751Z",
+            "lastAccessed": "2025-11-03T05:30:47.355Z"
+          },
+          {
+            "key": "UserSessionId",
+            "value": "9fe51c63-8cd4-4bd1-af8d-e96e926a7447",
+            "expires": "2026-11-03T05:29:41.667Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "secure": true,
+            "httpOnly": true,
+            "hostOnly": false,
+            "creation": "2025-11-03T05:29:42.751Z",
+            "lastAccessed": "2025-11-03T05:30:47.355Z"
+          },
+          {
+            "key": "OrderId",
+            "value": "K7HF403kpXIzba5/DKZt/w==",
+            "expires": "2026-11-03T05:29:41.668Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "secure": true,
+            "httpOnly": true,
+            "hostOnly": false,
+            "creation": "2025-11-03T05:29:42.751Z",
+            "lastAccessed": "2025-11-03T05:30:47.355Z"
+          },
+          {
+            "key": "ASP.NET_SessionId",
+            "value": "xl4oj2qymtyoihtdy2rg0yxs",
+            "expires": "2025-11-03T06:19:42.751Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "secure": true,
+            "httpOnly": true,
+            "hostOnly": true,
+            "creation": "2025-11-03T05:29:42.751Z",
+            "lastAccessed": "2025-11-03T05:30:47.356Z"
+          },
+          {
+            "key": ".ASPXAUTH",
+            "value": "A28F13BB31DCF8F8C8F11FCE2AF7D072A7820FF7889DFCA534031F0EAD7255F3D49F05131190144BA8FEB69EC5F99D59CADD73D9D614747610315C67D3678F9CA70119FDD0BB27E776B233BD7DDE5268D02451AD25CEDCC02D619247C60FD4B1AEF4F34DA127AC95C15ABEFFAB29261F5A220D0A678BC5F71DDD7232D1367EED639EDCBE3F82FEA5490B26ED4B8AEE03152C059236BAC00A61FA3858B688C8970A103A7F4F69F3779FA1ECFD9AA0EA466B1B6F4F5BB8AEC1F98818674A9C07F87DA6BC0702A68EFD5C5711E1E4492CD5E1EA050167E46FAE2E54842ADAA25B37",
+            "expires": "2025-11-03T06:20:47.355Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "secure": true,
+            "httpOnly": true,
+            "hostOnly": false,
+            "creation": "2025-11-03T05:29:42.751Z",
+            "lastAccessed": "2025-11-03T05:30:47.356Z"
+          },
+          {
+            "key": "_gcl_au",
+            "value": "1.1.915467492.1762147782",
+            "expires": "2026-02-01T05:29:42.000Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "hostOnly": false,
+            "creation": "2025-11-03T05:29:42.751Z",
+            "lastAccessed": "2025-11-03T05:30:47.356Z"
+          },
+          {
+            "key": "_ga",
+            "value": "GA1.1.2055805991.1762147782",
+            "expires": "2026-12-08T05:30:47.163Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "hostOnly": false,
+            "creation": "2025-11-03T05:29:42.751Z",
+            "lastAccessed": "2025-11-03T05:30:47.356Z"
+          },
+          {
+            "key": "_ga_8SQ68HKHBT",
+            "value": "GS2.1.s1762147782$o1$g1$t1762147847$j60$l0$h0",
+            "expires": "2026-12-08T05:30:47.171Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "hostOnly": false,
+            "creation": "2025-11-03T05:29:42.751Z",
+            "lastAccessed": "2025-11-03T05:30:47.356Z"
+          },
+          {
+            "key": "_fbp",
+            "value": "fb.1.1762147782645.107064869273887225",
+            "expires": "2026-02-01T05:30:47.000Z",
+            "domain": "batsonenterprises.com",
+            "path": "/",
+            "hostOnly": false,
+            "creation": "2025-11-03T05:29:42.751Z",
+            "lastAccessed": "2025-11-03T05:30:47.356Z"
+          }
+        ]
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:19:41.246Z",
+      "createdAt": "2025-11-03T05:29:41.246Z",
+      "usageCount": 6,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_6dR51fqf21",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:20:13.910Z",
+      "createdAt": "2025-11-03T05:30:13.910Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_vvMdUzFweK",
+      "cookieJar": {
+        "version": "tough-cookie@4.1.4",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2025-11-03T06:20:46.618Z",
+      "createdAt": "2025-11-03T05:30:46.618Z",
       "usageCount": 0,
       "maxUsageCount": 50,
       "errorScore": 0
