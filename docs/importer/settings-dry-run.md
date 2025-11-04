@@ -23,6 +23,22 @@ Long-running jobs
 
 - The Imports page highlights runs that exceed the ETA and offers Cancel.
 
+---
+
+# Review: opens latest run, never crawls
+
+Review does not start crawling. Instead, when you click Review from a template:
+
+- If that template currently has an active prepare (preparingRunId), Review opens that run directly.
+- Else, if there’s a recent ImportRun for the supplier, Review opens the latest run.
+- Else, if there are staged rows but no run yet, Review creates a minimal run and performs a quick diff-only pass from staging, then opens it.
+- Else, Review redirects back to Settings with guidance to Save & Crawl.
+
+Notes
+
+- This keeps crawling centralized in Save & Crawl and makes Review reliably fast.
+- If you want a “clean slate,” use Clear staging… first, then Save & Crawl with Force fresh staging.
+
 Production posture
 
 - Smoke routes are disabled by default in production. They remain available in dev/staging when enabled.

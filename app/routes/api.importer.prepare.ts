@@ -46,12 +46,40 @@ export async function action({ request }: ActionFunctionArgs) {
     summary?: any
   }) {
     try {
+      // First attempt: full create including summary (for modern schemas)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return await (prisma as any).importRun.create({ data })
     } catch {
-      // Retry without summary to tolerate older schemas without the column
+      // Second attempt: omit JSON fields like summary/progress
       const fallback = { supplierId: data.supplierId, status: data.status }
-      return await prisma.importRun.create({ data: fallback })
+      try {
+        return await prisma.importRun.create({ data: fallback })
+      } catch {
+        // Final attempt: raw SQL insert with minimal columns to bypass Prisma JSON mapping issues
+        try {
+          const { randomUUID } = await import('node:crypto')
+          const id = randomUUID()
+          const startedAt = new Date().toISOString()
+          // Use quoted identifiers to avoid case issues; SQLite is case-insensitive for table/columns
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (prisma as any).$executeRawUnsafe(
+            'INSERT INTO "ImportRun" ("id", "supplierId", "status", "startedAt") VALUES (?, ?, ?, ?)',
+            id,
+            data.supplierId,
+            data.status,
+            startedAt,
+          )
+          // Return a minimal object with id; callers must not rely on other fields
+          return { id, supplierId: data.supplierId, status: data.status } as unknown as {
+            id: string
+            supplierId: string
+            status: string
+          }
+        } catch {
+          // Re-throw the original error path if raw also fails
+          throw new Error('importRun.create failed (JSON unsupported and raw insert failed)')
+        }
+      }
     }
   }
 
@@ -267,9 +295,17 @@ export async function action({ request }: ActionFunctionArgs) {
       })()
         .then(async () => {
           // Clear preparing run pointer
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
-          await prisma.importLog.create({ data: { templateId, runId: run.id, type: 'prepare:done', payload: {} } })
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
+          } catch {
+            /* ignore */
+          }
+          try {
+            await prisma.importLog.create({ data: { templateId, runId: run.id, type: 'prepare:done', payload: {} } })
+          } catch {
+            /* ignore */
+          }
           // Kick next queued run for this template, if any
           try {
             await startNextQueuedForTemplate(templateId)
@@ -278,7 +314,12 @@ export async function action({ request }: ActionFunctionArgs) {
           }
         })
         .catch(async (err: unknown) => {
-          await prisma.importRun.update({ where: { id: run.id }, data: { status: 'failed' } })
+          // Best-effort: mark run failed; tolerate missing/unsupported columns
+          try {
+            await prisma.importRun.update({ where: { id: run.id }, data: { status: 'failed' } })
+          } catch {
+            /* ignore */
+          }
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
           await prisma.importLog.create({

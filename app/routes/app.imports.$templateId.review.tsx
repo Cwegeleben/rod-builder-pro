@@ -29,9 +29,48 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
-  // Wrap the entire staging flow to allow smoke fallback on any unexpected error
+  // Wrap the entire flow to allow smoke fallback on any unexpected error
   try {
     const { prisma } = await import('../db.server')
+
+    // Create ImportRun defensively in environments where Prisma JSON columns fail
+    async function createImportRunSafe(data: {
+      supplierId: string
+      status: string
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      summary?: any
+    }) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return await (prisma as any).importRun.create({ data })
+      } catch {
+        const fallback = { supplierId: data.supplierId, status: data.status }
+        try {
+          return await prisma.importRun.create({ data: fallback })
+        } catch {
+          try {
+            const { randomUUID } = await import('node:crypto')
+            const id = randomUUID()
+            const startedAt = new Date().toISOString()
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (prisma as any).$executeRawUnsafe(
+              'INSERT INTO "ImportRun" ("id", "supplierId", "status", "startedAt") VALUES (?, ?, ?, ?)',
+              id,
+              data.supplierId,
+              data.status,
+              startedAt,
+            )
+            return { id, supplierId: data.supplierId, status: data.status } as unknown as {
+              id: string
+              supplierId: string
+              status: string
+            }
+          } catch {
+            throw new Error('importRun.create failed in launcher')
+          }
+        }
+      }
+    }
 
     // Load saved settings
     const tpl = await prisma.importTemplate.findUnique({ where: { id: templateId } })
@@ -57,9 +96,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return redirect(`/app/imports/${templateId}${passthroughSearch}`)
     }
 
-    // Kick off crawl+stage using run options helper; MUST use saved settings seeds to match Preview behavior
-    const { startImportFromOptions } = await import('../services/importer/runOptions.server')
-    // Sanitize saved seeds: only accept absolute http(s) URLs to avoid runtime fetch/URL errors
+    // Sanitize saved seeds: only accept absolute http(s) URLs
     const manualUrls = discoverSeedUrls
       .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
       .filter(s => {
@@ -103,60 +140,64 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       useSeriesParser: useSeriesParserForTarget(targetId),
     }
 
-    // Helper: timeout wrapper to avoid long-running crawling in a request cycle
-    async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-      return (await Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])) as T
-    }
-
-    // Pre-create a run so we can attach logs and have a stable runId even if crawl fails
+    // New behavior: do NOT start crawl here. Find an existing run or build diffs from staging.
     const supplierId = options.supplierId || 'batson'
-    const preRun = await prisma.importRun.create({
-      data: { supplierId, status: 'started', summary: { options, seedCount: manualUrls.length } as unknown as object },
-    })
-    await prisma.importLog.create({
-      data: {
-        templateId,
-        runId: preRun.id,
-        type: 'launcher:start',
-        payload: { options, seedCount: manualUrls.length },
-      },
-    })
 
+    // 1) If template shows an active preparing run, prefer it
     try {
-      // Try full crawl+stage with a 60s guard; if it times out, fall back below
-      const runId = await withTimeout(startImportFromOptions(options, preRun.id), 60_000)
-      await prisma.importLog.create({
-        data: { templateId, runId, type: 'launcher:success', payload: {} },
-      })
-      return redirect(`/app/imports/runs/${runId}/review${passthroughSearch}`)
-    } catch (err) {
-      await prisma.importLog.create({
-        data: {
-          templateId,
-          runId: preRun.id,
-          type: 'launcher:error',
-          payload: { message: (err as Error)?.message || 'unknown', stack: (err as Error)?.stack },
-        },
-      })
-      // Fallback: generate diffs from current staging (no crawl) so Review can open
-      try {
-        const { diffStagingIntoExistingRun } = await import('../services/importer/runOptions.server')
-        // Use same pre-created run to keep logs and debug cohesive
-        const supplierId = 'batson'
-        await diffStagingIntoExistingRun(supplierId, preRun.id, { options })
-        await prisma.importLog.create({
-          data: { templateId, runId: preRun.id, type: 'launcher:fallback:diff-only', payload: {} },
-        })
-        return redirect(`/app/imports/runs/${preRun.id}/review${passthroughSearch}`)
-      } catch {
-        // If all else fails, redirect back with a banner trigger
-        const smoke = trySmokeRedirect()
-        if (smoke) return smoke
-        const u = new URL(request.url)
-        u.searchParams.set('reviewError', '1')
-        return redirect(`/app/imports/${templateId}${u.search}`)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tplState = (await (prisma as any).importTemplate.findUnique({
+        where: { id: templateId },
+        select: { preparingRunId: true },
+      })) as { preparingRunId?: string | null } | null
+      const preparingRunId = tplState?.preparingRunId || null
+      if (preparingRunId) {
+        return redirect(`/app/imports/runs/${preparingRunId}/review${passthroughSearch}`)
       }
+    } catch {
+      /* ignore */
     }
+
+    // 2) Find the most recent suitable run for this supplier
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const latest = await (prisma as any).importRun.findFirst({
+        where: { supplierId, status: { in: ['staged', 'preparing', 'success', 'started'] } },
+        orderBy: { startedAt: 'desc' },
+        select: { id: true },
+      })
+      if (latest?.id) {
+        return redirect(`/app/imports/runs/${latest.id}/review${passthroughSearch}`)
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 3) If staging exists but no run, synthesize a diff-only run and open it
+    try {
+      const staged = await prisma.partStaging.count({ where: { supplierId } })
+      if (staged > 0) {
+        const preRun = await createImportRunSafe({
+          supplierId,
+          status: 'started',
+          summary: { options, mode: 'review' },
+        })
+        try {
+          const { diffStagingIntoExistingRun } = await import('../services/importer/runOptions.server')
+          await diffStagingIntoExistingRun(supplierId, preRun.id, { options })
+        } catch {
+          // Even if diffing fails, attempt to open the run so the user gets context
+        }
+        return redirect(`/app/imports/runs/${preRun.id}/review${passthroughSearch}`)
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 4) Nothing to review; redirect back to Settings with a clear indicator
+    const u = new URL(request.url)
+    u.searchParams.set('reviewError', '1')
+    return redirect(`/app/imports/${templateId}${u.search}`)
   } catch {
     const smoke = trySmokeRedirect()
     if (smoke) return smoke

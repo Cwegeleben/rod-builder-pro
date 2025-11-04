@@ -1,5 +1,6 @@
 // <!-- BEGIN RBP GENERATED: importer-crawlB-batson-attrgrid-v1 -->
 import * as cheerio from 'cheerio'
+import { formatLineLbRangeString, formatLureOzRangeString } from '../../../../packages/importer/src/lib/specRange'
 
 export type BatsonGridRowRaw = {
   code: string
@@ -19,8 +20,11 @@ export type BlankSpec = {
   action?: string
   power?: string
   material?: string
+  // Human-friendly range strings (for display/specs)
+  line_lb?: string
   line_lb_min?: number
   line_lb_max?: number
+  lure_oz?: string
   lure_oz_min?: number
   lure_oz_max?: number
   weight_oz?: number
@@ -78,7 +82,7 @@ function mapLabelKey(label: string): string {
   return L
 }
 
-export function extractBatsonAttributeGrid(html: string, _baseUrl?: string) {
+export function extractBatsonAttributeGrid(html: string) {
   const $ = cheerio.load(html)
   const rows: BatsonGridRowRaw[] = []
   $('table.table.attribute-grid tbody tr').each((_i, tr) => {
@@ -149,12 +153,16 @@ export function extractBatsonAttributeGrid(html: string, _baseUrl?: string) {
           break
         case 'line_rating': {
           const { min, max } = parseRange(v)
+          // Preserve human-readable string
+          n.line_lb = formatLineLbRangeString(v)
           if (!isNaN(min)) n.line_lb_min = min
           if (!isNaN(max)) n.line_lb_max = max
           break
         }
         case 'lure_rating': {
           const { min, max } = parseRange(v)
+          // Preserve human-readable string
+          n.lure_oz = formatLureOzRangeString(v)
           if (!isNaN(min)) n.lure_oz_min = min
           if (!isNaN(max)) n.lure_oz_max = max
           break

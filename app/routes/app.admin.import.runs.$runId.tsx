@@ -575,6 +575,7 @@ export default function RunDetailPage() {
                 if (editAction) ns.action = editAction
                 if (editTipSize) ns.tip_size = editTipSize
                 if (Object.keys(ns).length > 0) {
+                  // Ensure edits write back string fields if present from series parser
                   edits['normSpecs'] = ns
                   form.set('edits', JSON.stringify(edits))
                 }
