@@ -310,6 +310,11 @@ export function GlobalImportProgress() {
                   </InlineStack>
                 </InlineStack>
                 <InlineStack gap="200">
+                  {r.templateId ? (
+                    <Button url={`/app/imports/${r.templateId}`}>View logs</Button>
+                  ) : (
+                    <Button url="/app/imports">View logs</Button>
+                  )}
                   <Button
                     tone="critical"
                     onClick={async () => {
