@@ -20,6 +20,14 @@ type Preparing = {
 }
 
 export function GlobalImportProgress() {
+  // Feature flag to disable SSE banner if needed (default enabled)
+  // Set VITE_IMPORTER_SSE_ENABLED=0 to disable in a given environment
+  if (typeof window !== 'undefined') {
+    // Vite in Remix exposes import.meta.env on the client
+    const env = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env || {}
+    const sseEnabled = env.VITE_IMPORTER_SSE_ENABLED
+    if (String(sseEnabled || '1') === '0') return null
+  }
   const [runs, setRuns] = React.useState<Record<string, RunStatus>>({})
   const [ready, setReady] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
   const [failed, setFailed] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])

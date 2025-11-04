@@ -9,8 +9,8 @@ vi.mock('../../packages/importer/src/seeds/sources', () => ({
   upsertProductSource: vi.fn(async () => {}),
 }))
 
-vi.mock('../../app/db.server', () => ({
-  prisma: {
+vi.mock('../../app/db.server', () => {
+  const prisma = {
     importDiff: {
       deleteMany: vi.fn(async () => {}),
       count: vi.fn(async () => 0),
@@ -27,10 +27,12 @@ vi.mock('../../app/db.server', () => ({
       upsert: vi.fn(async () => ({})),
     },
     $queryRawUnsafe: vi.fn(async () => []),
-  },
-}))
+  }
+  return { prisma }
+})
 
 import { parseRunOptions, startImportFromOptions } from '../../app/services/importer/runOptions.server'
+import { prisma as prismaMock } from '../../app/db.server'
 import { crawlBatson } from '../../packages/importer/src/crawlers/batsonCrawler'
 
 describe('runOptions.server', () => {
@@ -68,5 +70,30 @@ describe('runOptions.server', () => {
     const call = vi.mocked(crawlBatson).mock.calls[0]
     expect(call[0]).toEqual(['https://batsonenterprises.com/products/foo'])
     expect(call[1]).toEqual(expect.objectContaining({ templateKey: 'batson.product.v2' }))
+  })
+
+  it('cancels early when summary.control.cancelRequested is set', async () => {
+    // Arrange: prisma.findUnique returns a run with cancelRequested=true
+    // @ts-expect-error test-time mock shape
+    prismaMock.importRun.findUnique.mockResolvedValueOnce({
+      id: 'run-cancel',
+      summary: { control: { cancelRequested: true } },
+    })
+    const options = {
+      mode: 'price_avail' as const,
+      includeSeeds: false,
+      manualUrls: [],
+      skipSuccessful: false,
+      notes: '',
+      templateKey: 'batson.product.v2',
+    }
+
+    // Act: startImportFromOptions should detect cancel and throw
+    await expect(startImportFromOptions(options, 'run-cancel')).rejects.toThrow(/cancelled/i)
+
+    // And it should mark the run as cancelled
+    expect(prismaMock.importRun.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'run-cancel' }, data: expect.objectContaining({ status: 'cancelled' }) }),
+    )
   })
 })

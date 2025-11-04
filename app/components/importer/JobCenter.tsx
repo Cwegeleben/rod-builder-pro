@@ -16,6 +16,12 @@ type Preparing = { runId: string; startedAt?: string; etaSeconds?: number }
 type TemplateRow = { id: string; name?: string; preparing?: Preparing | null }
 
 export default function JobCenter() {
+  // Feature flag to disable Job Center if needed (default enabled)
+  if (typeof window !== 'undefined') {
+    const env = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env || {}
+    const sseEnabled = env.VITE_IMPORTER_SSE_ENABLED
+    if (String(sseEnabled || '1') === '0') return null
+  }
   const [open, setOpen] = React.useState(false)
   const [runs, setRuns] = React.useState<Record<string, RunStatus>>({})
   const [names, setNames] = React.useState<Record<string, string>>({})

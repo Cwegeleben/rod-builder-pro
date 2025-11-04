@@ -8,6 +8,20 @@ export async function action({ request }: ActionFunctionArgs) {
   await requireHqShopOr404(request)
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 })
 
+  // Feature flag: allow disabling background prepare in selected environments
+  // IMPORTER_BG_ENABLED=0 → returns 503 with a clear message
+  try {
+    const enabled = String(process.env.IMPORTER_BG_ENABLED ?? '1') !== '0'
+    if (!enabled) {
+      return json(
+        { ok: false, code: 'disabled', error: 'Background prepare is temporarily disabled in this environment.' },
+        { status: 503 },
+      )
+    }
+  } catch {
+    // ignore env read issues
+  }
+
   let body: Record<string, unknown> = {}
   try {
     body = (await request.json()) as Record<string, unknown>

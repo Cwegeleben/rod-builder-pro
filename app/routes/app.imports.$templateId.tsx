@@ -24,6 +24,7 @@ import {
   Tooltip,
   Toast,
   Frame,
+  Modal,
 } from '@shopify/polaris'
 // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
 // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
@@ -64,10 +65,16 @@ export default function ImportSettings() {
   const [seedsText, setSeedsText] = React.useState<string>('')
   const [showAppliedToast, setShowAppliedToast] = React.useState<boolean>(false)
   const [showSavedToast, setShowSavedToast] = React.useState<boolean>(false)
+  const [acceptedToastText, setAcceptedToastText] = React.useState<string | null>(null)
   // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
   const [saveLoading, setSaveLoading] = React.useState<boolean>(false)
   const [saveError, setSaveError] = React.useState<string | null>(null)
   const [crawlLoading, setCrawlLoading] = React.useState<boolean>(false)
+  // Overwrite confirmation (replace window.confirm)
+  const [overwriteModalOpen, setOverwriteModalOpen] = React.useState<boolean>(false)
+  const [overwriteStagedCount, setOverwriteStagedCount] = React.useState<number>(0)
+  const [overwriteConfirmLoading, setOverwriteConfirmLoading] = React.useState<boolean>(false)
+  const overwriteContinueRef = React.useRef<null | (() => Promise<void>)>(null)
   // <!-- END RBP GENERATED: importer-save-settings-v1 -->
   const seeds = (seedsOverride ?? seedsFetched) as string[]
   const [importName, setImportName] = React.useState<string>('')
@@ -107,6 +114,14 @@ export default function ImportSettings() {
       .split(/\r?\n/)
       .map(s => s.trim())
       .filter(Boolean)
+  }
+  function isValidHttpUrl(u: string): boolean {
+    try {
+      const url = new URL(u)
+      return url.protocol === 'http:' || url.protocol === 'https:'
+    } catch {
+      return false
+    }
   }
   // Prefer preview from explicit preview request; fall back to discover's preview if present
   const previewExplicit = (previewFetcher.data || null) as null | {
@@ -216,24 +231,82 @@ export default function ImportSettings() {
   }
   async function onSaveAndCrawl() {
     if (!templateId) return
+    // Guard against invalid input and surface a friendly message instead of native popups
+    if (!targetId) {
+      setSaveError('Please select a target before saving.')
+      return
+    }
+    const validSeeds = seeds.filter(s => {
+      try {
+        const u = new URL(s)
+        return u.protocol === 'http:' || u.protocol === 'https:'
+      } catch {
+        return false
+      }
+    })
+    if (validSeeds.length === 0) {
+      setSaveError('Please provide at least one valid URL (https://…) in Seeds.')
+      return
+    }
+    // Inform user how many seeds will be accepted
+    {
+      const total = seeds.length
+      const accepted = validSeeds.length
+      setAcceptedToastText(`Accepted ${accepted} of ${total} seeds`)
+    }
     setCrawlLoading(true)
     try {
       const ok = await saveSettings()
       if (!ok) return
       // Kick off background prepare to crawl and stage
-      const resp = await fetch('/api/importer/prepare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId }),
-      })
-      const data = (await resp.json()) as {
-        runId?: string
-        error?: string
-        candidates?: number
-        etaSeconds?: number
-        expectedItems?: number
+      const startPrepare = async (confirmOverwrite?: boolean) => {
+        const resp = await fetch('/api/importer/prepare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(confirmOverwrite ? { templateId, confirmOverwrite: true } : { templateId }),
+        })
+        return { resp, data: (await resp.json()) as Record<string, unknown> }
       }
-      if (!resp.ok || !data?.runId) throw new Error(String(data?.error || 'Save and Crawl failed'))
+      const { resp, data } = await startPrepare(false)
+      if (resp.status === 409 && (data as { code?: string }).code === 'confirm_overwrite') {
+        // Open Polaris modal to confirm overwrite
+        const staged = (data as { stagedCount?: number }).stagedCount || 0
+        setOverwriteStagedCount(staged)
+        overwriteContinueRef.current = async () => {
+          const res2 = await startPrepare(true)
+          const resp2 = res2.resp
+          const data2 = res2.data
+          if (!resp2.ok || !(data2 as { runId?: string }).runId) {
+            const msg = (data2 as { error?: string })?.error || 'Save and Crawl failed'
+            throw new Error(msg)
+          }
+          const c =
+            typeof (data2 as { candidates?: number }).candidates === 'number'
+              ? (data2 as { candidates?: number }).candidates
+              : undefined
+          const eta =
+            typeof (data2 as { etaSeconds?: number }).etaSeconds === 'number'
+              ? (data2 as { etaSeconds?: number }).etaSeconds
+              : undefined
+          const exp =
+            typeof (data2 as { expectedItems?: number }).expectedItems === 'number'
+              ? (data2 as { expectedItems?: number }).expectedItems
+              : undefined
+          const qs = new URLSearchParams(location.search)
+          qs.set('started', '1')
+          qs.set('tpl', templateId)
+          if (typeof c === 'number') qs.set('c', String(c))
+          if (typeof eta === 'number') qs.set('eta', String(eta))
+          if (typeof exp === 'number') qs.set('exp', String(exp))
+          window.location.assign(`/app/imports?${qs.toString()}`)
+        }
+        setOverwriteModalOpen(true)
+        return
+      }
+      if (!resp.ok || !(data as { runId?: string }).runId) {
+        const msg = (data as { error?: string })?.error || 'Save and Crawl failed'
+        throw new Error(msg)
+      }
       const c = typeof data.candidates === 'number' ? data.candidates : undefined
       const eta = typeof data.etaSeconds === 'number' ? data.etaSeconds : undefined
       const exp = typeof data.expectedItems === 'number' ? data.expectedItems : undefined
@@ -246,7 +319,7 @@ export default function ImportSettings() {
       // Navigate to Imports list with ephemeral banner
       window.location.assign(`/app/imports?${qs.toString()}`)
     } catch (e) {
-      alert((e as Error).message || 'Save and Crawl failed')
+      setSaveError((e as Error)?.message || 'Save and Crawl failed')
     } finally {
       setCrawlLoading(false)
     }
@@ -289,6 +362,11 @@ export default function ImportSettings() {
         {showSavedToast ? (
           <Frame>
             <Toast content="Settings saved" onDismiss={() => setShowSavedToast(false)} duration={2000} />
+          </Frame>
+        ) : null}
+        {acceptedToastText ? (
+          <Frame>
+            <Toast content={acceptedToastText} onDismiss={() => setAcceptedToastText(null)} duration={2000} />
           </Frame>
         ) : null}
         {/* <!-- BEGIN RBP GENERATED: importer-save-settings-v1 --> */}
@@ -401,7 +479,7 @@ export default function ImportSettings() {
                 autoComplete="off"
                 multiline={16}
                 placeholder={seedsFetched.length ? '' : 'Paste one URL per line'}
-                helpText="Edit the discovered list or paste your own. Click Use Seeds to update the working set."
+                helpText="Edit the discovered list or paste your own. Click Use Seeds to update the working set and refresh the preview."
               />
               {seedsText ? (
                 <details>
@@ -415,6 +493,16 @@ export default function ImportSettings() {
                     const next = parseSeeds(seedsText)
                     setSeedsOverride(next)
                     setShowAppliedToast(true)
+                    // Also update the preview using the first valid seed URL (best-effort)
+                    const firstValid = next.find(isValidHttpUrl)
+                    if (firstValid) {
+                      const fd = new FormData()
+                      fd.set('mode', 'series-products-batson')
+                      fd.set('sourceUrl', firstValid)
+                      fd.set('strategy', 'hybrid')
+                      fd.set('devSampleHtml', '0')
+                      previewFetcher.submit(fd, { method: 'post', action: '/api/importer/preview' })
+                    }
                   }}
                 >{`Use Seeds (${parseSeeds(seedsText).length})`}</Button>
                 <Button
@@ -584,7 +672,10 @@ export default function ImportSettings() {
             <InlineStack gap="200" align="start">
               <Button
                 variant="primary"
-                onClick={onSaveAndCrawl}
+                onClick={() => {
+                  // Keep clicks client-side; avoid any native form submission if present upstream
+                  onSaveAndCrawl()
+                }}
                 loading={crawlLoading || saveLoading}
                 disabled={crawlLoading || saveLoading || seeds.length === 0}
               >
@@ -596,6 +687,53 @@ export default function ImportSettings() {
             </InlineStack>
           </BlockStack>
         </Card>
+
+        {/* Overwrite confirmation modal */}
+        {overwriteModalOpen ? (
+          <Frame>
+            <Modal
+              open
+              title="Overwrite staged items?"
+              onClose={() => {
+                setOverwriteModalOpen(false)
+                overwriteContinueRef.current = null
+                setSaveError('Cancelled by user. Existing staged items were left untouched.')
+              }}
+              primaryAction={{
+                content: 'Overwrite and continue',
+                destructive: true,
+                loading: overwriteConfirmLoading,
+                onAction: async () => {
+                  if (!overwriteContinueRef.current) return
+                  try {
+                    setOverwriteConfirmLoading(true)
+                    await overwriteContinueRef.current()
+                  } catch (err) {
+                    setSaveError((err as Error)?.message || 'Save and Crawl failed')
+                  } finally {
+                    setOverwriteConfirmLoading(false)
+                    setOverwriteModalOpen(false)
+                    overwriteContinueRef.current = null
+                  }
+                },
+              }}
+              secondaryActions={[
+                {
+                  content: 'Cancel',
+                  onAction: () => {
+                    setOverwriteModalOpen(false)
+                    overwriteContinueRef.current = null
+                    setSaveError('Cancelled by user. Existing staged items were left untouched.')
+                  },
+                },
+              ]}
+            >
+              <Modal.Section>
+                <Text as="p">This will overwrite {overwriteStagedCount} staged item(s). Continue?</Text>
+              </Modal.Section>
+            </Modal>
+          </Frame>
+        ) : null}
 
         {/* Debug */}
         <Card>

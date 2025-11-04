@@ -57,6 +57,7 @@ export async function ensure() {
   try {
     await ensureSpecTemplateStatus()
     await ensureImportTemplatePreparingRunId()
+    await ensureImportRunProgressColumn()
     await ensureProductSourceTable()
     await ensurePartStagingPublishColumns()
     await ensureSqliteJsonTypes()
@@ -236,5 +237,18 @@ async function ensureSqliteJsonTypes() {
     if (needs) {
       await rebuildPartStaging()
     }
+  }
+}
+
+// Ensure ImportRun.progress JSON column exists (SQLite only)
+async function ensureImportRunProgressColumn() {
+  const hasTable = await tableExists('ImportRun')
+  if (!hasTable) return
+  const hasCol = await columnExists('ImportRun', 'progress')
+  if (hasCol) return
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "ImportRun" ADD COLUMN "progress" JSON`)
+  } catch {
+    // ignore
   }
 }
