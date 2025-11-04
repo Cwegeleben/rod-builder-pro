@@ -8,6 +8,8 @@ type RunStatus = {
   templateName?: string | null
   progress?: { phase?: string; percent?: number; etaSeconds?: number; details?: unknown } | null
   counts?: Record<string, number>
+  startedAt?: string
+  finishedAt?: string | null
 }
 
 type Preparing = {
@@ -34,6 +36,17 @@ export function GlobalImportProgress() {
     if (h > 0) return `${h}h${m ? ` ${m}m` : ''}`
     if (m > 0) return `${m}m${s ? ` ${s}s` : ''}`
     return `${s}s`
+  }, [])
+  const formatStartedAgo = React.useCallback((startedAt?: string) => {
+    if (!startedAt) return null
+    const t = Date.parse(startedAt)
+    if (!Number.isFinite(t)) return null
+    const diff = Math.max(0, Math.floor((Date.now() - t) / 1000))
+    const h = Math.floor(diff / 3600)
+    const m = Math.floor((diff % 3600) / 60)
+    if (h > 0) return `Started ${h}h${m ? ` ${m}m` : ''} ago`
+    if (m > 0) return `Started ${m}m ago`
+    return 'Started just now'
   }, [])
   React.useEffect(() => {
     let cancelled = false
@@ -283,14 +296,18 @@ export function GlobalImportProgress() {
             typeof r.progress?.etaSeconds === 'number'
               ? Math.max(0, Math.round(r.progress?.etaSeconds || 0))
               : undefined
+          const started = r.startedAt
           return (
             <Banner key={r.runId} tone="info">
               <InlineStack align="space-between" blockAlign="center">
                 <InlineStack gap="400" blockAlign="center">
                   <Text as="span">Preparing review… {phase}</Text>
-                  <Text as="span" tone="subdued">
-                    {pct}%{typeof eta === 'number' ? ` • ~${formatEtaShort(eta)}` : ''}
-                  </Text>
+                  <InlineStack gap="300" blockAlign="center">
+                    <Text as="span" tone="subdued">
+                      {pct}%{typeof eta === 'number' ? ` • ~${formatEtaShort(eta)}` : ''}
+                    </Text>
+                    {started ? <Text as="span" tone="subdued">{`• ${formatStartedAgo(started)}`}</Text> : null}
+                  </InlineStack>
                 </InlineStack>
                 <InlineStack gap="200">
                   <Button
