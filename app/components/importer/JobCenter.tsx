@@ -9,6 +9,7 @@ type RunStatus = {
   progress?: { phase?: string; percent?: number; etaSeconds?: number } | null
   startedAt?: string
   finishedAt?: string | null
+  preflight?: { candidates?: number; expectedItems?: number } | null
 }
 
 type Preparing = { runId: string; startedAt?: string; etaSeconds?: number }
@@ -294,6 +295,16 @@ export default function JobCenter() {
                   ? Math.max(0, Math.round(r.progress?.etaSeconds || 0))
                   : undefined
               const started = r.startedAt
+              const pf = (r as unknown as { preflight?: { candidates?: number; expectedItems?: number } | null })
+                .preflight
+              const preflightSummary = (() => {
+                const c = typeof pf?.candidates === 'number' ? pf!.candidates! : undefined
+                const exp = typeof pf?.expectedItems === 'number' ? pf!.expectedItems! : undefined
+                const bits: string[] = []
+                if (typeof c === 'number') bits.push(`~${c} series`)
+                if (typeof exp === 'number') bits.push(`~${exp} items`)
+                return bits.length ? `• ${bits.join(' • ')}` : ''
+              })()
               return (
                 <Card key={r.runId}>
                   <BlockStack gap="200">
@@ -313,6 +324,11 @@ export default function JobCenter() {
                         {phase}
                       </Text>
                       {started ? <Text as="span" tone="subdued">{`• ${formatStartedAgo(started)}`}</Text> : null}
+                      {preflightSummary ? (
+                        <Text as="span" tone="subdued">
+                          {preflightSummary}
+                        </Text>
+                      ) : null}
                     </InlineStack>
                     <div style={{ height: 6, width: '100%', background: 'var(--p-color-bg-secondary)' }}>
                       <div

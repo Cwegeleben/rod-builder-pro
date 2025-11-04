@@ -10,6 +10,7 @@ type RunStatus = {
   counts?: Record<string, number>
   startedAt?: string
   finishedAt?: string | null
+  preflight?: { candidates?: number; etaSeconds?: number; expectedItems?: number } | null
 }
 
 type Preparing = {
@@ -297,6 +298,15 @@ export function GlobalImportProgress() {
               ? Math.max(0, Math.round(r.progress?.etaSeconds || 0))
               : undefined
           const started = r.startedAt
+          const pf = (r as unknown as { preflight?: { candidates?: number; expectedItems?: number } | null }).preflight
+          const preflightSummary = (() => {
+            const c = typeof pf?.candidates === 'number' ? pf!.candidates! : undefined
+            const exp = typeof pf?.expectedItems === 'number' ? pf!.expectedItems! : undefined
+            const bits: string[] = []
+            if (typeof c === 'number') bits.push(`~${c} series`)
+            if (typeof exp === 'number') bits.push(`~${exp} items`)
+            return bits.length ? `• ${bits.join(' • ')}` : ''
+          })()
           return (
             <Banner key={r.runId} tone="info">
               <InlineStack align="space-between" blockAlign="center">
@@ -307,6 +317,11 @@ export function GlobalImportProgress() {
                       {pct}%{typeof eta === 'number' ? ` • ~${formatEtaShort(eta)}` : ''}
                     </Text>
                     {started ? <Text as="span" tone="subdued">{`• ${formatStartedAgo(started)}`}</Text> : null}
+                    {preflightSummary ? (
+                      <Text as="span" tone="subdued">
+                        {preflightSummary}
+                      </Text>
+                    ) : null}
                   </InlineStack>
                 </InlineStack>
                 <InlineStack gap="200">
