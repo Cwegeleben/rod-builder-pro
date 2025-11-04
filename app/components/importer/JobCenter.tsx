@@ -155,7 +155,7 @@ export default function JobCenter() {
                     </div>
                     <InlineStack align="space-between">
                       {r.templateId ? (
-                        <Button url={`/app/imports/${r.templateId}/review`} disabled={pct < 100}>
+                        <Button url={`/app/imports/${r.templateId}/review`} disabled={r.status !== 'staged'}>
                           Open Review
                         </Button>
                       ) : (

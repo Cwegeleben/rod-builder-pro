@@ -18,6 +18,7 @@ type Preparing = {
 export function GlobalImportProgress() {
   const [runs, setRuns] = React.useState<Record<string, RunStatus>>({})
   const [ready, setReady] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
+  const [failed, setFailed] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
   const [loading, setLoading] = React.useState<boolean>(true)
   React.useEffect(() => {
     let cancelled = false
@@ -49,6 +50,7 @@ export function GlobalImportProgress() {
                 ok?: boolean
                 runId?: string
                 templateId?: string | null
+                status?: string
               }
               if (data?.ok && data.runId) {
                 setRuns(prev => {
@@ -56,7 +58,11 @@ export function GlobalImportProgress() {
                   delete next[data.runId!]
                   return next
                 })
-                setReady(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                if (data.status === 'failed') {
+                  setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                } else {
+                  setReady(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                }
               }
             } catch {
               /* ignore */
@@ -99,12 +105,20 @@ export function GlobalImportProgress() {
   }, [])
 
   const runList = Object.values(runs).filter(r => r && r.status && r.status !== 'staged' && r.status !== 'failed')
-  if (loading && runList.length === 0 && ready.length === 0) return null
-  if (runList.length === 0 && ready.length === 0) return null
+  if (loading && runList.length === 0 && ready.length === 0 && failed.length === 0) return null
+  if (runList.length === 0 && ready.length === 0 && failed.length === 0) return null
 
   return (
     <div style={{ position: 'sticky', top: 0, zIndex: 10 }}>
       <BlockStack gap="200">
+        {failed.map(r => (
+          <Banner key={`failed-${r.runId}`} tone="critical" title="Prepare failed">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="span">An error occurred while preparing the review.</Text>
+              <Button url="/app/imports">View logs</Button>
+            </InlineStack>
+          </Banner>
+        ))}
         {ready.map(r => (
           <Banner key={`ready-${r.runId}`} tone="success" title="Review is ready">
             <InlineStack align="space-between" blockAlign="center">
