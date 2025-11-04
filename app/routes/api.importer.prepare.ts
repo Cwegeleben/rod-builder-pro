@@ -38,6 +38,23 @@ export async function action({ request }: ActionFunctionArgs) {
   const { prisma } = await import('../db.server')
   const { getTargetById } = await import('../server/importer/sites/targets')
 
+  // Helper: create ImportRun defensively in environments where JSON columns may not exist yet
+  async function createImportRunSafe(data: {
+    supplierId: string
+    status: string
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    summary?: any
+  }) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return await (prisma as any).importRun.create({ data })
+    } catch {
+      // Retry without summary to tolerate older schemas without the column
+      const fallback = { supplierId: data.supplierId, status: data.status }
+      return await prisma.importRun.create({ data: fallback })
+    }
+  }
+
   // Load saved settings for this template
   const tpl = await prisma.importTemplate.findUnique({ where: { id: templateId } })
   if (!tpl) return json({ error: 'Template not found' }, { status: 404 })
@@ -156,12 +173,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const existingRunId = (tpl2 as unknown as { preparingRunId?: string | null })?.preparingRunId
     if (existingRunId) {
       // Create a queued run with the same preflight snapshot and options
-      const queued = await prisma.importRun.create({
-        data: {
-          supplierId: supplierId || 'batson',
-          status: 'queued',
-          summary: { preflight: { candidates, etaSeconds, expectedItems }, options } as unknown as object,
-        },
+      const queued = await createImportRunSafe({
+        supplierId: supplierId || 'batson',
+        status: 'queued',
+        summary: { preflight: { candidates, etaSeconds, expectedItems }, options },
       })
       await prisma.importLog.create({
         data: {
@@ -178,12 +193,10 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // Create the run first without progress to avoid runtime errors on environments lacking the column
-  const run = await prisma.importRun.create({
-    data: {
-      supplierId: supplierId || 'batson',
-      status: 'preparing',
-      summary: { preflight: { candidates, etaSeconds, expectedItems }, options } as unknown as object,
-    },
+  const run = await createImportRunSafe({
+    supplierId: supplierId || 'batson',
+    status: 'preparing',
+    summary: { preflight: { candidates, etaSeconds, expectedItems }, options },
   })
   // Best-effort set initial progress (ignore if column missing)
   try {
