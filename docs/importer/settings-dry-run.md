@@ -26,6 +26,8 @@ Long-running jobs
 Production posture
 
 - Smoke routes are disabled by default in production. They remain available in dev/staging when enabled.
+- To temporarily allow smokes in production, set SMOKE_ALLOW_PROD=1 along with ENABLE_SMOKES and SMOKE_TOKEN. Unset SMOKE_ALLOW_PROD (or set to 0) to immediately disable again.
+- When disabled in production, smoke endpoints return 404 Not Found even if you include a valid token.
 
 Embedded Admin constraints
 
@@ -44,6 +46,7 @@ Prereqs
 - Set environment flags on the target app:
   - ENABLE_SMOKES=1
   - SMOKE_TOKEN=<your-token>
+  - SMOKE_ALLOW_PROD=1 (only if you are purposefully enabling smokes in production; omit/remove to disable)
   - IMPORTER_BG_ENABLED=1
   - VITE_IMPORTER_SSE_ENABLED=1 (optional; enables UI banners if you browse the app)
 - Know your base URL, e.g. https://your-app.fly.dev
@@ -84,6 +87,7 @@ Troubleshooting
 
 - 404 on smoke routes → ENABLE_SMOKES is off
 - 403 on smoke routes → bad or missing SMOKE_TOKEN
+- 404 on production only → SMOKE_ALLOW_PROD is unset (expected; remove to disable quickly)
 - No progress for >60s → check Fly logs for headless renderer availability; optionally increase resources or retry with strategy=static seeds
 - UI banners missing → ensure VITE_IMPORTER_SSE_ENABLED=1 and refresh
 
@@ -105,3 +109,5 @@ Notes
 
 - Smoke routes never modify production Shopify data; they only stage and compute diffs.
 - When testing overwrite scenarios, the prepare endpoint will prompt via 409 unless confirmOverwrite is provided (UI handles this). Smoke launcher skips that guard.
+- Cleanup: Use /resources/smoke/importer/cleanup?token=...&runId={runId} to target a specific run. Without runId, cleanup only deletes runs created with supplierId="smoke".
+- Security: Leaving SMOKE_TOKEN set is safe when SMOKE_ALLOW_PROD is unset; routes still return 404 in production.
