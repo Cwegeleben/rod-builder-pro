@@ -25,6 +25,16 @@ export function GlobalImportProgress() {
   const [names, setNames] = React.useState<Record<string, string>>({})
   // Track open EventSources by runId for cleanup and dynamic attach
   const sourcesRef = React.useRef<Record<string, EventSource>>({})
+  const formatEtaShort = React.useCallback((seconds?: number) => {
+    if (!Number.isFinite(seconds as number)) return null
+    const total = Math.max(0, Math.round((seconds as number) || 0))
+    const h = Math.floor(total / 3600)
+    const m = Math.floor((total % 3600) / 60)
+    const s = total % 60
+    if (h > 0) return `${h}h${m ? ` ${m}m` : ''}`
+    if (m > 0) return `${m}m${s ? ` ${s}s` : ''}`
+    return `${s}s`
+  }, [])
   React.useEffect(() => {
     let cancelled = false
     async function bootstrap() {
@@ -279,7 +289,7 @@ export function GlobalImportProgress() {
                 <InlineStack gap="400" blockAlign="center">
                   <Text as="span">Preparing review… {phase}</Text>
                   <Text as="span" tone="subdued">
-                    {pct}%{typeof eta === 'number' ? ` • ~${eta}s` : ''}
+                    {pct}%{typeof eta === 'number' ? ` • ~${formatEtaShort(eta)}` : ''}
                   </Text>
                 </InlineStack>
                 <InlineStack gap="200">

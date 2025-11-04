@@ -20,6 +20,18 @@ export default function JobCenter() {
   const [toast, setToast] = React.useState<string | null>(null)
   const sourcesRef = React.useRef<Record<string, EventSource>>({})
 
+  // Short ETA formatter: 1h 5m, 3m 20s, or 45s
+  const formatEtaShort = React.useCallback((seconds?: number) => {
+    if (!Number.isFinite(seconds as number)) return null
+    const total = Math.max(0, Math.round((seconds as number) || 0))
+    const h = Math.floor(total / 3600)
+    const m = Math.floor((total % 3600) / 60)
+    const s = total % 60
+    if (h > 0) return `${h}h${m ? ` ${m}m` : ''}`
+    if (m > 0) return `${m}m${s ? ` ${s}s` : ''}`
+    return `${s}s`
+  }, [])
+
   React.useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -275,7 +287,9 @@ export default function JobCenter() {
                         <Text as="span" tone="subdued">
                           {pct}%
                         </Text>
-                        {typeof eta === 'number' ? <Text as="span" tone="subdued">{`• ~${eta}s`}</Text> : null}
+                        {typeof eta === 'number' ? (
+                          <Text as="span" tone="subdued">{`• ~${formatEtaShort(eta)}`}</Text>
+                        ) : null}
                       </InlineStack>
                     </InlineStack>
                     <Text as="span" tone="subdued">
