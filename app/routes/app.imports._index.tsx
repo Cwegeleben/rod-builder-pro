@@ -10,6 +10,7 @@ import { requireHqShopOr404 } from '../lib/access.server'
 type LoaderData = {
   templates: Array<{ id: string; name?: string; state: string; hadFailures?: boolean; lastRunAt?: string | null }>
   logs: Array<{ at: string; templateId: string; runId: string; type: string; payload?: unknown }>
+  templateNames: Record<string, string>
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -22,9 +23,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
     // Grab recent logs (global view)
     const logs = await (prisma as any).importLog.findMany({ orderBy: { at: 'desc' }, take: 25 })
-    return json<LoaderData>({ templates: rows, logs })
+    const templateNames = Object.fromEntries(rows.map((r: any) => [r.id, r.name || r.id])) as Record<string, string>
+    return json<LoaderData>({ templates: rows, logs, templateNames })
   } catch {
-    return json<LoaderData>({ templates: [], logs: [] })
+    return json<LoaderData>({ templates: [], logs: [], templateNames: {} })
   }
 }
 
@@ -34,7 +36,14 @@ export default function ImportsIndexRoute() {
   // <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 -->
   // Display validation status only in the Imports list; no validation triggers/actions here.
   // Passing through server state for badges; actions (validate/test) remain in Settings.
-  return <ImportsHome search={location.search} initialDbTemplates={data.templates} initialLogs={data.logs} />
+  return (
+    <ImportsHome
+      search={location.search}
+      initialDbTemplates={data.templates}
+      initialLogs={data.logs}
+      templateNames={data.templateNames}
+    />
+  )
   // <!-- END RBP GENERATED: importer-v2-3-batson-series-v1 -->
 }
 // <!-- END RBP GENERATED: importer-v2-3 -->

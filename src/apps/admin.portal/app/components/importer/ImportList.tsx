@@ -232,6 +232,30 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
     }
   }
 
+  async function doDelete(r: Row) {
+    if (
+      !confirm(
+        'Delete this import and related data? This will remove its settings, logs, and any staged items for its supplier.',
+      )
+    )
+      return
+    setBusy(r.templateId)
+    try {
+      const resp = await fetch('/api/importer/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateIds: [r.templateId] }),
+      })
+      if (!resp.ok) throw new Error('Delete failed')
+      // Remove from list optimistically
+      setRows(cur => cur.filter(x => x.templateId !== r.templateId))
+    } catch {
+      setError('Delete failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function doRunNow(r: Row) {
     setBusy(r.templateId)
     try {
@@ -359,7 +383,10 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                           Approve
                         </Button>
                         <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
-                          Delete/Reset
+                          Reset drafts
+                        </Button>
+                        <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
+                          Delete import
                         </Button>
                       </>
                     )}
@@ -370,7 +397,10 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                           Run Now
                         </Button>
                         <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
-                          Delete/Reset
+                          Reset drafts
+                        </Button>
+                        <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
+                          Delete import
                         </Button>
                       </>
                     )}

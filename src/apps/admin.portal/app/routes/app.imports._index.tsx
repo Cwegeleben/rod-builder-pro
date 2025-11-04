@@ -15,6 +15,7 @@ type ImportsHomeProps = {
     lastRunAt?: string | null
   }>
   initialLogs?: Array<{ at: string; templateId: string; runId: string; type: string; payload?: unknown }>
+  templateNames?: Record<string, string>
 }
 
 export default function ImportsHome(props: ImportsHomeProps = {}) {
@@ -78,7 +79,7 @@ export default function ImportsHome(props: ImportsHomeProps = {}) {
                 Logs
               </Text>
             </InlineStack>
-            <GlobalLogList items={props.initialLogs} />
+            <GlobalLogList items={props.initialLogs} templateNames={props.templateNames} />
           </BlockStack>
         </Card>
       </BlockStack>
