@@ -212,6 +212,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   const options = Object.fromEntries(Object.entries(optsRaw).filter(([, v]) => v !== undefined)) as typeof optsRaw
 
+  // Create the run first without progress to avoid runtime errors on environments lacking the column
   const run = await prisma.importRun.create({
     data: {
       supplierId: supplierId || 'batson',
@@ -219,6 +220,16 @@ export async function action({ request }: ActionFunctionArgs) {
       summary: { preflight: { candidates, etaSeconds, expectedItems }, options } as unknown as object,
     },
   })
+  // Best-effort set initial progress (ignore if column missing)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (prisma as any).importRun.update({
+      where: { id: run.id },
+      data: { progress: { phase: 'preparing', percent: 0, etaSeconds, details: { candidates, expectedItems } } },
+    })
+  } catch {
+    /* ignore */
+  }
 
   // Log and start background job (fire-and-forget)
   await prisma.importLog.create({
@@ -247,7 +258,7 @@ export async function action({ request }: ActionFunctionArgs) {
     /* ignore */
   }
 
-  import('../services/importer/runOptions.server').then(async ({ startImportFromOptions }) => {
+  import('../services/importer/orchestrator.server').then(async ({ runPrepareJob }) => {
     setTimeout(() => {
       ;(async () => {
         if (confirmOverwrite && overwriteExisting) {
@@ -258,7 +269,7 @@ export async function action({ request }: ActionFunctionArgs) {
             /* ignore */
           }
         }
-        await startImportFromOptions(options, run.id)
+        await runPrepareJob({ templateId, options, runId: run.id })
       })()
         .then(async () => {
           // Clear preparing run pointer

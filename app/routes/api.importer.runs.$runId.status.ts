@@ -12,11 +12,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!runId) return json({ error: 'Missing run id' }, { status: 400 })
   const run = await prisma.importRun.findUnique({ where: { id: runId } })
   if (!run) return json({ error: 'Not found' }, { status: 404 })
+  // Best-effort map run -> templateId
+  let templateId: string | null = null
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tpl = await (prisma as any).importTemplate.findFirst({
+      where: { preparingRunId: runId },
+      select: { id: true },
+    })
+    templateId = tpl?.id || null
+  } catch {
+    /* ignore */
+  }
 
   const summary = (run.summary as unknown as { counts?: Record<string, number>; preflight?: unknown }) || {}
   return json({
     runId: run.id,
     status: run.status,
+    templateId,
+    // Use any-cast until Prisma client is regenerated with progress field
+    progress: ((run as unknown as { progress?: unknown }).progress as unknown) || null,
     counts: summary.counts || {},
     preflight: summary.preflight || null,
     startedAt: run.startedAt,

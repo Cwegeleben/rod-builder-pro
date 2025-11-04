@@ -205,6 +205,9 @@ model ImportRun {
   startedAt  DateTime @default(now())
   finishedAt DateTime?
   status     String   // started success failed
+  // Progress/state snapshot for UI streaming and polling
+  // Shape: { phase: string, percent: number, etaSeconds?: number, counts?: Json, details?: Json }
+  progress   Json?
   summary    Json?
 }
 

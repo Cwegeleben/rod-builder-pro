@@ -91,6 +91,46 @@ export async function startImportFromOptions(
   runId?: string,
   admin?: AdminClient,
 ): Promise<string> {
+  // Lightweight progress updater that tolerates missing column before migration
+  async function setProgress(
+    id: string,
+    data: { status?: string; phase?: string; percent?: number; etaSeconds?: number; details?: Record<string, unknown> },
+  ) {
+    try {
+      const patch: Record<string, unknown> = {}
+      if (data.status) patch.status = data.status
+      const progress: Record<string, unknown> = {}
+      if (data.phase) progress.phase = data.phase
+      if (typeof data.percent === 'number') progress.percent = data.percent
+      if (typeof data.etaSeconds === 'number') progress.etaSeconds = data.etaSeconds
+      if (data.details) progress.details = data.details
+      if (Object.keys(progress).length) patch.progress = progress as unknown as object
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (prisma as any).importRun.update({ where: { id }, data: patch })
+    } catch {
+      // ignore pre-migration or transient errors
+    }
+  }
+  async function isCancelRequested(id: string): Promise<boolean> {
+    try {
+      const run = await prisma.importRun.findUnique({ where: { id } })
+      const summary = (run?.summary as unknown as { control?: { cancelRequested?: boolean } }) || {}
+      return !!summary.control?.cancelRequested
+    } catch {
+      return false
+    }
+  }
+  async function throwIfCancelled(id?: string) {
+    if (!id) return
+    if (await isCancelRequested(id)) {
+      try {
+        await prisma.importRun.update({ where: { id }, data: { status: 'cancelled', finishedAt: new Date() } })
+      } catch {
+        /* ignore */
+      }
+      throw new Error('cancelled')
+    }
+  }
   // <!-- BEGIN RBP GENERATED: importer-prepare-review-wirefix-v1 -->
   // Force Prepare Review launcher to discovery mode (never short-circuit as price_avail)
   if (options.mode !== 'discover') options.mode = 'discover'
@@ -200,8 +240,14 @@ export async function startImportFromOptions(
       ? (await fetchActiveSources(supplierId)).map((s: { url: string }) => s.url)
       : []
   const seeds = Array.from(new Set([...saved, ...options.manualUrls]))
+  if (runId)
+    await setProgress(runId, { status: 'discover', phase: 'discover', percent: 15, details: { seeds: seeds.length } })
+  await throwIfCancelled(runId)
   // Stage products: for Batson, run the reliable series parser first, then follow with the crawler to backfill any misses
   if (options.useSeriesParser) {
+    if (runId)
+      await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 30, details: { seeds: seeds.length } })
+    await throwIfCancelled(runId)
     await stageFromSeriesParser(seeds)
     await crawlBatson(seeds, {
       templateKey: options.templateKey,
@@ -211,6 +257,9 @@ export async function startImportFromOptions(
       ignoreSavedSources: true,
     })
   } else {
+    if (runId)
+      await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 30, details: { seeds: seeds.length } })
+    await throwIfCancelled(runId)
     await crawlBatson(seeds, {
       templateKey: options.templateKey,
       // Conservative defaults for Fly Machines with headless Chromium
@@ -218,6 +267,8 @@ export async function startImportFromOptions(
       supplierId,
     })
   }
+  if (runId) await setProgress(runId, { status: 'staging', phase: 'stage', percent: 60 })
+  await throwIfCancelled(runId)
   // Generate diffs
   if (runId) {
     try {
@@ -228,6 +279,8 @@ export async function startImportFromOptions(
       /* noop */
     }
     await prisma.importDiff.deleteMany({ where: { importRunId: runId } })
+    await setProgress(runId, { status: 'diffing', phase: 'diff', percent: 80 })
+    await throwIfCancelled(runId)
     await createDiffRowsForRun(supplierId, runId, { options, admin })
     if (options.skipSuccessful) {
       // Also mark previously successful externalIds as skipped (history ledger based on approvals)
@@ -240,6 +293,7 @@ export async function startImportFromOptions(
       // Mark run as staged after diffs are materialized so Review can immediately show rows
       data: { status: 'staged', summary: { counts, options } as unknown as object },
     })
+    await setProgress(runId, { status: 'staged', phase: 'ready', percent: 100, details: { counts } })
     // Post-run consistency log: expectedItems (preflight) vs staged and diffs
     try {
       const run = await prisma.importRun.findUnique({ where: { id: runId } })
@@ -276,6 +330,8 @@ export async function startImportFromOptions(
       /* noop */
     }
     await prisma.importDiff.deleteMany({ where: { importRunId: newRunId } })
+    await setProgress(newRunId, { status: 'diffing', phase: 'diff', percent: 80 })
+    await throwIfCancelled(newRunId)
     await createDiffRowsForRun(supplierId, newRunId, { options, admin })
     if (options.skipSuccessful) {
       await markSkipSuccessfulForRun(supplierId, newRunId)
@@ -286,6 +342,7 @@ export async function startImportFromOptions(
       // Mark run as staged after diffs are materialized
       data: { status: 'staged', summary: { counts, options } as unknown as object },
     })
+    await setProgress(newRunId, { status: 'staged', phase: 'ready', percent: 100, details: { counts } })
     // Post-run consistency log for new run
     try {
       const run = await prisma.importRun.findUnique({ where: { id: newRunId } })

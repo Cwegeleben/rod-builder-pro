@@ -24,7 +24,7 @@ type Row = {
   runId?: string
   nextRunAt?: string
   hadFailures?: boolean
-  preparing?: { runId: string; startedAt?: string; etaSeconds?: number }
+  preparing?: { runId: string; startedAt?: string; etaSeconds?: number; pct?: number; phase?: string }
   hasSeeds?: boolean
   hasStaged?: boolean
 }
@@ -124,10 +124,19 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
             status: string
             startedAt?: string
             preflight?: { candidates?: number; etaSeconds?: number } | null
+            progress?: { percent?: number; phase?: string } | null
           }
           if (j.status === 'started' || j.status === 'done') {
             // stop showing preparing for this row
             setRows(cur => cur.map(r => (r.templateId === id.tpl ? { ...r, preparing: undefined } : r)))
+            continue
+          }
+          if (j.status === 'staged') {
+            // mark ready: stop preparing, enable Review, and toast
+            setRows(cur =>
+              cur.map(r => (r.templateId === id.tpl ? { ...r, preparing: undefined, hasStaged: true } : r)),
+            )
+            setToast('Review is ready')
             continue
           }
           const started = j.startedAt ? new Date(j.startedAt).getTime() : Date.now()
@@ -136,7 +145,16 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
           setRows(cur =>
             cur.map(r =>
               r.templateId === id.tpl
-                ? { ...r, preparing: { ...r.preparing!, etaSeconds: eta, startedAt: new Date(started).toISOString() } }
+                ? {
+                    ...r,
+                    preparing: {
+                      ...r.preparing!,
+                      etaSeconds: eta,
+                      startedAt: new Date(started).toISOString(),
+                      pct: typeof j.progress?.percent === 'number' ? j.progress.percent : r.preparing?.pct,
+                      phase: j.progress?.phase || r.preparing?.phase,
+                    },
+                  }
                 : r,
             ),
           )
@@ -376,7 +394,7 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                   {r.preparing ? (
                     <div>
                       <InlineStack gap="200" align="space-between">
-                        <Text as="span">Preparing…</Text>
+                        <Text as="span">{`Preparing…${r.preparing.phase ? ` ${r.preparing.phase}` : ''}`}</Text>
                         <Text as="span" tone="subdued">
                           {(() => {
                             const started = r.preparing?.startedAt ? new Date(r.preparing.startedAt).getTime() : 0
@@ -388,10 +406,17 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                         </Text>
                       </InlineStack>
                       {(() => {
-                        const started = r.preparing?.startedAt ? new Date(r.preparing.startedAt).getTime() : Date.now()
-                        const elapsed = (Date.now() - started) / 1000
-                        const eta = r.preparing?.etaSeconds || 60
-                        const pct = Math.max(5, Math.min(95, Math.round((elapsed / Math.max(eta, 30)) * 100)))
+                        const pct =
+                          typeof r.preparing?.pct === 'number'
+                            ? Math.max(0, Math.min(100, Math.round(r.preparing.pct)))
+                            : (() => {
+                                const started = r.preparing?.startedAt
+                                  ? new Date(r.preparing.startedAt).getTime()
+                                  : Date.now()
+                                const elapsed = (Date.now() - started) / 1000
+                                const eta = r.preparing?.etaSeconds || 60
+                                return Math.max(5, Math.min(95, Math.round((elapsed / Math.max(eta, 30)) * 100)))
+                              })()
                         return <ProgressBar progress={pct} size="small" />
                       })()}
                     </div>

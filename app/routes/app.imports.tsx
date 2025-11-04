@@ -2,8 +2,14 @@
 // /app/imports parent route acts as a layout and renders child routes via <Outlet/>.
 // The index child composes the Imports home UI; /app/imports/new renders the wizard, etc.
 import { Outlet } from '@remix-run/react'
+import GlobalImportProgress from '../components/importer/GlobalImportProgress'
 
 export default function ImportsLayout() {
-  return <Outlet />
+  return (
+    <div>
+      <GlobalImportProgress />
+      <Outlet />
+    </div>
+  )
 }
 // <!-- END RBP GENERATED: importer-v2-3 -->
