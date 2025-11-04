@@ -32,13 +32,11 @@ export async function action({ request }: ActionFunctionArgs) {
   const templateId = typeof body.templateId === 'string' ? (body.templateId as string) : ''
   const confirmOverwrite = Boolean(body.confirmOverwrite) || /\bconfirm(=|:)?(1|true|yes)\b/i.test(JSON.stringify(body))
   const overwriteExisting = Boolean(body.overwriteExisting) || false
+  const skipSuccessful = Boolean(body.skipSuccessful)
   if (!templateId) return json({ error: 'templateId required' }, { status: 400 })
 
   const { prisma } = await import('../db.server')
   const { getTargetById } = await import('../server/importer/sites/targets')
-  const { getSiteConfigForUrlDiscoverV1 } = await import('../server/importer/sites')
-  const { renderHeadlessHtml } = await import('../server/headless/renderHeadlessHtml')
-  const { PRODUCT_MODELS } = await import('../server/importer/products/models')
 
   // Load saved settings for this template
   const tpl = await prisma.importTemplate.findUnique({ where: { id: templateId } })
@@ -69,8 +67,34 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ error: 'Missing target or seeds' }, { status: 400 })
   }
 
+  // Enforce seed scope for selected targets (e.g., Batson-only)
+  try {
+    const { allowedHostsForTarget, partitionUrlsByHost } = await import('../server/importer/seedScope.server')
+    const allowed = allowedHostsForTarget(targetId)
+    if (allowed.length) {
+      const { invalid, invalidHosts } = partitionUrlsByHost(seedUrls, allowed)
+      if (invalid.length) {
+        return json(
+          {
+            ok: false,
+            code: 'seed_scope_violation',
+            error: `Some seeds are outside the allowed domain(s): ${allowed.join(', ')}`,
+            allowedHosts: allowed,
+            invalidUrls: invalid,
+            seenHosts: invalidHosts,
+          },
+          { status: 400 },
+        )
+      }
+    }
+  } catch {
+    // non-fatal
+  }
+
   const target = getTargetById(targetId)
   const supplierId = target?.siteId || targetId
+
+  // We will compute preflight first, then decide whether to queue or start immediately
 
   // If this prepare would overwrite existing staged data for the supplier, prompt for confirmation
   try {
@@ -92,110 +116,10 @@ export async function action({ request }: ActionFunctionArgs) {
     /* ignore confirm probe errors */
   }
 
-  // Quick discover to validate and estimate scope
-  const headers: Record<string, string> = {
-    'User-Agent':
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
-    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Cache-Control': 'no-cache',
-    Pragma: 'no-cache',
-  }
-
-  async function fetchStatic(url: string): Promise<string | null> {
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 15_000)
-    try {
-      const r = await fetch(url, { headers, signal: ctrl.signal })
-      if (!r.ok) return null
-      return await r.text()
-    } catch {
-      return null
-    } finally {
-      clearTimeout(timer)
-    }
-  }
-
-  const discovered = new Set<string>()
-  for (const src of seedUrls.slice(0, 5)) {
-    // cap initial validation to 5 seeds
-    const site = getSiteConfigForUrlDiscoverV1(src)
-    if (!site || typeof site.discover !== 'function') continue
-    const baseUrl = (() => {
-      try {
-        const u = new URL(src)
-        return `${u.protocol}//${u.hostname}`
-      } catch {
-        return src
-      }
-    })()
-    let staticHtml: string | null = null
-    try {
-      staticHtml = await fetchStatic(src)
-    } catch {
-      /* ignore */
-    }
-    const fetchHtml: (mode: 'static' | 'headless') => Promise<string | null> = async (mode: 'static' | 'headless') => {
-      if (mode === 'static') return staticHtml
-      try {
-        return await renderHeadlessHtml(src, { timeoutMs: 20_000 })
-      } catch {
-        return null
-      }
-    }
-    try {
-      const res = await site.discover(fetchHtml, baseUrl)
-      const urls = Array.isArray(res.seeds) ? res.seeds.map((s: { url: string }) => s.url) : []
-      for (const u of urls) discovered.add(u)
-    } catch {
-      /* continue */
-    }
-  }
-
-  const candidates = discovered.size
-  // Optional quick estimate: for series-parser targets, count expected item rows per seed.
-  let expectedItems: number | undefined = undefined
-  try {
-    if (useSeriesParserForTarget(targetId)) {
-      const parse = PRODUCT_MODELS['batson-attribute-grid']
-      let total = 0
-      // Compute base once
-      const getBase = (u: string) => {
-        try {
-          const x = new URL(u)
-          return `${x.protocol}//${x.hostname}`
-        } catch {
-          return 'https://batsonenterprises.com'
-        }
-      }
-      for (const seed of seedUrls) {
-        let html: string | null = null
-        try {
-          html = await fetchStatic(seed)
-        } catch {
-          html = null
-        }
-        if (!html) {
-          try {
-            html = await renderHeadlessHtml(seed, { timeoutMs: 20_000 })
-          } catch {
-            html = null
-          }
-        }
-        if (!html) continue
-        try {
-          const base = getBase(seed)
-          const res = parse(html, base)
-          total += Array.isArray(res?.rows) ? res.rows.length : 0
-        } catch {
-          /* ignore bad page */
-        }
-      }
-      expectedItems = total
-    }
-  } catch {
-    /* ignore estimate errors */
-  }
+  // Fast preflight to keep TTFB low in embedded Admin:
+  // Avoid external network fetches in the action handler. Use seed count as a proxy for candidates.
+  const candidates = seedUrls.length
+  const expectedItems: number | undefined = undefined
   // ETA heuristic: requests per minute ~30, with per-product ~1.2x overhead and diffing constant
   const rpm = 30
   const seconds = Math.ceil((candidates / Math.max(1, rpm)) * 60 * 1.2 + 20)
@@ -216,7 +140,7 @@ export async function action({ request }: ActionFunctionArgs) {
     mode: 'discover' as const,
     includeSeeds: true,
     manualUrls: seedUrls,
-    skipSuccessful: false,
+    skipSuccessful,
     notes: `prepare:${templateId}`,
     supplierId: supplierId || 'batson',
     templateKey: templateKeyForTarget(targetId),
@@ -225,6 +149,33 @@ export async function action({ request }: ActionFunctionArgs) {
     useSeriesParser: useSeriesParserForTarget(targetId),
   }
   const options = Object.fromEntries(Object.entries(optsRaw).filter(([, v]) => v !== undefined)) as typeof optsRaw
+
+  // If an active prepare is already running for this template, enqueue a queued run and return 202
+  try {
+    const tpl2 = await prisma.importTemplate.findUnique({ where: { id: templateId } })
+    const existingRunId = (tpl2 as unknown as { preparingRunId?: string | null })?.preparingRunId
+    if (existingRunId) {
+      // Create a queued run with the same preflight snapshot and options
+      const queued = await prisma.importRun.create({
+        data: {
+          supplierId: supplierId || 'batson',
+          status: 'queued',
+          summary: { preflight: { candidates, etaSeconds, expectedItems }, options } as unknown as object,
+        },
+      })
+      await prisma.importLog.create({
+        data: {
+          templateId,
+          runId: queued.id,
+          type: 'prepare:queued',
+          payload: { candidates, etaSeconds, expectedItems },
+        },
+      })
+      return json({ ok: true, queued: true, runId: queued.id, candidates, etaSeconds, expectedItems }, { status: 202 })
+    }
+  } catch {
+    /* ignore and fall back to immediate start */
+  }
 
   // Create the run first without progress to avoid runtime errors on environments lacking the column
   const run = await prisma.importRun.create({
@@ -257,9 +208,9 @@ export async function action({ request }: ActionFunctionArgs) {
   // Persist preparing run on template for UI polling
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: run.id } })
-  // Additional preflight report log (sample up to 10 discovered URLs for quick debug)
+  // Additional preflight report log (sample seeds; discovery moved to background)
   try {
-    const sample = Array.from(discovered).slice(0, 10)
+    const sample = seedUrls.slice(0, 10)
     await prisma.importLog.create({
       data: {
         templateId,
@@ -272,7 +223,7 @@ export async function action({ request }: ActionFunctionArgs) {
     /* ignore */
   }
 
-  import('../services/importer/orchestrator.server').then(async ({ runPrepareJob }) => {
+  import('../services/importer/orchestrator.server').then(async ({ runPrepareJob, startNextQueuedForTemplate }) => {
     setTimeout(() => {
       ;(async () => {
         if (confirmOverwrite && overwriteExisting) {
@@ -290,6 +241,12 @@ export async function action({ request }: ActionFunctionArgs) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
           await prisma.importLog.create({ data: { templateId, runId: run.id, type: 'prepare:done', payload: {} } })
+          // Kick next queued run for this template, if any
+          try {
+            await startNextQueuedForTemplate(templateId)
+          } catch {
+            /* ignore */
+          }
         })
         .catch(async (err: unknown) => {
           await prisma.importRun.update({ where: { id: run.id }, data: { status: 'failed' } })
@@ -303,6 +260,12 @@ export async function action({ request }: ActionFunctionArgs) {
               payload: { message: (err as Error)?.message || 'unknown' },
             },
           })
+          // Attempt to start next queued even after a failure
+          try {
+            await startNextQueuedForTemplate(templateId)
+          } catch {
+            /* ignore */
+          }
         })
     }, 0)
   })

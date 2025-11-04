@@ -182,6 +182,24 @@
       "type": "shell",
       "command": "npm run -s typecheck && npm run -s build",
       "group": "build"
+    },
+    {
+      "label": "Run new e2e (imports progress)",
+      "type": "shell",
+      "command": "pnpm exec playwright test tests/e2e/importer.progress.inline.spec.ts",
+      "group": "test"
+    },
+    {
+      "label": "Run new e2e (imports queueing)",
+      "type": "shell",
+      "command": "pnpm exec playwright test tests/e2e/importer.queueing.inline.spec.ts",
+      "group": "test"
+    },
+    {
+      "label": "Run new e2e (save & crawl)",
+      "type": "shell",
+      "command": "pnpm exec playwright test tests/e2e/importer.saveAndCrawl.inline.spec.ts",
+      "group": "test"
     }
   ]
 }

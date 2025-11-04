@@ -47,6 +47,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
           importConfig: true,
         },
       })
+      // Compute queued counts per template by correlating queued runs with 'prepare:queued' logs
+      const queuedRuns = (await (prisma as any).importRun.findMany({
+        where: { status: 'queued' },
+        select: { id: true },
+      })) as Array<{ id: string }>
+      const queuedIds = queuedRuns.map(r => r.id)
+      const queuedLogs = queuedIds.length
+        ? ((await (prisma as any).importLog.findMany({
+            where: { runId: { in: queuedIds }, type: 'prepare:queued' },
+            select: { templateId: true, runId: true },
+          })) as Array<{ templateId: string; runId: string }>)
+        : []
+      const queuedByTemplate = queuedLogs.reduce(
+        (acc: Record<string, number>, log: { templateId: string; runId: string }) => {
+          acc[log.templateId] = (acc[log.templateId] || 0) + 1
+          return acc
+        },
+        {},
+      )
       // Enrich with preparing snapshot from ImportRun
       const preparingIds = rows.filter((r: any) => r.preparingRunId).map((r: any) => r.preparingRunId as string)
       const prepRuns = preparingIds.length
@@ -96,7 +115,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           const rest = { ...r }
           delete (rest as any).preparingRunId
           delete (rest as any).importConfig
-          return { ...rest, preparing, hasSeeds, seedCount, hasStaged }
+          const queuedCount = queuedByTemplate[r.id] || 0
+          return { ...rest, preparing, hasSeeds, seedCount, hasStaged, queuedCount }
         }),
       )
       return new Response(JSON.stringify({ templates: out }), {

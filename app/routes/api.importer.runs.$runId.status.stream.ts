@@ -88,6 +88,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
+      // Hint proxies (e.g., nginx) not to buffer SSE
+      'X-Accel-Buffering': 'no',
     },
   })
 }

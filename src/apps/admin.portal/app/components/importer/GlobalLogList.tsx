@@ -32,6 +32,8 @@ export default function GlobalLogList({
   items?: LogRow[]
   templateNames?: Record<string, string>
 }) {
+  // Temporary: disable Polaris IndexTable to avoid td/li nesting errors in embedded context
+  const DISABLE_INDEXTABLE = true
   const [logItems, setLogItems] = useState<LogRow[]>(items)
   const [hydrated, setHydrated] = useState(false)
   // Defer IndexTable rendering to client to avoid SSR/CSR mismatches in condensed mode
@@ -413,8 +415,62 @@ export default function GlobalLogList({
                     <Badge>{String(rows.length)}</Badge>
                   </InlineStack>
                 </InlineStack>
-                {/* Render the table only after mount to avoid SSR/CSR markup mismatches in condensed layouts */}
-                {!hydrated ? null : (
+                {/* Render simple list fallback to avoid IndexTable condensed mismatches */}
+                {!hydrated ? null : DISABLE_INDEXTABLE ? (
+                  <BlockStack gap="150">
+                    {rows.map((r, i) => {
+                      const key = `${r.at}|${r.type}|${r.runId}`
+                      const isOpen = !!expanded[key]
+                      return (
+                        <Box key={key} padding="200" borderWidth="025" borderColor="border" borderRadius="050">
+                          <InlineStack align="space-between" blockAlign="start">
+                            <InlineStack gap="200" blockAlign="center">
+                              <Text as="span" tone="subdued">
+                                {rel(r.at)}
+                              </Text>
+                              {badge(r.type)}
+                              <InlineStack gap="100" align="start">
+                                <Text as="span" tone="subdued">
+                                  run
+                                </Text>
+                                <Link url={`/app/imports/runs/${r.runId}/review`}>{r.runId}</Link>
+                              </InlineStack>
+                            </InlineStack>
+                            <InlineStack gap="100">
+                              <Button onClick={() => setExpanded(cur => ({ ...cur, [key]: !cur[key] }))}>
+                                {isOpen ? 'Hide' : 'Details'}
+                              </Button>
+                              <Button
+                                variant="plain"
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(JSON.stringify(r.payload ?? null, null, 2))
+                                  } catch {
+                                    // ignore copy errors
+                                  }
+                                }}
+                              >
+                                Copy
+                              </Button>
+                            </InlineStack>
+                          </InlineStack>
+                          <Box paddingBlockStart="100">
+                            <Text as="span" tone="subdued" variant="bodySm">
+                              {summarize(r.type, r.payload) ?? ''}
+                            </Text>
+                          </Box>
+                          <Collapsible open={isOpen} id={`log-${i}`}>
+                            <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
+                              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0 }}>
+                                {JSON.stringify(r.payload ?? null, null, 2)}
+                              </pre>
+                            </div>
+                          </Collapsible>
+                        </Box>
+                      )
+                    })}
+                  </BlockStack>
+                ) : (
                   <IndexTable
                     resourceName={resourceName}
                     itemCount={rows.length}

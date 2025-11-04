@@ -1,3 +1,40 @@
+# Save & Crawl: Settings + Background Prepare
+
+This is the streamlined flow for preparing a Review. On Save & Crawl, we:
+
+- Save your Import Settings (name, target, seeds)
+- Start a background prepare job (discover → parse → crawl backfill → stage → diff)
+- Redirect to the Imports page inside Shopify Admin with a banner (candidates, ETA)
+- Show live progress at the top via streaming updates; you can leave the page
+
+Options
+
+- Skip successful (recommended): speed up re-runs by skipping already-successful series.
+
+Seed scope
+
+- Batson targets accept only seeds within batsonenterprises.com. Off-domain seeds are rejected with a clear error.
+
+Queueing
+
+- One active prepare per template. If one is already running, new Save & Crawl will re-use that run and show its status instead of starting another.
+
+Long-running jobs
+
+- The Imports page highlights runs that exceed the ETA and offers Cancel.
+
+Production posture
+
+- Smoke routes are disabled by default in production. They remain available in dev/staging when enabled.
+
+Embedded Admin constraints
+
+- Prepare returns quickly: the server avoids heavy preflight fetches and responds fast with a seed-based estimate. Work runs in the background.
+- Live updates are streamed via SSE with proxy buffering disabled; a polling fallback is used automatically if streaming is unavailable.
+- If your network/tenant blocks streaming, progress still updates every ~2s via polling and you can safely navigate away.
+
+---
+
 # Settings dry-run on production (no Shopify session)
 
 This guide lets you validate the new Settings + Prepare flow on any environment without a Shopify-embedded session by using the smoke endpoints guarded by ENABLE_SMOKES and SMOKE_TOKEN.

@@ -18,7 +18,7 @@ export default function App() {
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <Meta />
         <Links />
-        {/* Preemptively silence Shopify OTLP/Monorail beacons before any client scripts run */}
+        {/* Preemptively silence Shopify OTLP/Monorail beacons and noisy URL SyntaxErrors before any client scripts run */}
         <script
           dangerouslySetInnerHTML={{
             __html: `(()=>{try{
@@ -32,6 +32,9 @@ export default function App() {
               if(ORIG_ERR){console.error=function(...args){if(suppressMsg(...args))return;return ORIG_ERR(...args);};}
               const ORIG_WARN=console.warn?.bind(console);
               if(ORIG_WARN){console.warn=function(...args){try{const s=(args&&args[0]?String(args[0]):'').toLowerCase();if(s.includes('preloaded using link preload but not used')){return;}}catch{}return ORIG_WARN(...args);};}
+              // Suppress unhandled rejections caused by invalid URL() strings (benign noise in embedded context)
+              const shouldIgnoreRejection = (reason)=>{try{const msg=String((reason&&(reason.message||reason))||'').toLowerCase();return msg.includes('the string did not match the expected pattern');}catch{return false;}};
+              window.addEventListener('unhandledrejection',(ev)=>{try{if(shouldIgnoreRejection(ev&&ev.reason)){ev.preventDefault?.();}}catch{}});
               // Best-effort: intercept window error events referencing blocked hosts (not all are cancellable)
               window.addEventListener('error', (ev)=>{try{const msg=String(ev.message||'').toLowerCase();const src=(ev.filename||'').toLowerCase();if(msg.includes('otlp-http')||src.includes('otlp-http')||src.includes('monorail')){ev.stopImmediatePropagation?.();ev.preventDefault?.();}}catch{}}, true);
             }catch(e){}})();`,

@@ -31,6 +31,7 @@ export function GlobalImportProgress() {
   const [runs, setRuns] = React.useState<Record<string, RunStatus>>({})
   const [ready, setReady] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
   const [failed, setFailed] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
+  const [failedReasons, setFailedReasons] = React.useState<Record<string, string>>({})
   const [cancelled, setCancelled] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
   const [loading, setLoading] = React.useState<boolean>(true)
   const [names, setNames] = React.useState<Record<string, string>>({})
@@ -111,6 +112,32 @@ export function GlobalImportProgress() {
                 }
                 if (data.status === 'failed') {
                   setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                  // Best-effort fetch of error reason from recent logs
+                  void fetch(`/api/importer/logs?take=50`)
+                    .then(r => r.json())
+                    .then((j: unknown) => {
+                      const logs = Array.isArray((j as { logs?: unknown }).logs)
+                        ? ((j as { logs: Array<{ runId?: string; type?: string; payload?: unknown }> }).logs as Array<{
+                            runId?: string
+                            type?: string
+                            payload?: unknown
+                          }>)
+                        : []
+                      const err = logs.find(
+                        l =>
+                          l.runId === data.runId && (l.type === 'prepare:error' || /error/i.test(String(l.type || ''))),
+                      )
+                      const msg = (() => {
+                        try {
+                          const p = (err?.payload || {}) as { message?: string }
+                          return p?.message || ''
+                        } catch {
+                          return ''
+                        }
+                      })()
+                      if (msg) setFailedReasons(prev => ({ ...prev, [data.runId!]: msg }))
+                    })
+                    .catch(() => void 0)
                 } else if (data.status === 'staged') {
                   setReady(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
                 } else if (data.status === 'cancelled') {
@@ -255,6 +282,7 @@ export function GlobalImportProgress() {
             <InlineStack align="space-between" blockAlign="center">
               <Text as="span">
                 {`An error occurred while preparing${r.templateId ? ` “${names[r.templateId] || r.templateId}”` : ''}.`}
+                {failedReasons[r.runId] ? ` Reason: ${failedReasons[r.runId]}` : ''}
               </Text>
               <InlineStack gap="200">
                 {r.templateId ? (
@@ -299,14 +327,31 @@ export function GlobalImportProgress() {
           </Banner>
         ))}
         {runList.map(r => {
-          const pct = Math.max(0, Math.min(100, Math.round((r.progress?.percent as number) || 0)))
+          const queued = (r.status || '').toLowerCase() === 'queued'
+          const pct = queued ? 0 : Math.max(0, Math.min(100, Math.round((r.progress?.percent as number) || 0)))
           const phase = String(r.progress?.phase || r.status || 'preparing')
           const eta =
             typeof r.progress?.etaSeconds === 'number'
               ? Math.max(0, Math.round(r.progress?.etaSeconds || 0))
               : undefined
           const started = r.startedAt
-          const pf = (r as unknown as { preflight?: { candidates?: number; expectedItems?: number } | null }).preflight
+          const pf = (
+            r as unknown as { preflight?: { candidates?: number; expectedItems?: number; etaSeconds?: number } | null }
+          ).preflight
+          const expectedEta =
+            typeof r.progress?.etaSeconds === 'number'
+              ? (r.progress?.etaSeconds as number)
+              : typeof pf?.etaSeconds === 'number'
+                ? (pf?.etaSeconds as number)
+                : undefined
+          const startedMs = started ? Date.parse(started) : NaN
+          const elapsedSec = Number.isFinite(startedMs) ? Math.max(0, Math.floor((Date.now() - startedMs) / 1000)) : 0
+          const LONG_GRACE_SEC = 300 // 5 minutes grace beyond ETA
+          const HARD_LONG_SEC = 60 * 20 // 20 minutes absolute
+          const isLong = queued
+            ? false
+            : (typeof expectedEta === 'number' && elapsedSec > expectedEta + LONG_GRACE_SEC) ||
+              elapsedSec > HARD_LONG_SEC
           const preflightSummary = (() => {
             const c = typeof pf?.candidates === 'number' ? pf!.candidates! : undefined
             const exp = typeof pf?.expectedItems === 'number' ? pf!.expectedItems! : undefined
@@ -316,18 +361,25 @@ export function GlobalImportProgress() {
             return bits.length ? `• ${bits.join(' • ')}` : ''
           })()
           return (
-            <Banner key={r.runId} tone="info">
+            <Banner key={r.runId} tone={queued ? 'info' : isLong ? 'warning' : 'info'}>
               <InlineStack align="space-between" blockAlign="center">
                 <InlineStack gap="400" blockAlign="center">
-                  <Text as="span">Preparing review… {phase}</Text>
+                  <Text as="span">{queued ? 'Queued to prepare review…' : `Preparing review… ${phase}`}</Text>
                   <InlineStack gap="300" blockAlign="center">
                     <Text as="span" tone="subdued">
-                      {pct}%{typeof eta === 'number' ? ` • ~${formatEtaShort(eta)}` : ''}
+                      {queued
+                        ? 'Waiting for previous run to finish'
+                        : `${pct}%${typeof eta === 'number' ? ` • ~${formatEtaShort(eta)}` : ''}`}
                     </Text>
                     {started ? <Text as="span" tone="subdued">{`• ${formatStartedAgo(started)}`}</Text> : null}
                     {preflightSummary ? (
                       <Text as="span" tone="subdued">
                         {preflightSummary}
+                      </Text>
+                    ) : null}
+                    {isLong ? (
+                      <Text as="span" tone="subdued">
+                        Taking longer than expected
                       </Text>
                     ) : null}
                   </InlineStack>
@@ -352,16 +404,18 @@ export function GlobalImportProgress() {
                   </Button>
                 </InlineStack>
               </InlineStack>
-              <div style={{ marginTop: 6, height: 6, width: '100%', background: 'var(--p-color-bg-secondary)' }}>
-                <div
-                  style={{
-                    width: `${pct}%`,
-                    height: 6,
-                    background: 'var(--p-color-bg-fill-brand)',
-                    transition: 'width 300ms ease',
-                  }}
-                />
-              </div>
+              {!queued ? (
+                <div style={{ marginTop: 6, height: 6, width: '100%', background: 'var(--p-color-bg-secondary)' }}>
+                  <div
+                    style={{
+                      width: `${pct}%`,
+                      height: 6,
+                      background: 'var(--p-color-bg-fill-brand)',
+                      transition: 'width 300ms ease',
+                    }}
+                  />
+                </div>
+              ) : null}
             </Banner>
           )
         })}

@@ -1,10 +1,22 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 
-/** Returns true if smoke endpoints are enabled via ENABLE_SMOKES env var. */
+/** Returns true if smoke endpoints are enabled via ENABLE_SMOKES env var.
+ * In production, smokes are disabled by default unless SMOKE_ALLOW_PROD=1 is set explicitly.
+ */
 export function smokesEnabled(): boolean {
   const v = process.env.ENABLE_SMOKES || ''
   const norm = v.trim().toLowerCase()
-  return norm === '1' || norm === 'true' || norm === 'on' || norm === 'enabled' || norm === 'yes'
+  const enabled = norm === '1' || norm === 'true' || norm === 'on' || norm === 'enabled' || norm === 'yes'
+  // Disallow in production unless explicitly forced
+  const isProd = String(process.env.NODE_ENV || '').toLowerCase() === 'production'
+  if (isProd) {
+    const force = String(process.env.SMOKE_ALLOW_PROD || '')
+      .trim()
+      .toLowerCase()
+    const allowProd = force === '1' || force === 'true' || force === 'yes'
+    return enabled && allowProd
+  }
+  return enabled
 }
 
 /** Extracts a bearer/query token from the request. */

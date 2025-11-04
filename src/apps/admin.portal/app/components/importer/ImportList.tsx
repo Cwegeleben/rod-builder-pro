@@ -27,6 +27,7 @@ type Row = {
   preparing?: { runId: string; startedAt?: string; etaSeconds?: number; pct?: number; phase?: string }
   hasSeeds?: boolean
   hasStaged?: boolean
+  queuedCount?: number
 }
 
 type InitialDbTemplate = {
@@ -39,6 +40,8 @@ type InitialDbTemplate = {
 
 // NOTE: For Logic Pass 1 we simulate a single row pulled from adapters
 export default function ImportList({ initialDbTemplates }: { initialDbTemplates?: InitialDbTemplate[] } = {}) {
+  // Temporary: disable Polaris IndexTable on this page to avoid td/li hydration issues in embedded Admin
+  const DISABLE_INDEXTABLE = true
   const [rows, setRows] = useState<Row[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
@@ -86,6 +89,7 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
               preparing?: { runId: string; startedAt?: string; etaSeconds?: number } | null
               hasSeeds?: boolean
               hasStaged?: boolean
+              queuedCount?: number
             }>
           }
           const list = Array.isArray(jr.templates) ? jr.templates : []
@@ -102,6 +106,7 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
               preparing: t.preparing || undefined,
               hasSeeds: !!t.hasSeeds,
               hasStaged: !!t.hasStaged,
+              queuedCount: typeof t.queuedCount === 'number' ? t.queuedCount : 0,
             })),
           )
           return
@@ -354,10 +359,163 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
             Loading…
           </Text>
         </div>
+      ) : DISABLE_INDEXTABLE ? (
+        <div>
+          <div style={{ display: 'grid', gap: 12 }}>
+            {rows.map(r => {
+              const isBusy = busy === r.templateId
+              const nextRun = r.nextRunAt
+                ? (() => {
+                    try {
+                      return new Date(r.nextRunAt).toISOString().replace('T', ' ').replace(/Z$/, '')
+                    } catch {
+                      return r.nextRunAt
+                    }
+                  })()
+                : '—'
+              return (
+                <div
+                  key={r.templateId}
+                  style={{
+                    border: '1px solid var(--p-color-border)',
+                    borderRadius: 8,
+                    padding: 12,
+                    display: 'grid',
+                    gap: 8,
+                  }}
+                >
+                  <InlineStack align="space-between">
+                    <Link url={`/app/imports/${r.templateId}${location.search}`}>{r.name || r.templateId}</Link>
+                    <div>
+                      <InlineStack gap="200" blockAlign="center">
+                        <ImportRowStateBadge state={r.state} />
+                        {r.queuedCount && r.queuedCount > 0 ? (
+                          <Text as="span" tone="subdued">{`• ${r.queuedCount} queued`}</Text>
+                        ) : null}
+                      </InlineStack>
+                    </div>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text as="span" tone="subdued">
+                      {r.state === ImportState.SCHEDULED ? nextRun : '—'}
+                    </Text>
+                    <ButtonGroup>
+                      <Button
+                        url={`/app/imports/${r.templateId}/review${location.search}`}
+                        disabled={!!r.preparing || r.hasSeeds === false || r.hasStaged === false}
+                        accessibilityLabel={
+                          r.hasSeeds === false
+                            ? 'Add seeds in settings to enable Review'
+                            : r.hasStaged === false
+                              ? 'Run Prepare review to discover items before reviewing'
+                              : undefined
+                        }
+                      >
+                        Review
+                      </Button>
+                      <Button url={`/app/imports/${r.templateId}${location.search}`}>
+                        {r.state === ImportState.NEEDS_SETTINGS ? 'Edit settings' : 'Settings'}
+                      </Button>
+                      {r.state === ImportState.READY_TO_APPROVE && (
+                        <>
+                          {r.runId ? <ShopifyFilterLink runId={r.runId} /> : null}
+                          <Button loading={isBusy} onClick={() => doApprove(r)}>
+                            Approve
+                          </Button>
+                          <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
+                            Reset drafts
+                          </Button>
+                          <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
+                            Delete import
+                          </Button>
+                        </>
+                      )}
+                      {r.state === ImportState.APPROVED && (
+                        <>
+                          <Button url={`/app/imports/${r.templateId}/schedule`}>Schedule</Button>
+                          <Button loading={isBusy} onClick={() => doRunNow(r)}>
+                            Run Now
+                          </Button>
+                          <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
+                            Reset drafts
+                          </Button>
+                          <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
+                            Delete import
+                          </Button>
+                        </>
+                      )}
+                      {r.state === ImportState.SCHEDULED && (
+                        <>
+                          <Button url={`/app/imports/${r.templateId}/schedule`}>Schedule</Button>
+                          <Button loading={isBusy} onClick={() => doRunNow(r)}>
+                            Run Now
+                          </Button>
+                          <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
+                            Reset drafts
+                          </Button>
+                          <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
+                            Delete import
+                          </Button>
+                          {r.hadFailures ? (
+                            <Text as="span" tone="critical">
+                              Last run had failures
+                            </Text>
+                          ) : null}
+                        </>
+                      )}
+                      {r.state !== ImportState.APPROVED && r.state !== ImportState.SCHEDULED && (
+                        <>
+                          <Button disabled>Schedule</Button>
+                          <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
+                            Reset drafts
+                          </Button>
+                          <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
+                            Delete import
+                          </Button>
+                        </>
+                      )}
+                    </ButtonGroup>
+                  </InlineStack>
+                  {r.preparing ? (
+                    <div>
+                      <InlineStack gap="200" align="space-between">
+                        <Text as="span">{`Preparing…${r.preparing.phase ? ` ${r.preparing.phase}` : ''}`}</Text>
+                        <Text as="span" tone="subdued">
+                          {(() => {
+                            const started = r.preparing?.startedAt ? new Date(r.preparing.startedAt).getTime() : 0
+                            const elapsed = started ? (Date.now() - started) / 1000 : 0
+                            const eta = r.preparing?.etaSeconds || 60
+                            const remain = Math.max(0, Math.ceil(eta - elapsed))
+                            return `~${Math.max(1, Math.ceil(remain / 60))}m`
+                          })()}
+                        </Text>
+                      </InlineStack>
+                      {(() => {
+                        const pct =
+                          typeof r.preparing?.pct === 'number'
+                            ? Math.max(0, Math.min(100, Math.round(r.preparing.pct)))
+                            : (() => {
+                                const started = r.preparing?.startedAt
+                                  ? new Date(r.preparing.startedAt).getTime()
+                                  : Date.now()
+                                const elapsed = (Date.now() - started) / 1000
+                                const eta = r.preparing?.etaSeconds || 60
+                                return Math.max(5, Math.min(95, Math.round((elapsed / Math.max(eta, 30)) * 100)))
+                              })()
+                        return <ProgressBar progress={pct} size="small" />
+                      })()}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        </div>
       ) : (
         <IndexTable
           resourceName={resourceName}
           itemCount={rows.length}
+          condensed={false}
           selectable
           selectedItemsCount={selected.length}
           onSelectionChange={selection => {
