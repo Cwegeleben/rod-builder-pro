@@ -5,6 +5,7 @@ type RunStatus = {
   runId: string
   status: string
   templateId?: string | null
+  templateName?: string | null
   progress?: { phase?: string; percent?: number; etaSeconds?: number; details?: unknown } | null
   counts?: Record<string, number>
 }
@@ -50,6 +51,10 @@ export function GlobalImportProgress() {
             try {
               const data = JSON.parse((e as MessageEvent).data) as RunStatus
               setRuns(prev => ({ ...prev, [data.runId]: data }))
+              // If SSE provides templateId+name, record it
+              if (data.templateId && data.templateName) {
+                setNames(prev => ({ ...prev, [data.templateId!]: data.templateName! }))
+              }
             } catch {
               /* ignore */
             }
@@ -61,6 +66,7 @@ export function GlobalImportProgress() {
                 runId?: string
                 templateId?: string | null
                 status?: string
+                templateName?: string | null
               }
               if (data?.ok && data.runId) {
                 setRuns(prev => {
@@ -68,6 +74,9 @@ export function GlobalImportProgress() {
                   delete next[data.runId!]
                   return next
                 })
+                if (data.templateId && data.templateName) {
+                  setNames(prev => ({ ...prev, [data.templateId!]: data.templateName! }))
+                }
                 if (data.status === 'failed') {
                   setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
                 } else if (data.status === 'staged') {

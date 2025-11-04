@@ -23,13 +23,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           }
           // Best-effort map run -> templateId via ImportTemplate.preparingRunId
           let templateId: string | null = null
+          let templateName: string | null = null
           try {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const tpl = await (prisma as any).importTemplate.findFirst({
               where: { preparingRunId: runId },
-              select: { id: true },
+              select: { id: true, name: true },
             })
             templateId = tpl?.id || null
+            templateName = tpl?.name || null
           } catch {
             /* ignore */
           }
@@ -38,6 +40,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             runId: run.id,
             status: run.status,
             templateId,
+            templateName,
             progress: ((run as unknown as { progress?: unknown }).progress as unknown) || null,
             counts: summary.counts || {},
             preflight: summary.preflight || null,

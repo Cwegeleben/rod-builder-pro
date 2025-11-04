@@ -5,6 +5,7 @@ type RunStatus = {
   runId: string
   status: string
   templateId?: string | null
+  templateName?: string | null
   progress?: { phase?: string; percent?: number; etaSeconds?: number } | null
 }
 
@@ -38,6 +39,9 @@ export default function JobCenter() {
             try {
               const data = JSON.parse((e as MessageEvent).data) as RunStatus
               setRuns(prev => ({ ...prev, [data.runId]: data }))
+              if (data.templateId && data.templateName) {
+                setNames(prev => ({ ...prev, [data.templateId!]: data.templateName! }))
+              }
             } catch {
               /* ignore */
             }
@@ -98,6 +102,9 @@ export default function JobCenter() {
                   try {
                     const data = JSON.parse((ev as MessageEvent).data) as RunStatus
                     setRuns(prev => ({ ...prev, [data.runId]: data }))
+                    if (data.templateId && data.templateName) {
+                      setNames(prev => ({ ...prev, [data.templateId!]: data.templateName! }))
+                    }
                   } catch {
                     /* ignore */
                   }
