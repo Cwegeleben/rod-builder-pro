@@ -7,12 +7,13 @@ import {
   BlockStack,
   Box,
   Button,
-  TextField,
-  ButtonGroup,
+  Filters,
+  ChoiceList,
   Divider,
   Collapsible,
   IndexTable,
   Link,
+  EmptyState,
 } from '@shopify/polaris'
 
 type LogRow = {
@@ -36,6 +37,9 @@ export default function GlobalLogList({
   >('all')
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [past, setPast] = useState<'all' | '1h' | '24h' | '7d'>('all')
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const badge = (t: LogRow['type']) => {
     switch (t) {
@@ -76,9 +80,19 @@ export default function GlobalLogList({
 
   if (!items.length) {
     return (
-      <Text as="p" tone="subdued">
-        No logs yet.
-      </Text>
+      <Box padding="200" borderWidth="025" borderColor="border" borderRadius="100">
+        <EmptyState
+          heading="No logs yet"
+          action={{ content: 'Refresh', onAction: () => window.location.reload() }}
+          secondaryAction={{
+            content: 'Learn more',
+            url: 'https://polaris.shopify.com/components/data-display/index-table',
+          }}
+          image="https://cdn.shopify.com/shopifycloud/web/assets/v1/empty-state-illustration-2e6f7b2a1aa1b7a2c0a7b826fbc7f3b2b7d827f1b5a89e.svg"
+        >
+          <p>Activity from prepare, crawl, review, and publish will appear here.</p>
+        </EmptyState>
+      </Box>
     )
   }
   // Keep internal state in sync on first mount or when parent sends new items
@@ -221,48 +235,102 @@ export default function GlobalLogList({
     <>
       {/* Controls */}
       <BlockStack gap="200">
-        <InlineStack align="space-between">
-          <ButtonGroup>
-            {(
-              [
-                { key: 'all', label: 'All' },
-                { key: 'prepare', label: 'Prepare' },
-                { key: 'settings', label: 'Settings' },
-                { key: 'approve', label: 'Approve' },
-                { key: 'discovery', label: 'Discovery' },
-                { key: 'scrape', label: 'Scrape' },
-                { key: 'schedule', label: 'Schedule' },
-                { key: 'recrawl', label: 'Recrawl' },
-                { key: 'error', label: 'Errors' },
-              ] as Array<{ key: typeof filterType; label: string }>
-            ).map(btn => (
-              <Button
-                key={btn.key}
-                pressed={filterType === (btn.key as typeof filterType)}
-                onClick={() => setFilterType(btn.key as typeof filterType)}
-              >
-                {btn.label}
-              </Button>
-            ))}
-          </ButtonGroup>
+        <Filters
+          queryValue={query}
+          onQueryChange={setQuery}
+          onQueryClear={() => setQuery('')}
+          onClearAll={() => {
+            setQuery('')
+            setFilterType('all')
+            setPast('all')
+          }}
+          filters={[
+            {
+              key: 'type',
+              label: 'Type',
+              filter: (
+                <ChoiceList
+                  title="Type"
+                  titleHidden
+                  choices={[
+                    { label: 'All', value: 'all' },
+                    { label: 'Prepare', value: 'prepare' },
+                    { label: 'Settings', value: 'settings' },
+                    { label: 'Approve', value: 'approve' },
+                    { label: 'Discovery', value: 'discovery' },
+                    { label: 'Scrape', value: 'scrape' },
+                    { label: 'Schedule', value: 'schedule' },
+                    { label: 'Recrawl', value: 'recrawl' },
+                    { label: 'Errors', value: 'error' },
+                  ]}
+                  selected={[filterType]}
+                  onChange={vals => setFilterType((vals[0] as typeof filterType) || 'all')}
+                  allowMultiple={false}
+                />
+              ),
+            },
+            {
+              key: 'past',
+              label: 'Past',
+              filter: (
+                <ChoiceList
+                  title="Past"
+                  titleHidden
+                  choices={[
+                    { label: 'All', value: 'all' },
+                    { label: '1h', value: '1h' },
+                    { label: '24h', value: '24h' },
+                    { label: '7d', value: '7d' },
+                  ]}
+                  selected={[past]}
+                  onChange={vals => setPast((vals[0] as typeof past) || 'all')}
+                  allowMultiple={false}
+                />
+              ),
+            },
+          ]}
+          appliedFilters={
+            filterType !== 'all'
+              ? [
+                  {
+                    key: 'type',
+                    label: `Type: ${filterType}`,
+                    onRemove: () => setFilterType('all'),
+                  },
+                  ...(past !== 'all'
+                    ? [
+                        {
+                          key: 'past',
+                          label: `Past: ${past}`,
+                          onRemove: () => setPast('all'),
+                        },
+                      ]
+                    : []),
+                ]
+              : past !== 'all'
+                ? [
+                    {
+                      key: 'past',
+                      label: `Past: ${past}`,
+                      onRemove: () => setPast('all'),
+                    },
+                  ]
+                : []
+          }
+        >
           <InlineStack gap="200" align="end">
-            <div style={{ minWidth: 260 }}>
-              <TextField
-                label="Search"
-                labelHidden
-                value={query}
-                onChange={setQuery}
-                placeholder="Filter by template, run, type, payload"
-                autoComplete="off"
-              />
-            </div>
             <LiveControls
               onRefreshRequest={async () => {
                 try {
-                  const r = await fetch('/api/importer/logs')
+                  const qs = new URLSearchParams()
+                  if (past !== 'all') qs.set('since', past)
+                  const r = await fetch(`/api/importer/logs?${qs.toString()}`)
                   if (r.ok) {
                     const j = (await r.json()) as { logs?: LogRow[] }
                     if (Array.isArray(j.logs)) setLogItems(j.logs)
+                    // reset cursor based on newest batch
+                    const last = j.logs && j.logs[j.logs.length - 1]
+                    setCursor(last ? last.at : null)
                   }
                 } catch {
                   // ignore
@@ -270,11 +338,50 @@ export default function GlobalLogList({
               }}
               onLogs={rows => {
                 if (Array.isArray(rows)) setLogItems(rows)
+                const last = rows && rows[rows.length - 1]
+                setCursor(last ? last.at : null)
               }}
             />
           </InlineStack>
-        </InlineStack>
+        </Filters>
         <Divider />
+        {/* Active runs strip */}
+        {(() => {
+          const latestByRun = new Map<string, LogRow>()
+          for (const l of logItems) {
+            const prev = latestByRun.get(l.runId)
+            if (!prev || prev.at < l.at) latestByRun.set(l.runId, l)
+          }
+          const actives = [...latestByRun.values()].filter(
+            x => x.type.startsWith('prepare:') && x.type !== 'prepare:done' && x.type !== 'prepare:error',
+          )
+          if (!actives.length) return null
+          return (
+            <Box padding="150" borderWidth="025" borderColor="border" borderRadius="050">
+              <InlineStack gap="300" align="start">
+                <Text as="h3" variant="headingSm">
+                  Active runs
+                </Text>
+                {actives.slice(0, 6).map(a => (
+                  <InlineStack key={a.runId} gap="150" align="center">
+                    <Badge>{templateNames[a.templateId] || a.templateId}</Badge>
+                    <Text as="span" tone="subdued" variant="bodySm">
+                      {a.runId}
+                    </Text>
+                    <Text as="span" tone="subdued" variant="bodySm">
+                      {rel(a.at)}
+                    </Text>
+                  </InlineStack>
+                ))}
+                {actives.length > 6 ? (
+                  <Text as="span" tone="subdued" variant="bodySm">
+                    +{actives.length - 6} more
+                  </Text>
+                ) : null}
+              </InlineStack>
+            </Box>
+          )
+        })()}
         {[...grouped.entries()].map(([tpl, rows]) => {
           const resourceName = { singular: 'log', plural: 'logs' }
           const displayName = templateNames[tpl] || tpl
@@ -347,11 +454,54 @@ export default function GlobalLogList({
                           >
                             {isOpen ? 'Hide' : 'Details'}
                           </Button>
+                          <Button
+                            variant="plain"
+                            accessibilityLabel="Copy payload"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(JSON.stringify(r.payload ?? null, null, 2))
+                              } catch {
+                                // ignore
+                              }
+                            }}
+                          >
+                            Copy
+                          </Button>
                         </IndexTable.Cell>
                       </IndexTable.Row>
                     )
                   })}
                 </IndexTable>
+                {/* Load older */}
+                <InlineStack align="center">
+                  <Button
+                    loading={loadingMore}
+                    onClick={async () => {
+                      if (!cursor) return
+                      setLoadingMore(true)
+                      try {
+                        const qs = new URLSearchParams()
+                        qs.set('before', cursor)
+                        if (past !== 'all') qs.set('since', past)
+                        const r = await fetch(`/api/importer/logs?${qs.toString()}`)
+                        if (r.ok) {
+                          const j = (await r.json()) as { logs?: LogRow[] }
+                          if (Array.isArray(j.logs) && j.logs.length) {
+                            setLogItems(cur => [...cur, ...j.logs!])
+                            const last = j.logs[j.logs.length - 1]
+                            setCursor(last ? last.at : cursor)
+                          }
+                        }
+                      } catch {
+                        // ignore
+                      } finally {
+                        setLoadingMore(false)
+                      }
+                    }}
+                  >
+                    Load older
+                  </Button>
+                </InlineStack>
               </BlockStack>
             </Box>
           )
