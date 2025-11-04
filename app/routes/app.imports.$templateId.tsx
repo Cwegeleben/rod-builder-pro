@@ -62,7 +62,14 @@ export default function ImportSettings() {
   const [overwriteModalOpen, setOverwriteModalOpen] = React.useState<boolean>(false)
   const [overwriteStagedCount, setOverwriteStagedCount] = React.useState<number>(0)
   const [overwriteConfirmLoading, setOverwriteConfirmLoading] = React.useState<boolean>(false)
+  const [overwriteForceClear, setOverwriteForceClear] = React.useState<boolean>(false)
   const overwriteContinueRef = React.useRef<null | (() => Promise<void>)>(null)
+  // Clear staging modal state
+  const [clearModalOpen, setClearModalOpen] = React.useState<boolean>(false)
+  const [clearLoading, setClearLoading] = React.useState<boolean>(false)
+  const [clearCount, setClearCount] = React.useState<number | null>(null)
+  const [clearError, setClearError] = React.useState<string | null>(null)
+  const [showClearedToast, setShowClearedToast] = React.useState<boolean>(false)
   // <!-- END RBP GENERATED: importer-save-settings-v1 -->
   // Single source of truth: the editor text. We'll parse it as needed.
   const seeds = React.useMemo(() => parseSeeds(seedsText), [seedsText])
@@ -180,12 +187,14 @@ export default function ImportSettings() {
       })()
       if (!ok) return
       // Kick off background prepare to crawl and stage
-      const startPrepare = async (confirmOverwrite?: boolean) => {
+      const startPrepare = async (confirmOverwrite?: boolean, forceClear?: boolean) => {
         const resp = await fetch('/api/importer/prepare', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(
-            confirmOverwrite ? { templateId, confirmOverwrite: true, skipSuccessful } : { templateId, skipSuccessful },
+            confirmOverwrite
+              ? { templateId, confirmOverwrite: true, skipSuccessful, overwriteExisting: Boolean(forceClear) }
+              : { templateId, skipSuccessful },
           ),
         })
         return { resp, data: (await resp.json()) as Record<string, unknown> }
@@ -195,8 +204,9 @@ export default function ImportSettings() {
         // Open Polaris modal to confirm overwrite
         const staged = (data as { stagedCount?: number }).stagedCount || 0
         setOverwriteStagedCount(staged)
+        setOverwriteForceClear(false)
         overwriteContinueRef.current = async () => {
-          const res2 = await startPrepare(true)
+          const res2 = await startPrepare(true, overwriteForceClear)
           const resp2 = res2.resp
           const data2 = res2.data
           if (!resp2.ok || !(data2 as { runId?: string }).runId) {
@@ -307,6 +317,11 @@ export default function ImportSettings() {
         {showSavedToast ? (
           <Frame>
             <Toast content="Settings saved" onDismiss={() => setShowSavedToast(false)} duration={2000} />
+          </Frame>
+        ) : null}
+        {showClearedToast ? (
+          <Frame>
+            <Toast content="Cleared staged rows" onDismiss={() => setShowClearedToast(false)} duration={3000} />
           </Frame>
         ) : null}
         {/* <!-- BEGIN RBP GENERATED: importer-save-settings-v1 --> */}
@@ -462,6 +477,35 @@ export default function ImportSettings() {
               >
                 Save and Crawl
               </Button>
+              <Button
+                tone="critical"
+                variant="secondary"
+                disabled={!templateId}
+                onClick={async () => {
+                  if (!templateId) return
+                  setClearError(null)
+                  setClearLoading(true)
+                  try {
+                    // First, dry-run to get a count and then open confirm modal
+                    const r = await fetch('/api/importer/staging/clear', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ templateId, dryRun: true }),
+                    })
+                    const d = (await r.json()) as { ok?: boolean; count?: number; error?: string }
+                    if (!r.ok || !d?.ok) throw new Error(d?.error || 'Failed to estimate staged rows')
+                    setClearCount(typeof d.count === 'number' ? d.count : 0)
+                    setClearModalOpen(true)
+                  } catch (err) {
+                    setClearError((err as Error)?.message || 'Failed to estimate staged rows')
+                  } finally {
+                    setClearLoading(false)
+                  }
+                }}
+                loading={clearLoading}
+              >
+                Clear staging…
+              </Button>
               <Text as="span" tone="subdued">
                 {seeds.length === 0 ? 'Add or discover seeds to enable.' : `${seeds.length} seed(s) will be used.`}
               </Text>
@@ -511,6 +555,78 @@ export default function ImportSettings() {
             >
               <Modal.Section>
                 <Text as="p">This will overwrite {overwriteStagedCount} staged item(s). Continue?</Text>
+                <div style={{ marginTop: 12 }}>
+                  <Checkbox
+                    label="Force fresh staging (delete all staged rows before running)"
+                    checked={overwriteForceClear}
+                    onChange={val => setOverwriteForceClear(Boolean(val))}
+                    helpText="Best-effort wipe of existing staged rows for this supplier before the new run."
+                  />
+                </div>
+              </Modal.Section>
+            </Modal>
+          </Frame>
+        ) : null}
+
+        {/* Clear staging confirmation modal */}
+        {clearModalOpen ? (
+          <Frame>
+            <Modal
+              open
+              title="Clear staged rows?"
+              onClose={() => {
+                setClearModalOpen(false)
+                setClearError(null)
+                setClearCount(null)
+              }}
+              primaryAction={{
+                content: clearCount ? `Delete ${clearCount} row(s)` : 'Delete',
+                destructive: true,
+                onAction: async () => {
+                  if (!templateId) return
+                  setClearLoading(true)
+                  try {
+                    const r = await fetch('/api/importer/staging/clear', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ templateId }),
+                    })
+                    const d = (await r.json()) as { ok?: boolean; deleted?: number; error?: string }
+                    if (!r.ok || !d?.ok) throw new Error(d?.error || 'Failed to clear staged rows')
+                    setShowClearedToast(true)
+                  } catch (err) {
+                    setClearError((err as Error)?.message || 'Failed to clear staged rows')
+                  } finally {
+                    setClearLoading(false)
+                    setClearModalOpen(false)
+                    setClearCount(null)
+                  }
+                },
+                loading: clearLoading,
+              }}
+              secondaryActions={[{ content: 'Cancel', onAction: () => setClearModalOpen(false) }]}
+            >
+              <Modal.Section>
+                {clearError ? (
+                  <Banner tone="critical" title="Clear failed">
+                    <p>{clearError}</p>
+                  </Banner>
+                ) : null}
+                <Text as="p">
+                  This will remove all staged rows for this template's supplier
+                  {siteId ? (
+                    <>
+                      {' '}
+                      (<code>{siteId}</code>)
+                    </>
+                  ) : null}
+                  .
+                </Text>
+                {typeof clearCount === 'number' ? (
+                  <Text as="p" tone="subdued">
+                    {clearCount} row(s) currently staged.
+                  </Text>
+                ) : null}
               </Modal.Section>
             </Modal>
           </Frame>
