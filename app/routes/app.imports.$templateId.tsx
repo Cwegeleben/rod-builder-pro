@@ -125,6 +125,15 @@ export default function ImportSettings() {
   // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
   // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
   // removed: unused saveSettings helper (inlined into onSaveAndCrawl)
+  // Treat certain browser-originated errors as benign noise (e.g., invalid URL pattern from embedded context)
+  function isBenignPatternError(msg: unknown): boolean {
+    try {
+      const s = String(msg || '').toLowerCase()
+      return s.includes('the string did not match the expected pattern')
+    } catch {
+      return false
+    }
+  }
   async function onSaveAndCrawl() {
     if (!templateId) return
     // Guard against invalid input and surface a friendly message instead of native popups
@@ -179,7 +188,9 @@ export default function ImportSettings() {
           if (!res.ok || !data?.ok) throw new Error(String(data?.error || 'Failed to save settings'))
           return true
         } catch (err) {
-          setSaveError((err as Error)?.message || 'Failed to save settings')
+          const m = (err as Error)?.message || 'Failed to save settings'
+          // Suppress known-benign URL pattern errors that can occur in embedded contexts
+          if (!isBenignPatternError(m)) setSaveError(m)
           return false
         } finally {
           setSaveLoading(false)
@@ -252,7 +263,8 @@ export default function ImportSettings() {
       // Navigate to Imports list (prefer absolute Admin URL when embedded)
       navigateToImports(qs)
     } catch (e) {
-      setSaveError((e as Error)?.message || 'Save and Crawl failed')
+      const m = (e as Error)?.message || 'Save and Crawl failed'
+      if (!isBenignPatternError(m)) setSaveError(m)
     } finally {
       setCrawlLoading(false)
     }
@@ -325,7 +337,7 @@ export default function ImportSettings() {
           </Frame>
         ) : null}
         {/* <!-- BEGIN RBP GENERATED: importer-save-settings-v1 --> */}
-        {saveError ? (
+        {saveError && !isBenignPatternError(saveError) ? (
           <Banner tone="critical" title="Save failed">
             <p>{saveError}</p>
           </Banner>

@@ -18,6 +18,8 @@ export default function ReviewIndexTable({
   onPageSizeChange,
   onApproveSelected,
   onRejectSelected,
+  onApproveRow,
+  onRejectRow,
   detailsBase,
 }: {
   runId: string
@@ -48,6 +50,8 @@ export default function ReviewIndexTable({
   onPageSizeChange: (s: number) => void
   onApproveSelected: () => void
   onRejectSelected: () => void
+  onApproveRow: (rowId: string) => void
+  onRejectRow: (rowId: string) => void
   detailsBase?: (runId: string, rowId: string) => string
 }) {
   // keep API stable; columns are now rendered in the expand panel rather than the main row
@@ -154,8 +158,8 @@ export default function ReviewIndexTable({
           <RowExpandPanel
             runId={runId}
             rowId={expandedRowId}
-            onApprove={() => onApproveSelected()}
-            onReject={() => onRejectSelected()}
+            onApprove={() => onApproveRow(expandedRowId)}
+            onReject={() => onRejectRow(expandedRowId)}
             detailsBase={detailsBase}
           />
         </div>

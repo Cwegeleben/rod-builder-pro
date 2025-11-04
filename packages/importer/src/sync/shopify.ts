@@ -8,6 +8,7 @@ import Shopify from 'shopify-api-node'
 import { prisma } from '../../../../app/db.server'
 
 const NS = 'rbp'
+const SPEC_NS = 'rbp.spec'
 
 export type ShopCfg = {
   shopName: string
@@ -83,6 +84,62 @@ async function upsertProductMetafield(
   } else {
     await withRetry(() => shopify.metafield.update(found.id, { type, value }))
   }
+}
+
+function toNumber(val: unknown): number | null {
+  if (val == null) return null
+  if (typeof val === 'number' && Number.isFinite(val)) return val
+  if (typeof val === 'string') {
+    const n = Number(val)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+function extractPriceFields(after: any): { price: string | undefined; compare_at_price: string | undefined } {
+  const pWh = toNumber(after?.priceWh)
+  const pMsrp = toNumber(after?.priceMsrp)
+  const priceNum = pWh ?? pMsrp ?? null
+  let compareNum: number | null = null
+  if (pMsrp != null && priceNum != null && pMsrp > priceNum) compareNum = pMsrp
+  // Only use compare_at_price when strictly greater than price
+  const price = priceNum != null ? priceNum.toFixed(2) : undefined
+  const compare_at_price = compareNum != null ? compareNum.toFixed(2) : undefined
+  return { price, compare_at_price }
+}
+
+function gramsFromSpec(spec: any): number | undefined {
+  const oz = toNumber(spec?.weight_oz)
+  if (oz == null) return undefined
+  const grams = Math.round(oz * 28.3495)
+  return Number.isFinite(grams) ? grams : undefined
+}
+
+function discreteSpecEntries(spec: Record<string, any>): Array<{ key: string; type: string; value: string }> {
+  const mf: Array<{ key: string; type: string; value: string }> = []
+  const push = (key: string, type: string, val: unknown) => {
+    const present = val !== undefined && val !== null && !(Array.isArray(val) && !val.length)
+    if (!present) return
+    const value = Array.isArray(val) ? JSON.stringify(val) : String(val)
+    mf.push({ key, type, value })
+  }
+  // Mirror preview mapper keys where available
+  push('series', 'single_line_text_field', spec.series)
+  push('length_in', 'number_integer', spec.length_in)
+  push('pieces', 'number_integer', spec.pieces)
+  push('color', 'single_line_text_field', spec.color)
+  push('action', 'single_line_text_field', spec.action)
+  push('power', 'single_line_text_field', spec.power)
+  push('material', 'single_line_text_field', spec.material)
+  push('line_lb_min', 'number_integer', spec.line_lb_min)
+  push('line_lb_max', 'number_integer', spec.line_lb_max)
+  push('lure_oz_min', 'number_decimal', spec.lure_oz_min)
+  push('lure_oz_max', 'number_decimal', spec.lure_oz_max)
+  push('weight_oz', 'number_decimal', spec.weight_oz)
+  push('butt_dia_in', 'number_decimal', spec.butt_dia_in)
+  push('tip_top_size', 'single_line_text_field', spec.tip_top_size)
+  push('applications', 'list.single_line_text_field', spec.applications ?? [])
+  return mf
 }
 
 // <!-- BEGIN RBP GENERATED: shopify-sync-images-v1 -->
@@ -192,8 +249,23 @@ export async function upsertShopifyForRun(
       const tags = tagsArr.join(', ')
 
       if (!product) {
+        // Create with a single default variant if available
+        const { price, compare_at_price } = extractPriceFields(after)
+        const grams = gramsFromSpec(specs)
+        const sku = String(after.sku || externalId)
+        const variants = [
+          {
+            sku,
+            price,
+            compare_at_price,
+            grams,
+            taxable: true,
+            inventory_policy: 'deny' as const,
+            inventory_management: null,
+          },
+        ]
         product = await withRetry(() =>
-          shopify.product.create({ title, body_html, vendor, product_type, handle, tags }),
+          shopify.product.create({ title, body_html, vendor, product_type, handle, tags, variants }),
         )
         const pid = Number(product.id)
         results.push({ externalId, productId: pid, handle, action: 'created' })
@@ -252,6 +324,53 @@ export async function upsertShopifyForRun(
       await upsertProductMetafield(shopify, pid, NS, 'specs', 'json', JSON.stringify(specs))
       await upsertProductMetafield(shopify, pid, NS, 'supplier_external_id', 'single_line_text_field', externalId)
       await upsertProductMetafield(shopify, pid, NS, 'hash', 'single_line_text_field', contentHash)
+
+      // Discrete typed spec metafields under rbp.spec
+      try {
+        const entries = discreteSpecEntries(specs)
+        for (const e of entries) {
+          await upsertProductMetafield(shopify, pid, SPEC_NS, e.key, e.type, e.value)
+        }
+      } catch {
+        // non-fatal
+      }
+
+      // Ensure the single variant reflects price/SKU/grams on updates as well
+      try {
+        const { price, compare_at_price } = extractPriceFields(after)
+        const grams = gramsFromSpec(specs)
+        const sku = String(after.sku || externalId)
+        const variants = Array.isArray((product as any).variants) ? (product as any).variants : []
+        if (variants.length > 0 && variants[0]?.id) {
+          const vid = Number(variants[0].id)
+          await withRetry(() =>
+            shopify.productVariant.update(vid, {
+              sku,
+              price,
+              compare_at_price,
+              grams,
+              taxable: true,
+              inventory_policy: 'deny',
+              inventory_management: null,
+            }),
+          )
+        } else {
+          // If no variant exists for some reason, create one
+          await withRetry(() =>
+            shopify.productVariant.create(pid, {
+              sku,
+              price,
+              compare_at_price,
+              grams,
+              taxable: true,
+              inventory_policy: 'deny',
+              inventory_management: null,
+            }),
+          )
+        }
+      } catch {
+        // non-fatal
+      }
 
       // <!-- BEGIN RBP GENERATED: shopify-sync-images-v1 -->
       // Images v1: pass-through by src, dedupe by remembered source URLs

@@ -194,6 +194,20 @@ export default function ReviewRunRoute() {
     }
   }
 
+  async function singleAction(id: string, kind: 'approve' | 'reject') {
+    if (!id) return
+    const resp = await fetch(`/api/importer/runs/${run.id}/${kind}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [id] }),
+    })
+    if (resp.ok) {
+      setToast(kind === 'approve' ? 'Approved' : 'Rejected')
+      fetcher.load(listUrl)
+      // keep current selection as-is
+    }
+  }
+
   const hasConflicts = (data?.totals?.conflicts || 0) > 0
   const approvedCount = (() => {
     const rows = data?.rows || []
@@ -376,6 +390,8 @@ export default function ReviewRunRoute() {
             }}
             onApproveSelected={smokeMode ? () => {} : () => bulkAction('approve')}
             onRejectSelected={smokeMode ? () => {} : () => bulkAction('reject')}
+            onApproveRow={smokeMode ? () => {} : (id: string) => singleAction(id, 'approve')}
+            onRejectRow={smokeMode ? () => {} : (id: string) => singleAction(id, 'reject')}
             detailsBase={
               smokeMode
                 ? (_runId: string, rowId: string) => {
