@@ -256,14 +256,7 @@ export default function ImportSettings() {
     // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
     <Page
       title="Import Settings"
-      subtitle="Target → Seeds → Preview → Debug"
-      primaryAction={{
-        content: 'Save and Crawl',
-        onAction: onSaveAndCrawl,
-        loading: crawlLoading || saveLoading,
-        disabled: crawlLoading || saveLoading,
-      }}
-      secondaryActions={[]}
+      subtitle="Guided flow: 1) Setup → 2) Seeds → 3) Preview → 4) Save & Crawl"
       backAction={{ content: 'Back to Imports', url: `/app/imports${location.search}` }}
     >
       <BlockStack gap="400">
@@ -307,6 +300,18 @@ export default function ImportSettings() {
         {/* <!-- END RBP GENERATED: importer-save-settings-v1 --> */}
         {/* Publish removed; review is launched from the list and auto-stages */}
 
+        {/* Stepper header */}
+        <Card>
+          <BlockStack gap="200">
+            <InlineStack gap="300" blockAlign="center">
+              <Badge tone="success">1. Setup target</Badge>
+              <Badge tone={seeds.length ? 'success' : 'attention'}>2. Seeds</Badge>
+              <Badge tone={preview ? 'success' : 'attention'}>3. Preview</Badge>
+              <Badge tone="attention">4. Save & Crawl</Badge>
+            </InlineStack>
+          </BlockStack>
+        </Card>
+
         {/* Details */}
         <Card>
           <BlockStack gap="300">
@@ -320,7 +325,6 @@ export default function ImportSettings() {
                 onChange={val => setImportName(val)}
                 autoComplete="off"
                 placeholder="e.g., Batson Rod Blanks Crawl"
-                helpText="Give this import a descriptive name."
               />
             </div>
           </BlockStack>
@@ -359,24 +363,13 @@ export default function ImportSettings() {
                   const data = new FormData()
                   data.set('siteId', siteId)
                   data.set('sourceUrl', sourceUrl)
-                  fetcher.submit(data, { method: 'post', action: '/api/importer/crawl/discover' })
-                }}
-              >
-                Discover series
-              </Button>
-              <Button
-                disabled={discovering || !siteId || !sourceUrl}
-                onClick={() => {
-                  const data = new FormData()
-                  data.set('siteId', siteId)
-                  data.set('sourceUrl', sourceUrl)
+                  // Always fetch a quick preview as part of discovery to guide the next step
                   data.set('alsoPreview', '1')
                   fetcher.submit(data, { method: 'post', action: '/api/importer/crawl/discover' })
                 }}
               >
-                Discover + preview first
+                Discover series (with preview)
               </Button>
-              {/* Prepare review moved to Imports list */}
               {discovering ? <Spinner accessibilityLabel="Discovering series" size="small" /> : null}
               <Tooltip content="Static fetch; fallback to headless if empty">
                 <Badge tone={headlessAvailable ? 'success' : 'attention'}>
@@ -408,7 +401,7 @@ export default function ImportSettings() {
                 autoComplete="off"
                 multiline={16}
                 placeholder={seedsFetched.length ? '' : 'Paste one URL per line'}
-                helpText="Edit the discovered list or paste your own. Click Apply to use these for preview/import."
+                helpText="Edit the discovered list or paste your own. Click Use Seeds to update the working set."
               />
               {seedsText ? (
                 <details>
@@ -423,7 +416,7 @@ export default function ImportSettings() {
                     setSeedsOverride(next)
                     setShowAppliedToast(true)
                   }}
-                >{`Apply edits (${parseSeeds(seedsText).length})`}</Button>
+                >{`Use Seeds (${parseSeeds(seedsText).length})`}</Button>
                 <Button
                   onClick={() => {
                     setSeedsOverride(null)
@@ -434,10 +427,9 @@ export default function ImportSettings() {
               </InlineStack>
               {!seedsFetched.length && !seeds.length ? (
                 <Banner tone="warning" title="No seeds yet">
-                  <p>Click Discover to fetch seeds, or paste URLs above and click Apply.</p>
+                  <p>Click Discover to fetch seeds, or paste URLs above and click Use Seeds.</p>
                 </Banner>
               ) : null}
-              {/* Preview URL selector and Open button removed */}
             </BlockStack>
           </BlockStack>
         </Card>
@@ -576,6 +568,32 @@ export default function ImportSettings() {
                 ) : null}
               </BlockStack>
             ) : null}
+          </BlockStack>
+        </Card>
+
+        {/* Step 4: Save & Crawl */}
+        <Card>
+          <BlockStack gap="300">
+            <Text as="h2" variant="headingMd">
+              Save & Crawl
+            </Text>
+            <Text as="p" tone="subdued">
+              This will save the settings (name, selected target, and current seeds) and start a background crawl to
+              prepare a Review. You can track progress from the Imports list.
+            </Text>
+            <InlineStack gap="200" align="start">
+              <Button
+                variant="primary"
+                onClick={onSaveAndCrawl}
+                loading={crawlLoading || saveLoading}
+                disabled={crawlLoading || saveLoading || seeds.length === 0}
+              >
+                Save and Crawl
+              </Button>
+              <Text as="span" tone="subdued">
+                {seeds.length === 0 ? 'Add or discover seeds to enable.' : `${seeds.length} seed(s) will be used.`}
+              </Text>
+            </InlineStack>
           </BlockStack>
         </Card>
 
