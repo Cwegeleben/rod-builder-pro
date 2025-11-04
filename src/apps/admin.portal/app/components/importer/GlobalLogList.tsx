@@ -1,5 +1,5 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Text,
   Badge,
@@ -35,7 +35,7 @@ export default function GlobalLogList({
   const [logItems, setLogItems] = useState<LogRow[]>(items)
   const [hydrated, setHydrated] = useState(false)
   // Defer IndexTable rendering to client to avoid SSR/CSR mismatches in condensed mode
-  useMemo(() => {
+  useEffect(() => {
     setHydrated(true)
   }, [])
   const [filterType, setFilterType] = useState<

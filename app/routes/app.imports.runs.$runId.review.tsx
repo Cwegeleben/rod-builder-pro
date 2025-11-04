@@ -45,6 +45,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const runId = String(params.runId || '')
 
+  // In smoke mode, avoid hitting the DB entirely to prevent 500s if migrations lag
+  if (smokeMode) {
+    const now = new Date().toISOString()
+    return json({ run: { id: runId, supplierId: 'smoke', startedAt: now }, smokeMode: true })
+  }
+
   const run = await prisma.importRun.findUnique({
     where: { id: runId },
     select: { id: true, supplierId: true, startedAt: true },
@@ -60,6 +66,9 @@ export default function ReviewRunRoute() {
     run: { id: string; supplierId: string; startedAt: string }
     smokeMode: boolean
   }
+  // Avoid SSR/CSR mismatches inside Polaris IndexTable by rendering it after mount
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => setHydrated(true), [])
   const [params, setParams] = useSearchParams()
   const smokeToken = useMemo(() => (smokeMode ? params.get('token') || '' : ''), [smokeMode, params])
   const tab = (params.get('tab') as 'unlinked' | 'linked' | 'conflicts' | 'all') || 'all'
@@ -342,41 +351,43 @@ export default function ReviewRunRoute() {
             </BlockStack>
           </Modal.Section>
         </Modal>
-        <ReviewIndexTable
-          runId={run.id}
-          rows={data.rows || []}
-          columns={data.columns || []}
-          page={data.page || page}
-          pageSize={data.pageSize || pageSize}
-          totalPages={data.totalPages || 1}
-          selectedIds={selectedIds}
-          onSelectedIdsChange={setSelectedIds}
-          expandedRowId={expandedRowId}
-          onExpand={setExpandedRowId}
-          onPageChange={(p: number) => {
-            const usp = new URLSearchParams(params)
-            usp.set('page', String(p))
-            setParams(usp)
-          }}
-          onPageSizeChange={(s: number) => {
-            const usp = new URLSearchParams(params)
-            usp.set('pageSize', String(s))
-            usp.set('page', '1')
-            setParams(usp)
-          }}
-          onApproveSelected={smokeMode ? () => {} : () => bulkAction('approve')}
-          onRejectSelected={smokeMode ? () => {} : () => bulkAction('reject')}
-          detailsBase={
-            smokeMode
-              ? (_runId: string, rowId: string) => {
-                  const usp = new URLSearchParams()
-                  usp.set('id', rowId)
-                  if (smokeToken) usp.set('token', smokeToken)
-                  return `/resources/smoke/importer/get-diff?${usp.toString()}`
-                }
-              : undefined
-          }
-        />
+        {hydrated ? (
+          <ReviewIndexTable
+            runId={run.id}
+            rows={data.rows || []}
+            columns={data.columns || []}
+            page={data.page || page}
+            pageSize={data.pageSize || pageSize}
+            totalPages={data.totalPages || 1}
+            selectedIds={selectedIds}
+            onSelectedIdsChange={setSelectedIds}
+            expandedRowId={expandedRowId}
+            onExpand={setExpandedRowId}
+            onPageChange={(p: number) => {
+              const usp = new URLSearchParams(params)
+              usp.set('page', String(p))
+              setParams(usp)
+            }}
+            onPageSizeChange={(s: number) => {
+              const usp = new URLSearchParams(params)
+              usp.set('pageSize', String(s))
+              usp.set('page', '1')
+              setParams(usp)
+            }}
+            onApproveSelected={smokeMode ? () => {} : () => bulkAction('approve')}
+            onRejectSelected={smokeMode ? () => {} : () => bulkAction('reject')}
+            detailsBase={
+              smokeMode
+                ? (_runId: string, rowId: string) => {
+                    const usp = new URLSearchParams()
+                    usp.set('id', rowId)
+                    if (smokeToken) usp.set('token', smokeToken)
+                    return `/resources/smoke/importer/get-diff?${usp.toString()}`
+                  }
+                : undefined
+            }
+          />
+        ) : null}
       </BlockStack>
     </Page>
   )
