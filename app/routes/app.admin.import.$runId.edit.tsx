@@ -1,3 +1,4 @@
+// redirect shim only; do not expand.
 // hq-run-options-scrape-preview-v1
 import { json, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from '@remix-run/node'
 import { useEffect, useState } from 'react'

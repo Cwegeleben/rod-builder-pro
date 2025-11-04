@@ -1,3 +1,4 @@
+// redirect shim only; do not expand.
 // <!-- BEGIN RBP GENERATED: hq-run-detail-tabs-v1 -->
 import { json, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from '@remix-run/node'
 import { useEffect, useMemo, useState } from 'react'

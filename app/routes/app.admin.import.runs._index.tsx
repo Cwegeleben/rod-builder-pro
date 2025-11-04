@@ -1,3 +1,4 @@
+// redirect shim only; do not expand.
 // <!-- BEGIN RBP GENERATED: hq-import-runs-list-v1 -->
 import { redirect, type LoaderFunctionArgs } from '@remix-run/node'
 import { requireHQAccess } from '../services/auth/guards.server'

@@ -1,3 +1,4 @@
+// redirect shim only; do not expand.
 // <!-- BEGIN RBP GENERATED: hq-import-settings-v1 -->
 import { json } from '@remix-run/node'
 import { Outlet } from '@remix-run/react'

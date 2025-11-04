@@ -1,3 +1,4 @@
+// redirect shim only; do not expand.
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { useLoaderData, useLocation } from '@remix-run/react'

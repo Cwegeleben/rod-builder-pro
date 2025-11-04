@@ -1,3 +1,4 @@
+// redirect shim only; do not expand.
 // <!-- BEGIN RBP GENERATED: importer-extractor-templates-v2 -->
 import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from '@remix-run/node'
 import { useEffect, useMemo, useState } from 'react'

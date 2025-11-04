@@ -1,3 +1,4 @@
+// redirect shim only; do not expand.
 import { json, type LoaderFunctionArgs } from '@remix-run/node'
 import { requireHQAccess } from '../services/auth/guards.server'
 import { prisma } from '../db.server'

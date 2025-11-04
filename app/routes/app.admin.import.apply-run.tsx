@@ -1,3 +1,4 @@
+// redirect shim only; do not expand.
 // <!-- BEGIN RBP GENERATED: gateway-token-bridge-v1 -->
 import { json } from '@remix-run/node'
 import type { ActionFunctionArgs } from '@remix-run/node'
