@@ -262,14 +262,21 @@ export default function JobCenter() {
               const pct = Math.max(0, Math.min(100, Math.round((r.progress?.percent as number) || 0)))
               const phase = String(r.progress?.phase || r.status || 'preparing')
               const name = r.templateId ? names[r.templateId] || r.templateId : 'Preparing'
+              const eta =
+                typeof r.progress?.etaSeconds === 'number'
+                  ? Math.max(0, Math.round(r.progress?.etaSeconds || 0))
+                  : undefined
               return (
                 <Card key={r.runId}>
                   <BlockStack gap="200">
                     <InlineStack align="space-between" blockAlign="center">
                       <Text as="span">{name}</Text>
-                      <Text as="span" tone="subdued">
-                        {pct}%
-                      </Text>
+                      <InlineStack gap="200" blockAlign="center">
+                        <Text as="span" tone="subdued">
+                          {pct}%
+                        </Text>
+                        {typeof eta === 'number' ? <Text as="span" tone="subdued">{`• ~${eta}s`}</Text> : null}
+                      </InlineStack>
                     </InlineStack>
                     <Text as="span" tone="subdued">
                       {phase}
