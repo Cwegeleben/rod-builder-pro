@@ -54,7 +54,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             controller.enqueue(encoder.encode(`event: end\n`))
             controller.enqueue(
               encoder.encode(
-                `data: ${JSON.stringify({ ok: true, runId: run.id, templateId, status: run.status })}\n\n`,
+                `data: ${JSON.stringify({ ok: true, runId: run.id, templateId, templateName, status: run.status })}\n\n`,
               ),
             )
             controller.close()
