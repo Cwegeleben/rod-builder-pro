@@ -20,6 +20,8 @@ export function GlobalImportProgress() {
   const [ready, setReady] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
   const [failed, setFailed] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
   const [loading, setLoading] = React.useState<boolean>(true)
+  // Track open EventSources by runId for cleanup and dynamic attach
+  const sourcesRef = React.useRef<Record<string, EventSource>>({})
   React.useEffect(() => {
     let cancelled = false
     async function bootstrap() {
@@ -30,11 +32,13 @@ export function GlobalImportProgress() {
         })
         const jr = (await res.json()) as { templates?: Array<{ preparing?: Preparing | null }> }
         const preps = (jr.templates || []).map(t => t.preparing).filter(Boolean) as Preparing[]
-        // Open an SSE stream for each preparing run
-        const sources: EventSource[] = []
-        preps.forEach(p => {
-          const url = `/api/importer/runs/${encodeURIComponent(p.runId)}/status/stream`
+        // Attach SSE per preparing run, deduplicating via sourcesRef
+        for (const p of preps) {
+          const key = p.runId
+          if (sourcesRef.current[key]) continue
+          const url = `/api/importer/runs/${encodeURIComponent(key)}/status/stream`
           const es = new EventSource(url)
+          sourcesRef.current[key] = es
           es.addEventListener('update', e => {
             if (cancelled) return
             try {
@@ -60,7 +64,7 @@ export function GlobalImportProgress() {
                 })
                 if (data.status === 'failed') {
                   setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
-                } else {
+                } else if (data.status === 'staged') {
                   setReady(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
                 }
               }
@@ -72,6 +76,7 @@ export function GlobalImportProgress() {
               } catch {
                 /* noop */
               }
+              delete sourcesRef.current[key]
             }
           })
           es.addEventListener('error', () => {
@@ -80,18 +85,88 @@ export function GlobalImportProgress() {
             } catch {
               /* noop */
             }
+            delete sourcesRef.current[key]
           })
-          sources.push(es)
-        })
+        }
+        // Periodically poll for new preparing runs to subscribe to
+        const poll = setInterval(async () => {
+          if (cancelled) return
+          try {
+            const r = await fetch('/api/importer/templates?kind=import-templates', {
+              headers: { Accept: 'application/json' },
+            })
+            const j = (await r.json()) as { templates?: Array<{ preparing?: Preparing | null }> }
+            const news = (j.templates || []).map(t => t.preparing?.runId).filter(Boolean) as string[]
+            for (const rid of news) {
+              if (!sourcesRef.current[rid]) {
+                const url2 = `/api/importer/runs/${encodeURIComponent(rid)}/status/stream`
+                const es2 = new EventSource(url2)
+                sourcesRef.current[rid] = es2
+                es2.addEventListener('update', ev => {
+                  if (cancelled) return
+                  try {
+                    const data = JSON.parse((ev as MessageEvent).data) as RunStatus
+                    setRuns(prev => ({ ...prev, [data.runId]: data }))
+                  } catch {
+                    /* ignore */
+                  }
+                })
+                es2.addEventListener('end', ev => {
+                  try {
+                    const data = JSON.parse((ev as MessageEvent).data) as {
+                      ok?: boolean
+                      runId?: string
+                      templateId?: string | null
+                      status?: string
+                    }
+                    if (data?.ok && data.runId) {
+                      setRuns(prev => {
+                        const next = { ...prev }
+                        delete next[data.runId!]
+                        return next
+                      })
+                      if (data.status === 'failed') {
+                        setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                      } else if (data.status === 'staged') {
+                        setReady(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                      }
+                    }
+                  } catch {
+                    /* ignore */
+                  } finally {
+                    try {
+                      es2.close()
+                    } catch {
+                      /* noop */
+                    }
+                    delete sourcesRef.current[rid]
+                  }
+                })
+                es2.addEventListener('error', () => {
+                  try {
+                    es2.close()
+                  } catch {
+                    /* noop */
+                  }
+                  delete sourcesRef.current[rid]
+                })
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }, 2000)
         return () => {
           cancelled = true
-          sources.forEach(s => {
+          clearInterval(poll)
+          Object.values(sourcesRef.current).forEach(s => {
             try {
               s.close()
             } catch {
               /* noop */
             }
           })
+          sourcesRef.current = {}
         }
       } finally {
         setLoading(false)

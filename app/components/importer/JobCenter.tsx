@@ -16,10 +16,10 @@ export default function JobCenter() {
   const [runs, setRuns] = React.useState<Record<string, RunStatus>>({})
   const [names, setNames] = React.useState<Record<string, string>>({})
   const [failed, setFailed] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
+  const sourcesRef = React.useRef<Record<string, EventSource>>({})
 
   React.useEffect(() => {
     let cancelled = false
-    let sources: EventSource[] = []
     ;(async () => {
       try {
         // Seed names and preparing runs
@@ -28,9 +28,10 @@ export default function JobCenter() {
         const rows = jr.templates || []
         setNames(Object.fromEntries(rows.map(r => [r.id, r.name || r.id])))
         const preparing = rows.map(r => r.preparing?.runId).filter(Boolean) as string[]
-        sources.forEach(s => s.close())
-        sources = preparing.map(runId => {
+        for (const runId of preparing) {
+          if (sourcesRef.current[runId]) continue
           const es = new EventSource(`/api/importer/runs/${encodeURIComponent(runId)}/status/stream`)
+          sourcesRef.current[runId] = es
           es.addEventListener('update', e => {
             if (cancelled) return
             try {
@@ -59,6 +60,7 @@ export default function JobCenter() {
               } catch {
                 /* noop */
               }
+              delete sourcesRef.current[runId]
             }
           })
           es.addEventListener('error', () => {
@@ -67,22 +69,91 @@ export default function JobCenter() {
             } catch {
               /* noop */
             }
+            delete sourcesRef.current[runId]
           })
-          return es
-        })
+        }
+        // Poll for new preparing runs and subscribe
+        const poll = setInterval(async () => {
+          if (cancelled) return
+          try {
+            const r = await fetch('/api/importer/templates?kind=import-templates')
+            const j = (await r.json()) as { templates?: TemplateRow[] }
+            const news = (j.templates || []).map(t => t.preparing?.runId).filter(Boolean) as string[]
+            for (const rid of news) {
+              if (!sourcesRef.current[rid]) {
+                const es2 = new EventSource(`/api/importer/runs/${encodeURIComponent(rid)}/status/stream`)
+                sourcesRef.current[rid] = es2
+                es2.addEventListener('update', ev => {
+                  if (cancelled) return
+                  try {
+                    const data = JSON.parse((ev as MessageEvent).data) as RunStatus
+                    setRuns(prev => ({ ...prev, [data.runId]: data }))
+                  } catch {
+                    /* ignore */
+                  }
+                })
+                es2.addEventListener('end', ev => {
+                  try {
+                    const data = JSON.parse((ev as MessageEvent).data) as {
+                      ok?: boolean
+                      runId?: string
+                      templateId?: string | null
+                      status?: string
+                    }
+                    if (data?.ok && data.status === 'failed' && data.runId) {
+                      setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                    }
+                  } catch {
+                    /* ignore */
+                  } finally {
+                    try {
+                      es2.close()
+                    } catch {
+                      /* noop */
+                    }
+                    delete sourcesRef.current[rid]
+                  }
+                })
+                es2.addEventListener('error', () => {
+                  try {
+                    es2.close()
+                  } catch {
+                    /* noop */
+                  }
+                  delete sourcesRef.current[rid]
+                })
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }, 2000)
+        return () => {
+          cancelled = true
+          clearInterval(poll)
+          Object.values(sourcesRef.current).forEach(s => {
+            try {
+              s.close()
+            } catch {
+              /* noop */
+            }
+          })
+          sourcesRef.current = {}
+        }
       } catch {
         /* ignore */
       }
     })()
     return () => {
       cancelled = true
-      sources.forEach(s => {
+      Object.values(sourcesRef.current).forEach(s => {
         try {
           s.close()
         } catch {
           /* noop */
         }
       })
+      sourcesRef.current = {}
     }
   }, [])
 

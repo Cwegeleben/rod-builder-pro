@@ -46,8 +46,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           }
           controller.enqueue(encoder.encode(`event: update\n`))
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`))
-          // Auto-end stream when run is staged or failed
-          if (run.status === 'staged' || run.status === 'failed') {
+          // Auto-end stream when run is staged, failed, or cancelled
+          if (run.status === 'staged' || run.status === 'failed' || run.status === 'cancelled') {
             controller.enqueue(encoder.encode(`event: end\n`))
             controller.enqueue(
               encoder.encode(
