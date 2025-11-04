@@ -178,14 +178,18 @@ export async function action({ request }: ActionFunctionArgs) {
         status: 'queued',
         summary: { preflight: { candidates, etaSeconds, expectedItems }, options },
       })
-      await prisma.importLog.create({
-        data: {
-          templateId,
-          runId: queued.id,
-          type: 'prepare:queued',
-          payload: { candidates, etaSeconds, expectedItems },
-        },
-      })
+      try {
+        await prisma.importLog.create({
+          data: {
+            templateId,
+            runId: queued.id,
+            type: 'prepare:queued',
+            payload: { candidates, etaSeconds, expectedItems },
+          },
+        })
+      } catch {
+        /* ignore logging errors (table may be missing) */
+      }
       return json({ ok: true, queued: true, runId: queued.id, candidates, etaSeconds, expectedItems }, { status: 202 })
     }
   } catch {
@@ -210,28 +214,40 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // Log and start background job (fire-and-forget)
-  await prisma.importLog.create({
-    data: {
-      templateId,
-      runId: run.id,
-      type: 'prepare:start',
-      payload: { candidates, etaSeconds, expectedItems, options },
-    },
-  })
-  // Persist preparing run on template for UI polling
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: run.id } })
-  // Additional preflight report log (sample seeds; discovery moved to background)
   try {
-    const sample = seedUrls.slice(0, 10)
     await prisma.importLog.create({
       data: {
         templateId,
         runId: run.id,
-        type: 'prepare:report',
-        payload: { candidates, etaSeconds, expectedItems, sample },
+        type: 'prepare:start',
+        payload: { candidates, etaSeconds, expectedItems, options },
       },
     })
+  } catch {
+    /* ignore logging errors */
+  }
+  // Persist preparing run on template for UI polling
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: run.id } })
+  } catch {
+    /* ignore missing column/table */
+  }
+  // Additional preflight report log (sample seeds; discovery moved to background)
+  try {
+    const sample = seedUrls.slice(0, 10)
+    try {
+      await prisma.importLog.create({
+        data: {
+          templateId,
+          runId: run.id,
+          type: 'prepare:report',
+          payload: { candidates, etaSeconds, expectedItems, sample },
+        },
+      })
+    } catch {
+      /* ignore logging errors */
+    }
   } catch {
     /* ignore */
   }
