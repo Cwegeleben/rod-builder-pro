@@ -19,6 +19,7 @@ export function GlobalImportProgress() {
   const [runs, setRuns] = React.useState<Record<string, RunStatus>>({})
   const [ready, setReady] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
   const [failed, setFailed] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
+  const [cancelled, setCancelled] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
   const [loading, setLoading] = React.useState<boolean>(true)
   // Track open EventSources by runId for cleanup and dynamic attach
   const sourcesRef = React.useRef<Record<string, EventSource>>({})
@@ -66,6 +67,8 @@ export function GlobalImportProgress() {
                   setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
                 } else if (data.status === 'staged') {
                   setReady(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                } else if (data.status === 'cancelled') {
+                  setCancelled(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
                 }
               }
             } catch {
@@ -129,6 +132,8 @@ export function GlobalImportProgress() {
                         setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
                       } else if (data.status === 'staged') {
                         setReady(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                      } else if (data.status === 'cancelled') {
+                        setCancelled(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
                       }
                     }
                   } catch {
@@ -180,12 +185,21 @@ export function GlobalImportProgress() {
   }, [])
 
   const runList = Object.values(runs).filter(r => r && r.status && r.status !== 'staged' && r.status !== 'failed')
-  if (loading && runList.length === 0 && ready.length === 0 && failed.length === 0) return null
-  if (runList.length === 0 && ready.length === 0 && failed.length === 0) return null
+  if (loading && runList.length === 0 && ready.length === 0 && failed.length === 0 && cancelled.length === 0)
+    return null
+  if (runList.length === 0 && ready.length === 0 && failed.length === 0 && cancelled.length === 0) return null
 
   return (
     <div style={{ position: 'sticky', top: 0, zIndex: 10 }}>
       <BlockStack gap="200">
+        {cancelled.map(r => (
+          <Banner key={`cancel-${r.runId}`} tone="warning" title="Prepare cancelled">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="span">This prepare run was cancelled.</Text>
+              <Button url="/app/imports">View logs</Button>
+            </InlineStack>
+          </Banner>
+        ))}
         {failed.map(r => (
           <Banner key={`failed-${r.runId}`} tone="critical" title="Prepare failed">
             <InlineStack align="space-between" blockAlign="center">

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Card, Button, Text, InlineStack, BlockStack, Banner, Badge } from '@shopify/polaris'
+import { Card, Button, Text, InlineStack, BlockStack, Banner, Badge, Frame, Toast } from '@shopify/polaris'
 
 type RunStatus = {
   runId: string
@@ -16,6 +16,7 @@ export default function JobCenter() {
   const [runs, setRuns] = React.useState<Record<string, RunStatus>>({})
   const [names, setNames] = React.useState<Record<string, string>>({})
   const [failed, setFailed] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
+  const [toast, setToast] = React.useState<string | null>(null)
   const sourcesRef = React.useRef<Record<string, EventSource>>({})
 
   React.useEffect(() => {
@@ -49,8 +50,17 @@ export default function JobCenter() {
                 templateId?: string | null
                 status?: string
               }
-              if (data?.ok && data.status === 'failed' && data.runId) {
-                setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+              if (data?.ok && data.runId) {
+                setRuns(prev => {
+                  const next = { ...prev }
+                  delete next[data.runId!]
+                  return next
+                })
+                if (data.status === 'failed') {
+                  setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                } else if (data.status === 'cancelled') {
+                  setToast('Prepare cancelled')
+                }
               }
             } catch {
               /* ignore */
@@ -100,8 +110,17 @@ export default function JobCenter() {
                       templateId?: string | null
                       status?: string
                     }
-                    if (data?.ok && data.status === 'failed' && data.runId) {
-                      setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                    if (data?.ok && data.runId) {
+                      setRuns(prev => {
+                        const next = { ...prev }
+                        delete next[data.runId!]
+                        return next
+                      })
+                      if (data.status === 'failed') {
+                        setFailed(prev => [{ runId: data.runId!, templateId: data.templateId }, ...prev].slice(0, 3))
+                      } else if (data.status === 'cancelled') {
+                        setToast('Prepare cancelled')
+                      }
                     }
                   } catch {
                     /* ignore */
@@ -157,11 +176,18 @@ export default function JobCenter() {
     }
   }, [])
 
-  const active = Object.values(runs).filter(r => r.status !== 'staged' && r.status !== 'failed')
+  const active = Object.values(runs).filter(
+    r => r.status !== 'staged' && r.status !== 'failed' && r.status !== 'cancelled',
+  )
   const count = active.length
 
   return (
     <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 20 }}>
+      {toast ? (
+        <Frame>
+          <Toast content={toast} duration={1800} onDismiss={() => setToast(null)} />
+        </Frame>
+      ) : null}
       <InlineStack gap="100" align="end" blockAlign="center">
         <Button onClick={() => setOpen(!open)}>Jobs</Button>
         {count > 0 ? <Badge tone="attention">{String(count)}</Badge> : null}
