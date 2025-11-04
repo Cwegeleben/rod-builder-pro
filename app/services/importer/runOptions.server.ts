@@ -439,8 +439,9 @@ async function createDiffRowsForRun(
         images: (s.images as unknown as Prisma.JsonValue) ?? null,
         rawSpecs: (s.rawSpecs as unknown as Prisma.JsonValue) ?? null,
         normSpecs: (s.normSpecs as unknown as Prisma.JsonValue) ?? null,
-        priceMsrp: (s.priceMsrp as unknown as Prisma.JsonValue) ?? null,
-        priceWh: (s.priceWh as unknown as Prisma.JsonValue) ?? null,
+        // Ensure JSON-safe primitives (Decimal -> number)
+        priceMsrp: s.priceMsrp != null ? Number(s.priceMsrp as unknown as number | string) : null,
+        priceWh: s.priceWh != null ? Number(s.priceWh as unknown as number | string) : null,
         // Avoid undefined in JSON payloads; use null or omit
         sourceUrl: null,
       }
@@ -461,8 +462,8 @@ async function createDiffRowsForRun(
         images: (beforeObj['images'] as unknown as Prisma.JsonValue) ?? null,
         rawSpecs: (beforeObj['rawSpecs'] as unknown as Prisma.JsonValue) ?? null,
         normSpecs: (beforeObj['normSpecs'] as unknown as Prisma.JsonValue) ?? null,
-        priceMsrp: (beforeObj['priceMsrp'] as unknown as Prisma.JsonValue) ?? null,
-        priceWh: (beforeObj['priceWh'] as unknown as Prisma.JsonValue) ?? null,
+        priceMsrp: beforeObj['priceMsrp'] != null ? Number(beforeObj['priceMsrp'] as unknown as number | string) : null,
+        priceWh: beforeObj['priceWh'] != null ? Number(beforeObj['priceWh'] as unknown as number | string) : null,
         sourceUrl: (beforeObj['sourceUrl'] as string) ?? null,
       }
       const after: Prisma.JsonObject = {
@@ -472,8 +473,8 @@ async function createDiffRowsForRun(
         images: (s.images as unknown as Prisma.JsonValue) ?? null,
         rawSpecs: (s.rawSpecs as unknown as Prisma.JsonValue) ?? null,
         normSpecs: (s.normSpecs as unknown as Prisma.JsonValue) ?? null,
-        priceMsrp: (s.priceMsrp as unknown as Prisma.JsonValue) ?? null,
-        priceWh: (s.priceWh as unknown as Prisma.JsonValue) ?? null,
+        priceMsrp: s.priceMsrp != null ? Number(s.priceMsrp as unknown as number | string) : null,
+        priceWh: s.priceWh != null ? Number(s.priceWh as unknown as number | string) : null,
         // omit undefined fields to keep JSON serializable
       }
       rows.push({ externalId: s.externalId, diffType: 'change', before: beforeJson, after })
@@ -491,8 +492,8 @@ async function createDiffRowsForRun(
         images: (exObj['images'] as unknown as Prisma.JsonValue) ?? null,
         rawSpecs: (exObj['rawSpecs'] as unknown as Prisma.JsonValue) ?? null,
         normSpecs: (exObj['normSpecs'] as unknown as Prisma.JsonValue) ?? null,
-        priceMsrp: (exObj['priceMsrp'] as unknown as Prisma.JsonValue) ?? null,
-        priceWh: (exObj['priceWh'] as unknown as Prisma.JsonValue) ?? null,
+        priceMsrp: exObj['priceMsrp'] != null ? Number(exObj['priceMsrp'] as unknown as number | string) : null,
+        priceWh: exObj['priceWh'] != null ? Number(exObj['priceWh'] as unknown as number | string) : null,
         sourceUrl: (exObj['sourceUrl'] as string) ?? null,
       }
       rows.push({ externalId: exId, diffType: 'delete', before: beforeJson, after: null })
