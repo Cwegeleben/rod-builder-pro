@@ -189,7 +189,9 @@ export async function startImportFromOptions(
         const title = String(r.raw.model || r.raw.code || '')
         const partType = 'Rod Blank'
         const description = ''
-        const images: string[] = []
+        const images: string[] = Array.from(
+          new Set([...((r.spec as unknown as { images?: string[] })?.images || [])]),
+        ).filter(Boolean) as string[]
         const rawSpecs = { raw: r.raw, spec: r.spec }
         const normSpecs = { ...r.spec, availability: r.raw.availability }
         // Sanitize price fields: accept only numeric; strip currency and fallback to null

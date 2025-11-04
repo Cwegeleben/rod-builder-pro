@@ -31,6 +31,8 @@ export type BlankSpec = {
   butt_dia_in?: number
   tip_top_size?: string
   applications?: string[]
+  // Series/page-level images propagated to each item
+  images?: string[]
 }
 
 const fractionToFloat = (s: string) => {
@@ -82,8 +84,38 @@ function mapLabelKey(label: string): string {
   return L
 }
 
-export function extractBatsonAttributeGrid(html: string) {
+export function extractBatsonAttributeGrid(html: string, baseUrl?: string) {
   const $ = cheerio.load(html)
+  // Resolve absolute URLs with a safe base
+  const base = (() => {
+    try {
+      return baseUrl ? new URL(baseUrl).origin : 'https://batsonenterprises.com'
+    } catch {
+      return 'https://batsonenterprises.com'
+    }
+  })()
+  const toAbs = (src: string | undefined | null): string | null => {
+    if (!src) return null
+    try {
+      return new URL(src, base).toString()
+    } catch {
+      return src
+    }
+  }
+
+  // Detect a single series-level image to attach to all rows on the page
+  const pickSeriesImage = (): string | null => {
+    const og = $('meta[property="og:image"]').attr('content')
+    if (og) return toAbs(og)
+    const main = $('#product-detail-gallery-main-img').attr('src')
+    if (main) return toAbs(main)
+    const firstGallery = $('.product-image img').attr('src') || $('.product-detail-gallery img').attr('src')
+    if (firstGallery) return toAbs(firstGallery)
+    const anyImg = $('img').first().attr('src')
+    if (anyImg) return toAbs(anyImg)
+    return null
+  }
+  const seriesImg = pickSeriesImage()
   const rows: BatsonGridRowRaw[] = []
   $('table.table.attribute-grid tbody tr').each((_i, tr) => {
     const $tr = $(tr)
@@ -188,6 +220,7 @@ export function extractBatsonAttributeGrid(html: string) {
           break
       }
     }
+    if (seriesImg) n.images = [seriesImg]
     return { raw: r, spec: n }
   })
 
