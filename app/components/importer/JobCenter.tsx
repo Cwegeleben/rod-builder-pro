@@ -91,7 +91,7 @@ export default function JobCenter() {
 
   return (
     <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 20 }}>
-      <InlineStack gap="200" align="end">
+      <InlineStack gap="100" align="end" blockAlign="center">
         <Button onClick={() => setOpen(!open)}>Jobs</Button>
         {count > 0 ? <Badge tone="attention">{String(count)}</Badge> : null}
       </InlineStack>
