@@ -7,6 +7,8 @@ type RunStatus = {
   templateId?: string | null
   templateName?: string | null
   progress?: { phase?: string; percent?: number; etaSeconds?: number } | null
+  startedAt?: string
+  finishedAt?: string | null
 }
 
 type Preparing = { runId: string; startedAt?: string; etaSeconds?: number }
@@ -30,6 +32,19 @@ export default function JobCenter() {
     if (h > 0) return `${h}h${m ? ` ${m}m` : ''}`
     if (m > 0) return `${m}m${s ? ` ${s}s` : ''}`
     return `${s}s`
+  }, [])
+
+  // Relative started-at formatter: "Started 5m ago", "Started 2h 3m ago"
+  const formatStartedAgo = React.useCallback((startedAt?: string) => {
+    if (!startedAt) return null
+    const t = Date.parse(startedAt)
+    if (!Number.isFinite(t)) return null
+    const diff = Math.max(0, Math.floor((Date.now() - t) / 1000))
+    const h = Math.floor(diff / 3600)
+    const m = Math.floor((diff % 3600) / 60)
+    if (h > 0) return `Started ${h}h${m ? ` ${m}m` : ''} ago`
+    if (m > 0) return `Started ${m}m ago`
+    return 'Started just now'
   }, [])
 
   React.useEffect(() => {
@@ -278,6 +293,7 @@ export default function JobCenter() {
                 typeof r.progress?.etaSeconds === 'number'
                   ? Math.max(0, Math.round(r.progress?.etaSeconds || 0))
                   : undefined
+              const started = r.startedAt
               return (
                 <Card key={r.runId}>
                   <BlockStack gap="200">
@@ -292,9 +308,12 @@ export default function JobCenter() {
                         ) : null}
                       </InlineStack>
                     </InlineStack>
-                    <Text as="span" tone="subdued">
-                      {phase}
-                    </Text>
+                    <InlineStack gap="300" blockAlign="center">
+                      <Text as="span" tone="subdued">
+                        {phase}
+                      </Text>
+                      {started ? <Text as="span" tone="subdued">{`• ${formatStartedAgo(started)}`}</Text> : null}
+                    </InlineStack>
                     <div style={{ height: 6, width: '100%', background: 'var(--p-color-bg-secondary)' }}>
                       <div
                         style={{
@@ -313,18 +332,28 @@ export default function JobCenter() {
                       ) : (
                         <span />
                       )}
-                      <Button
-                        tone="critical"
-                        onClick={async () => {
-                          try {
-                            await fetch(`/api/importer/runs/${encodeURIComponent(r.runId)}/cancel`, { method: 'POST' })
-                          } catch {
-                            /* ignore */
-                          }
-                        }}
-                      >
-                        Cancel
-                      </Button>
+                      <InlineStack gap="100">
+                        <Button
+                          url={r.templateId ? `/app/imports/${r.templateId}` : '/app/imports'}
+                          accessibilityLabel="View logs"
+                        >
+                          View logs
+                        </Button>
+                        <Button
+                          tone="critical"
+                          onClick={async () => {
+                            try {
+                              await fetch(`/api/importer/runs/${encodeURIComponent(r.runId)}/cancel`, {
+                                method: 'POST',
+                              })
+                            } catch {
+                              /* ignore */
+                            }
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </InlineStack>
                     </InlineStack>
                   </BlockStack>
                 </Card>
