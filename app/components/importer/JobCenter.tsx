@@ -211,14 +211,41 @@ export default function JobCenter() {
             <Text as="h3" variant="headingSm">
               Job Center
             </Text>
-            {failed.map(f => (
-              <Banner key={`fail-${f.runId}`} tone="critical" title="Prepare failed">
-                <InlineStack align="space-between" blockAlign="center">
-                  <Text as="span">{`Run ${f.runId.slice(0, 6)}… failed.`}</Text>
-                  <Button url="/app/imports">View logs</Button>
-                </InlineStack>
-              </Banner>
-            ))}
+            {failed.map(f => {
+              const tname = f.templateId ? names[f.templateId] || f.templateId : undefined
+              return (
+                <Banner key={`fail-${f.runId}`} tone="critical" title="Prepare failed">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span">{`Run ${f.runId.slice(0, 6)}… failed${tname ? ` for “${tname}”` : ''}.`}</Text>
+                    <InlineStack gap="200">
+                      {f.templateId ? (
+                        <Button url={`/app/imports/${f.templateId}`}>View logs</Button>
+                      ) : (
+                        <Button url="/app/imports">View logs</Button>
+                      )}
+                      {f.templateId ? (
+                        <Button
+                          variant="primary"
+                          onClick={async () => {
+                            try {
+                              await fetch('/api/importer/prepare', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ templateId: f.templateId, confirmOverwrite: true }),
+                              })
+                            } catch {
+                              /* ignore */
+                            }
+                          }}
+                        >
+                          Retry
+                        </Button>
+                      ) : null}
+                    </InlineStack>
+                  </InlineStack>
+                </Banner>
+              )
+            })}
             {active.length === 0 ? (
               <Text as="span" tone="subdued">
                 No active jobs.

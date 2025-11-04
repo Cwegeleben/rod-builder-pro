@@ -21,6 +21,7 @@ export function GlobalImportProgress() {
   const [failed, setFailed] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
   const [cancelled, setCancelled] = React.useState<Array<{ runId: string; templateId?: string | null }>>([])
   const [loading, setLoading] = React.useState<boolean>(true)
+  const [names, setNames] = React.useState<Record<string, string>>({})
   // Track open EventSources by runId for cleanup and dynamic attach
   const sourcesRef = React.useRef<Record<string, EventSource>>({})
   React.useEffect(() => {
@@ -31,8 +32,12 @@ export function GlobalImportProgress() {
         const res = await fetch('/api/importer/templates?kind=import-templates', {
           headers: { Accept: 'application/json' },
         })
-        const jr = (await res.json()) as { templates?: Array<{ preparing?: Preparing | null }> }
-        const preps = (jr.templates || []).map(t => t.preparing).filter(Boolean) as Preparing[]
+        const jr = (await res.json()) as {
+          templates?: Array<{ id: string; name?: string; preparing?: Preparing | null }>
+        }
+        const templates = Array.isArray(jr.templates) ? jr.templates : []
+        setNames(prev => ({ ...prev, ...Object.fromEntries(templates.map(t => [t.id, t.name || t.id])) }))
+        const preps = templates.map(t => t.preparing).filter(Boolean) as Preparing[]
         // Attach SSE per preparing run, deduplicating via sourcesRef
         for (const p of preps) {
           const key = p.runId
@@ -98,8 +103,12 @@ export function GlobalImportProgress() {
             const r = await fetch('/api/importer/templates?kind=import-templates', {
               headers: { Accept: 'application/json' },
             })
-            const j = (await r.json()) as { templates?: Array<{ preparing?: Preparing | null }> }
-            const news = (j.templates || []).map(t => t.preparing?.runId).filter(Boolean) as string[]
+            const j = (await r.json()) as {
+              templates?: Array<{ id: string; name?: string; preparing?: Preparing | null }>
+            }
+            const tpls = Array.isArray(j.templates) ? j.templates : []
+            setNames(prev => ({ ...prev, ...Object.fromEntries(tpls.map(t => [t.id, t.name || t.id])) }))
+            const news = tpls.map(t => t.preparing?.runId).filter(Boolean) as string[]
             for (const rid of news) {
               if (!sourcesRef.current[rid]) {
                 const url2 = `/api/importer/runs/${encodeURIComponent(rid)}/status/stream`
@@ -203,15 +212,43 @@ export function GlobalImportProgress() {
         {failed.map(r => (
           <Banner key={`failed-${r.runId}`} tone="critical" title="Prepare failed">
             <InlineStack align="space-between" blockAlign="center">
-              <Text as="span">An error occurred while preparing the review.</Text>
-              <Button url="/app/imports">View logs</Button>
+              <Text as="span">
+                {`An error occurred while preparing${r.templateId ? ` “${names[r.templateId] || r.templateId}”` : ''}.`}
+              </Text>
+              <InlineStack gap="200">
+                {r.templateId ? (
+                  <Button url={`/app/imports/${r.templateId}`}>View logs</Button>
+                ) : (
+                  <Button url="/app/imports">View logs</Button>
+                )}
+                {r.templateId ? (
+                  <Button
+                    variant="primary"
+                    onClick={async () => {
+                      try {
+                        await fetch('/api/importer/prepare', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ templateId: r.templateId, confirmOverwrite: true }),
+                        })
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                  >
+                    Retry
+                  </Button>
+                ) : null}
+              </InlineStack>
             </InlineStack>
           </Banner>
         ))}
         {ready.map(r => (
           <Banner key={`ready-${r.runId}`} tone="success" title="Review is ready">
             <InlineStack align="space-between" blockAlign="center">
-              <Text as="span">Staging complete. You can start reviewing changes.</Text>
+              <Text as="span">
+                {`Staging complete${r.templateId ? ` for “${names[r.templateId] || r.templateId}”` : ''}. You can start reviewing changes.`}
+              </Text>
               {r.templateId ? (
                 <Button url={`/app/imports/${r.templateId}/review`} variant="primary">
                   Open Review
