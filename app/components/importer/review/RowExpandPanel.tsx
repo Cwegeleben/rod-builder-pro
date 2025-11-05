@@ -1,6 +1,6 @@
 // <!-- BEGIN RBP GENERATED: importer-review-inline-v1 -->
 import { Card, BlockStack, Text, InlineStack, Badge, Button, Link as PolarisLink } from '@shopify/polaris'
-import { useEffect } from 'react'
+import { useEffect, Fragment } from 'react'
 import { useFetcher } from '@remix-run/react'
 
 export default function RowExpandPanel({
@@ -61,8 +61,8 @@ export default function RowExpandPanel({
               No field changes.
             </Text>
           ) : (
-            fields.map((f, idx) => (
-              <InlineStack key={idx} align="space-between">
+            fields.map(f => (
+              <InlineStack key={f.key} align="space-between">
                 <Text as="span">{f.key}</Text>
                 <Text as="span" tone="subdued">
                   {String(f.before ?? '—')} → {String(f.after ?? '—')}
@@ -94,8 +94,13 @@ export default function RowExpandPanel({
           </InlineStack>
           {Array.isArray(data.images) && data.images.length ? (
             <InlineStack gap="200">
-              {data.images.slice(0, 8).map((src, i) => (
-                <img key={i} src={src} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }} />
+              {data.images.slice(0, 8).map(src => (
+                <img
+                  key={src}
+                  src={src}
+                  alt=""
+                  style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }}
+                />
               ))}
             </InlineStack>
           ) : null}
@@ -107,12 +112,12 @@ export default function RowExpandPanel({
           {data.attributesSubset && Object.keys(data.attributesSubset).length ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8 }}>
               {Object.entries(data.attributesSubset).map(([k, v]) => (
-                <>
+                <Fragment key={k}>
                   <Text as="span" tone="subdued">
                     {k}
                   </Text>
                   <Text as="span">{formatVal(v)}</Text>
-                </>
+                </Fragment>
               ))}
             </div>
           ) : (
