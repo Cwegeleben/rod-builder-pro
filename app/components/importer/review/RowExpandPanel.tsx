@@ -1,6 +1,6 @@
-// <!-- BEGIN RBP GENERATED: importer-review-inline-v1 -->
-import { Card, BlockStack, Text, InlineStack, Badge, Button } from '@shopify/polaris'
-import { useEffect, Fragment } from 'react'
+// <!-- BEGIN RBP GENERATED: importer-review-inline-v2 -->
+import { Card, BlockStack, Text, InlineStack, Badge, Button, DescriptionList, Collapsible } from '@shopify/polaris'
+import { useEffect, Fragment, useMemo, useState } from 'react'
 import { useFetcher } from '@remix-run/react'
 
 export default function RowExpandPanel({
@@ -52,6 +52,58 @@ export default function RowExpandPanel({
     }
   }
   const preview = data.preview
+  const [showAttrs, setShowAttrs] = useState(false)
+  const [showImages, setShowImages] = useState(false)
+
+  const coreItems = useMemo(
+    () =>
+      preview
+        ? [
+            { term: 'Title', description: preview.core.title },
+            { term: 'Vendor', description: preview.core.vendor },
+            { term: 'Type', description: preview.core.product_type },
+            {
+              term: 'Handle',
+              description: (
+                <InlineStack gap="200">
+                  <Text as="span">{preview.core.handle}</Text>
+                  <Button onClick={() => copyToClipboard(preview.core.handle)} accessibilityLabel="Copy handle">
+                    Copy
+                  </Button>
+                </InlineStack>
+              ),
+            },
+            { term: 'Tags', description: preview.core.tags },
+          ]
+        : [],
+    [preview],
+  )
+
+  const variantItems = useMemo(
+    () =>
+      preview
+        ? [
+            {
+              term: 'SKU',
+              description: (
+                <InlineStack gap="200">
+                  <Text as="span">{preview.variant.sku}</Text>
+                  <Button onClick={() => copyToClipboard(preview.variant.sku)} accessibilityLabel="Copy SKU">
+                    Copy
+                  </Button>
+                </InlineStack>
+              ),
+            },
+            ...(preview.variant.price ? [{ term: 'Price', description: `$${preview.variant.price}` }] : []),
+            ...(preview.variant.compare_at_price
+              ? [{ term: 'Compare at', description: `$${preview.variant.compare_at_price}` }]
+              : []),
+            ...(preview.variant.grams != null ? [{ term: 'Weight', description: `${preview.variant.grams} g` }] : []),
+          ]
+        : [],
+    [preview],
+  )
+
   return (
     <Card>
       <BlockStack gap="200">
@@ -80,68 +132,53 @@ export default function RowExpandPanel({
               <Text as="h3" variant="headingSm">
                 Core
               </Text>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 3fr', gap: 8 }}>
-                <Text as="span" tone="subdued">
-                  Title
-                </Text>
-                <Text as="span">{preview.core.title}</Text>
-                <Text as="span" tone="subdued">
-                  Vendor
-                </Text>
-                <Text as="span">{preview.core.vendor}</Text>
-                <Text as="span" tone="subdued">
-                  Type
-                </Text>
-                <Text as="span">{preview.core.product_type}</Text>
-                <Text as="span" tone="subdued">
-                  Handle
-                </Text>
-                <Text as="span">{preview.core.handle}</Text>
-                <Text as="span" tone="subdued">
-                  Tags
-                </Text>
-                <Text as="span">{preview.core.tags}</Text>
-              </div>
+              <DescriptionList items={coreItems} />
             </BlockStack>
             <BlockStack gap="100">
               <Text as="h3" variant="headingSm">
                 Variant
               </Text>
-              <InlineStack gap="400">
-                <Badge>{`SKU: ${preview.variant.sku}`}</Badge>
-                {preview.variant.price ? <Badge tone="success">{`Price: $${preview.variant.price}`}</Badge> : null}
-                {preview.variant.compare_at_price ? (
-                  <Badge tone="warning">{`Compare at: $${preview.variant.compare_at_price}`}</Badge>
-                ) : null}
-                {preview.variant.grams != null ? <Badge>{`Weight: ${preview.variant.grams}g`}</Badge> : null}
-              </InlineStack>
+              <DescriptionList items={variantItems} />
             </BlockStack>
             <BlockStack gap="100">
               <Text as="h3" variant="headingSm">
                 Attributes (metafields)
               </Text>
               {preview.metafields && preview.metafields.length ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 8 }}>
-                  <Text as="span" tone="subdued">
-                    Namespace
-                  </Text>
-                  <Text as="span" tone="subdued">
-                    Key
-                  </Text>
-                  <Text as="span" tone="subdued">
-                    Value
-                  </Text>
-                  {preview.metafields.map(mf => (
-                    <Fragment key={`${mf.namespace}.${mf.key}`}>
-                      <Text as="span">{mf.namespace}</Text>
-                      <InlineStack gap="200">
-                        <Text as="span">{mf.key}</Text>
-                        <Badge>{mf.type}</Badge>
-                      </InlineStack>
-                      <Text as="span">{formatVal(prettyVal(mf))}</Text>
-                    </Fragment>
-                  ))}
-                </div>
+                <BlockStack gap="100">
+                  <InlineStack gap="200">
+                    <Button onClick={() => setShowAttrs(s => !s)}>
+                      {`${showAttrs ? 'Hide' : 'Show'} ${preview.metafields.length} attributes`}
+                    </Button>
+                  </InlineStack>
+                  <Collapsible
+                    open={showAttrs}
+                    id={`attrs-${rowId}`}
+                    transition={{ duration: '200ms', timingFunction: 'ease' }}
+                  >
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 8 }}>
+                      <Text as="span" tone="subdued">
+                        Namespace
+                      </Text>
+                      <Text as="span" tone="subdued">
+                        Key
+                      </Text>
+                      <Text as="span" tone="subdued">
+                        Value
+                      </Text>
+                      {preview.metafields.map(mf => (
+                        <Fragment key={`${mf.namespace}.${mf.key}`}>
+                          <Text as="span">{mf.namespace}</Text>
+                          <InlineStack gap="200">
+                            <Text as="span">{mf.key}</Text>
+                            <Badge>{mf.type}</Badge>
+                          </InlineStack>
+                          <Text as="span">{formatVal(prettyVal(mf))}</Text>
+                        </Fragment>
+                      ))}
+                    </div>
+                  </Collapsible>
+                </BlockStack>
               ) : (
                 <Text as="p" tone="subdued">
                   No attributes.
@@ -154,15 +191,26 @@ export default function RowExpandPanel({
                   Images
                 </Text>
                 <InlineStack gap="200">
-                  {preview.images.slice(0, 8).map(src => (
-                    <img
-                      key={src}
-                      src={src}
-                      alt=""
-                      style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }}
-                    />
-                  ))}
+                  <Button onClick={() => setShowImages(s => !s)}>
+                    {`${showImages ? 'Hide' : 'Show'} ${preview.images.length} images`}
+                  </Button>
                 </InlineStack>
+                <Collapsible
+                  open={showImages}
+                  id={`imgs-${rowId}`}
+                  transition={{ duration: '200ms', timingFunction: 'ease' }}
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 48px)', gap: 8 }}>
+                    {preview.images.slice(0, 24).map(src => (
+                      <img
+                        key={src}
+                        src={src}
+                        alt=""
+                        style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }}
+                      />
+                    ))}
+                  </div>
+                </Collapsible>
               </BlockStack>
             ) : null}
           </>
@@ -184,6 +232,30 @@ export default function RowExpandPanel({
       </BlockStack>
     </Card>
   )
+}
+
+function copyToClipboard(text: string) {
+  try {
+    if (navigator?.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text)
+      return
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  } catch {
+    // no-op
+  }
 }
 
 function formatVal(v: unknown): string {
