@@ -289,16 +289,13 @@ export default function ReviewRunRoute() {
                         if (s.totals) setPublishTotals(s.totals)
                         setPublishEtaMs(typeof s.etaMs === 'number' ? s.etaMs : null)
                         if (s.state === 'published') {
-                          // Redirect once complete; prefer server totals
+                          // Stay on Review: show success and keep list available for re-publish
                           const t = s.totals || publishTotals || { created: 0, updated: 0, skipped: 0, failed: 0 }
-                          const query = new URLSearchParams()
-                          query.set('tag', `importRun:${run.id}`)
-                          query.set('banner', 'publishOk')
-                          query.set('created', String(t.created))
-                          query.set('updated', String(t.updated))
-                          query.set('skipped', String(t.skipped))
-                          query.set('failed', String(t.failed))
-                          window.location.assign(`/app/products?${query.toString()}`)
+                          setToast(
+                            `Published to Shopify — Created ${t.created}, Updated ${t.updated}, Skipped ${t.skipped}, Failed ${t.failed}`,
+                          )
+                          setPolling(false)
+                          setPublishing(false)
                           return
                         }
                       }
