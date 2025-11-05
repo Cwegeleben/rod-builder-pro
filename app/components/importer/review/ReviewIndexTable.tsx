@@ -101,10 +101,22 @@ export default function ReviewIndexTable({
         itemCount={rows.length}
         selectable
         selectedItemsCount={allSelected ? 'All' : selectedIds.length}
-        onSelectionChange={state => {
-          if (Array.isArray(state)) onSelectedIdsChange(state as string[])
-          // @ts-expect-error tolerate legacy 'All' type from Polaris
-          else if (state === 'All') onSelectedIdsChange(allIds)
+        onSelectionChange={(state: unknown) => {
+          // Normalize selection from Polaris: can be string[] | 'All' | {selectionType:'All'}
+          if (Array.isArray(state)) {
+            onSelectedIdsChange(state as string[])
+            return
+          }
+          if (state === 'All') {
+            onSelectedIdsChange(allIds)
+            return
+          }
+          if (state && typeof state === 'object' && (state as { selectionType?: string }).selectionType === 'All') {
+            onSelectedIdsChange(allIds)
+            return
+          }
+          // Fallback: clear selection
+          onSelectedIdsChange([])
         }}
         headings={typedHeadings}
       >

@@ -142,6 +142,111 @@ function discreteSpecEntries(spec: Record<string, any>): Array<{ key: string; ty
   return mf
 }
 
+export type ShopifyPreview = {
+  core: {
+    title: string
+    body_html: string
+    vendor: string
+    product_type: string
+    handle: string
+    tags: string
+  }
+  variant: {
+    sku: string
+    price?: string
+    compare_at_price?: string
+    grams?: number
+    taxable: boolean
+    inventory_policy: 'deny'
+    inventory_management: null
+  }
+  metafields: Array<{ namespace: string; key: string; type: string; value: string }>
+  images: string[]
+}
+
+export function buildShopifyPreview(after: any, runId: string): ShopifyPreview {
+  const supplierId = String(after?.supplierId || 'batson')
+  const externalId = String(after?.externalId)
+  const title = String(after?.title || externalId)
+  const body_html = String(after?.description || '')
+  const product_type = String(after?.partType || 'part')
+  const vendor = supplierId.charAt(0).toUpperCase() + supplierId.slice(1)
+  const handle = buildHandle(supplierId, externalId)
+  const specs = (after?.normSpecs as any) || (after?.rawSpecs as any) || {}
+  const contentHash = String(after?.hashContent || '')
+
+  const { price, compare_at_price } = extractPriceFields(after)
+  const grams = gramsFromSpec(specs)
+  const sku = String(after?.sku || externalId).trim()
+  const tagsArr = [product_type, supplierId, `importRun:${runId}`]
+  const tags = tagsArr.join(', ')
+
+  const metafields: Array<{ namespace: string; key: string; type: string; value: string }> = []
+  metafields.push({ namespace: NS, key: 'specs', type: 'json', value: JSON.stringify(specs) })
+  metafields.push({ namespace: NS, key: 'supplier_external_id', type: 'single_line_text_field', value: externalId })
+  metafields.push({ namespace: NS, key: 'hash', type: 'single_line_text_field', value: contentHash })
+  try {
+    const entries = discreteSpecEntries(specs)
+    for (const e of entries) metafields.push({ namespace: SPEC_NS, key: e.key, type: e.type, value: e.value })
+  } catch {
+    // ignore
+  }
+
+  const imageSrcs: string[] = (Array.isArray(after?.images) ? after.images : [])
+    .map((u: any) => toAbsolute(String(u)))
+    .filter(Boolean) as string[]
+
+  return {
+    core: { title, body_html, vendor, product_type, handle, tags },
+    variant: {
+      sku,
+      price,
+      compare_at_price,
+      grams,
+      taxable: true,
+      inventory_policy: 'deny',
+      inventory_management: null,
+    },
+    metafields,
+    images: imageSrcs,
+  }
+}
+
+export function validateShopifyPreview(p: ShopifyPreview): { ok: boolean; errors: string[] } {
+  const errors: string[] = []
+  const dec = /^-?\d+(?:\.\d+)?$/
+  const int = /^-?\d+$/
+  if (!p.core.title) errors.push('title is required')
+  if (!p.core.handle) errors.push('handle is required')
+  if (p.variant.price != null && !dec.test(p.variant.price)) errors.push('variant.price must be a decimal string')
+  if (p.variant.compare_at_price != null && !dec.test(p.variant.compare_at_price))
+    errors.push('variant.compare_at_price must be a decimal string')
+  if (p.variant.grams != null && !Number.isInteger(p.variant.grams)) errors.push('variant.grams must be an integer')
+  if (!p.variant.sku) errors.push('variant.sku is required')
+  for (const mf of p.metafields) {
+    if (!mf.namespace || !mf.key || !mf.type) errors.push(`metafield missing fields: ${mf.namespace}.${mf.key}`)
+    if (mf.type === 'number_integer' && !int.test(mf.value)) errors.push(`metafield ${mf.key} not integer`)
+    if (mf.type === 'number_decimal' && !dec.test(mf.value)) errors.push(`metafield ${mf.key} not decimal`)
+    if (mf.type?.startsWith('list.')) {
+      try {
+        const v = JSON.parse(mf.value)
+        if (!Array.isArray(v) || v.some(x => typeof x !== 'string'))
+          errors.push(`metafield ${mf.key} list must be array of strings`)
+      } catch {
+        errors.push(`metafield ${mf.key} list must be JSON array string`)
+      }
+    }
+    if (mf.type === 'json') {
+      try {
+        JSON.parse(mf.value)
+      } catch {
+        errors.push(`metafield ${mf.key} json must be valid JSON`)
+      }
+    }
+  }
+  return { ok: errors.length === 0, errors }
+}
+
 // <!-- BEGIN RBP GENERATED: shopify-sync-images-v1 -->
 function toAbsolute(urlStr: string): string | null {
   if (!urlStr) return null
@@ -233,41 +338,23 @@ export async function upsertShopifyForRun(
       }
       if (!after) continue
 
-      const supplierId = String(after.supplierId || 'batson')
-      const externalId = String(after.externalId)
-      const title = String(after.title || externalId)
-      const body_html = String(after.description || '')
-      const product_type = String(after.partType || 'part')
-      const vendor = supplierId.charAt(0).toUpperCase() + supplierId.slice(1)
-      const handle = buildHandle(supplierId, externalId)
-      const specs = (after.normSpecs as any) || (after.rawSpecs as any) || {}
+      const preview = buildShopifyPreview(after, runId)
+      const { ok, errors } = validateShopifyPreview(preview)
+      if (!ok) {
+        throw new Error(`Invalid Shopify payload: ${errors.join('; ')}`)
+      }
+      const { core, variant } = preview
+      const { handle } = core
       const contentHash = String(after.hashContent || '')
 
       let product = await findProductByHandle(shopify, handle)
-      // Shopify REST expects a comma-separated string for tags. Build a stable set.
-      const tagsArr = [product_type, supplierId, `importRun:${runId}`]
-      const tags = tagsArr.join(', ')
 
       if (!product) {
         // Create with a single default variant if available
-        const { price, compare_at_price } = extractPriceFields(after)
-        const grams = gramsFromSpec(specs)
-        const sku = String(after.sku || externalId)
-        const variants = [
-          {
-            sku,
-            price,
-            compare_at_price,
-            grams,
-            taxable: true,
-            inventory_policy: 'deny' as const,
-            inventory_management: null,
-          },
-        ]
-        product = await withRetry(() =>
-          shopify.product.create({ title, body_html, vendor, product_type, handle, tags, variants }),
-        )
+        const variants = [variant]
+        product = await withRetry(() => shopify.product.create({ ...core, variants }))
         const pid = Number(product.id)
+        const externalId = String(after.externalId)
         results.push({ externalId, productId: pid, handle, action: 'created' })
         try {
           await db.importDiff.update({
@@ -295,10 +382,9 @@ export async function upsertShopifyForRun(
         if (prevHash === contentHash) {
           continue
         }
-        await withRetry(() =>
-          shopify.product.update(Number(product.id), { title, body_html, vendor, product_type, tags }),
-        )
+        await withRetry(() => shopify.product.update(Number(product.id), core))
         const pid = Number(product.id)
+        const externalId = String(after.externalId)
         results.push({ externalId, productId: pid, handle, action: 'updated' })
         try {
           await db.importDiff.update({
@@ -321,25 +407,18 @@ export async function upsertShopifyForRun(
       }
 
       const pid = Number(product.id)
-      await upsertProductMetafield(shopify, pid, NS, 'specs', 'json', JSON.stringify(specs))
-      await upsertProductMetafield(shopify, pid, NS, 'supplier_external_id', 'single_line_text_field', externalId)
-      await upsertProductMetafield(shopify, pid, NS, 'hash', 'single_line_text_field', contentHash)
-
-      // Discrete typed spec metafields under rbp.spec
-      try {
-        const entries = discreteSpecEntries(specs)
-        for (const e of entries) {
-          await upsertProductMetafield(shopify, pid, SPEC_NS, e.key, e.type, e.value)
-        }
-      } catch {
-        // non-fatal
+      for (const mf of preview.metafields) {
+        await upsertProductMetafield(shopify, pid, mf.namespace, mf.key, mf.type, mf.value)
       }
 
       // Ensure the single variant reflects price/SKU/grams on updates as well
       try {
-        const { price, compare_at_price } = extractPriceFields(after)
-        const grams = gramsFromSpec(specs)
-        const sku = String(after.sku || externalId)
+        const { price, compare_at_price, grams, sku } = {
+          price: variant.price,
+          compare_at_price: variant.compare_at_price,
+          grams: variant.grams,
+          sku: variant.sku,
+        }
         const variants = Array.isArray((product as any).variants) ? (product as any).variants : []
         if (variants.length > 0 && variants[0]?.id) {
           const vid = Number(variants[0].id)
@@ -374,9 +453,7 @@ export async function upsertShopifyForRun(
 
       // <!-- BEGIN RBP GENERATED: shopify-sync-images-v1 -->
       // Images v1: pass-through by src, dedupe by remembered source URLs
-      const imageSrcs: string[] = (Array.isArray(after.images) ? after.images : [])
-        .map((u: any) => toAbsolute(String(u)))
-        .filter(Boolean) as string[]
+      const imageSrcs: string[] = preview.images
       if (imageSrcs.length) {
         // Read previous image sources metafield (if any)
         const sourcesMf = await readImageSourcesMetafield(shopify, pid, NS)
@@ -387,7 +464,7 @@ export async function upsertShopifyForRun(
 
         if (toCreate.length) {
           // Optional: set alt text from title / externalId
-          const altBase = `${title} (${externalId})`
+          const altBase = `${core.title} (${String(after.externalId)})`
           for (const src of toCreate) {
             try {
               await createProductImageFromSrc(shopify, pid, src, altBase)

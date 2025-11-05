@@ -1,5 +1,5 @@
 // <!-- BEGIN RBP GENERATED: importer-review-inline-v1 -->
-import { Card, BlockStack, Text, InlineStack, Badge, Button, Link as PolarisLink } from '@shopify/polaris'
+import { Card, BlockStack, Text, InlineStack, Badge, Button } from '@shopify/polaris'
 import { useEffect, Fragment } from 'react'
 import { useFetcher } from '@remix-run/react'
 
@@ -20,120 +20,146 @@ export default function RowExpandPanel({
   const fetcher = useFetcher()
   useEffect(() => {
     if (rowId) {
-      const url = detailsBase ? detailsBase(runId, rowId) : `/api/importer/runs/${runId}/staged/${rowId}`
+      const url = detailsBase ? detailsBase(runId, rowId) : `/api/importer/runs/${runId}/preview/${rowId}`
       fetcher.load(url)
     }
   }, [rowId, runId, detailsBase])
   const data = (fetcher.data || {}) as {
-    changedFields?: Array<{
-      key: string
-      before?: unknown
-      after?: unknown
-      confidence?: number
-      class: 'add' | 'update' | 'conflict'
-    }>
-    sourceUrl?: string | null
-    images?: string[]
-    attributesSubset?: Record<string, unknown>
-    priceWh?: number | null
-    priceMsrp?: number | null
-    availability?: string | null
-  }
-  const fields = data.changedFields || []
-  const isValidHttpUrl = (u: unknown): u is string => {
-    if (typeof u !== 'string' || !u) return false
-    try {
-      const url = new URL(u, typeof window !== 'undefined' ? window.location.origin : 'https://example.com')
-      return url.protocol === 'http:' || url.protocol === 'https:'
-    } catch {
-      return false
+    preview?: {
+      core: { title: string; body_html: string; vendor: string; product_type: string; handle: string; tags: string }
+      variant: {
+        sku: string
+        price?: string
+        compare_at_price?: string
+        grams?: number
+        taxable: boolean
+        inventory_policy: 'deny'
+        inventory_management: null
+      }
+      metafields: Array<{ namespace: string; key: string; type: string; value: string }>
+      images: string[]
     }
+    valid?: boolean
+    errors?: string[]
   }
+  const preview = data.preview
   return (
     <Card>
       <BlockStack gap="200">
-        <BlockStack gap="100">
-          <Text as="h3" variant="headingSm">
-            Changes
-          </Text>
-          {fields.length === 0 ? (
-            <Text as="p" tone="subdued">
-              No field changes.
+        {data.valid === false ? (
+          <BlockStack gap="100">
+            <Text as="p" tone="critical">
+              Cannot publish: {data.errors?.join(', ')}
             </Text>
-          ) : (
-            fields.map(f => (
-              <InlineStack key={f.key} align="space-between">
-                <Text as="span">{f.key}</Text>
+          </BlockStack>
+        ) : null}
+        {preview ? (
+          <>
+            <BlockStack gap="100">
+              <Text as="h3" variant="headingSm">
+                Core
+              </Text>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 3fr', gap: 8 }}>
                 <Text as="span" tone="subdued">
-                  {String(f.before ?? '—')} → {String(f.after ?? '—')}
+                  Title
                 </Text>
-                <Badge tone={f.class === 'conflict' ? 'critical' : f.class === 'add' ? 'success' : 'attention'}>
-                  {f.class}
-                </Badge>
+                <Text as="span">{preview.core.title}</Text>
+                <Text as="span" tone="subdued">
+                  Vendor
+                </Text>
+                <Text as="span">{preview.core.vendor}</Text>
+                <Text as="span" tone="subdued">
+                  Type
+                </Text>
+                <Text as="span">{preview.core.product_type}</Text>
+                <Text as="span" tone="subdued">
+                  Handle
+                </Text>
+                <Text as="span">{preview.core.handle}</Text>
+                <Text as="span" tone="subdued">
+                  Tags
+                </Text>
+                <Text as="span">{preview.core.tags}</Text>
+              </div>
+            </BlockStack>
+            <BlockStack gap="100">
+              <Text as="h3" variant="headingSm">
+                Variant
+              </Text>
+              <InlineStack gap="400">
+                <Badge>{`SKU: ${preview.variant.sku}`}</Badge>
+                {preview.variant.price ? <Badge tone="success">{`Price: $${preview.variant.price}`}</Badge> : null}
+                {preview.variant.compare_at_price ? (
+                  <Badge tone="warning">{`Compare at: $${preview.variant.compare_at_price}`}</Badge>
+                ) : null}
+                {preview.variant.grams != null ? <Badge>{`Weight: ${preview.variant.grams}g`}</Badge> : null}
               </InlineStack>
-            ))
-          )}
-        </BlockStack>
-        <BlockStack gap="100">
-          <Text as="h3" variant="headingSm">
-            Metadata
-          </Text>
-          {isValidHttpUrl(data.sourceUrl) ? (
-            <PolarisLink url={data.sourceUrl} target="_blank">
-              Source
-            </PolarisLink>
-          ) : null}
-          <InlineStack gap="400">
-            {data.priceWh != null ? (
-              <Text as="span">Wholesale: ${data.priceWh?.toFixed?.(2) ?? String(data.priceWh)}</Text>
-            ) : null}
-            {data.priceMsrp != null ? (
-              <Text as="span">MSRP: ${data.priceMsrp?.toFixed?.(2) ?? String(data.priceMsrp)}</Text>
-            ) : null}
-            {data.availability ? <Text as="span">Availability: {data.availability}</Text> : null}
-          </InlineStack>
-          {Array.isArray(data.images) && data.images.length ? (
-            <InlineStack gap="200">
-              {data.images.slice(0, 8).map(src => (
-                <img
-                  key={src}
-                  src={src}
-                  alt=""
-                  style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }}
-                />
-              ))}
-            </InlineStack>
-          ) : null}
-        </BlockStack>
-        <BlockStack gap="100">
-          <Text as="h3" variant="headingSm">
-            Attributes
-          </Text>
-          {data.attributesSubset && Object.keys(data.attributesSubset).length ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8 }}>
-              {Object.entries(data.attributesSubset).map(([k, v]) => (
-                <Fragment key={k}>
+            </BlockStack>
+            <BlockStack gap="100">
+              <Text as="h3" variant="headingSm">
+                Attributes (metafields)
+              </Text>
+              {preview.metafields && preview.metafields.length ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 8 }}>
                   <Text as="span" tone="subdued">
-                    {k}
+                    Namespace
                   </Text>
-                  <Text as="span">{formatVal(v)}</Text>
-                </Fragment>
-              ))}
-            </div>
-          ) : (
-            <Text as="p" tone="subdued">
-              No attributes available.
-            </Text>
-          )}
+                  <Text as="span" tone="subdued">
+                    Key
+                  </Text>
+                  <Text as="span" tone="subdued">
+                    Value
+                  </Text>
+                  {preview.metafields.map(mf => (
+                    <Fragment key={`${mf.namespace}.${mf.key}`}>
+                      <Text as="span">{mf.namespace}</Text>
+                      <InlineStack gap="200">
+                        <Text as="span">{mf.key}</Text>
+                        <Badge>{mf.type}</Badge>
+                      </InlineStack>
+                      <Text as="span">{formatVal(prettyVal(mf))}</Text>
+                    </Fragment>
+                  ))}
+                </div>
+              ) : (
+                <Text as="p" tone="subdued">
+                  No attributes.
+                </Text>
+              )}
+            </BlockStack>
+            {Array.isArray(preview.images) && preview.images.length ? (
+              <BlockStack gap="100">
+                <Text as="h3" variant="headingSm">
+                  Images
+                </Text>
+                <InlineStack gap="200">
+                  {preview.images.slice(0, 8).map(src => (
+                    <img
+                      key={src}
+                      src={src}
+                      alt=""
+                      style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }}
+                    />
+                  ))}
+                </InlineStack>
+              </BlockStack>
+            ) : null}
+          </>
+        ) : (
+          <Text as="p" tone="subdued">
+            Loading preview…
+          </Text>
+        )}
+        <BlockStack gap="100">
+          <InlineStack gap="200">
+            {onApprove ? <Button onClick={onApprove}>Approve</Button> : null}
+            {onReject ? (
+              <Button tone="critical" onClick={onReject}>
+                Reject
+              </Button>
+            ) : null}
+          </InlineStack>
         </BlockStack>
-        <InlineStack gap="200">
-          {onApprove ? <Button onClick={onApprove}>Approve</Button> : null}
-          {onReject ? (
-            <Button tone="critical" onClick={onReject}>
-              Reject
-            </Button>
-          ) : null}
-        </InlineStack>
       </BlockStack>
     </Card>
   )
@@ -147,5 +173,24 @@ function formatVal(v: unknown): string {
   } catch {
     return '—'
   }
+}
+
+function prettyVal(mf: { type: string; value: string }): unknown {
+  if (mf.type === 'json') {
+    try {
+      return JSON.parse(mf.value)
+    } catch {
+      return mf.value
+    }
+  }
+  if (mf.type?.startsWith('list.')) {
+    try {
+      const arr = JSON.parse(mf.value)
+      return Array.isArray(arr) ? arr : mf.value
+    } catch {
+      return mf.value
+    }
+  }
+  return mf.value
 }
 // <!-- END RBP GENERATED: importer-review-inline-v1 -->
