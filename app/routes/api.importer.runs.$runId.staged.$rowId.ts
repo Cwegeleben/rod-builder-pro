@@ -8,7 +8,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireHqShopOr404(request)
   const runId = String(params.runId || '')
   const rowId = String(params.rowId || '')
-  const details = await getRowDetails(runId, rowId)
-  return json(details)
+  try {
+    const details = await getRowDetails(runId, rowId)
+    return json(details)
+  } catch (err) {
+    return json({ changedFields: [], error: (err as Error)?.message || 'unknown' })
+  }
 }
 // <!-- END RBP GENERATED: importer-review-inline-v1 -->

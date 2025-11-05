@@ -35,12 +35,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     attribute: attrKey && attrOp && attrVal ? { key: attrKey, operator: attrOp, value: attrVal } : undefined,
   }
 
-  const [columns, totals, list] = await Promise.all([
-    computeColumnsRegistry(runId),
-    computeTotals(runId),
-    queryStagedRows({ runId, tab, page, pageSize, filters }),
-  ])
-
-  return json({ ...list, columns, totals })
+  try {
+    const [columns, totals, list] = await Promise.all([
+      computeColumnsRegistry(runId),
+      computeTotals(runId),
+      queryStagedRows({ runId, tab, page, pageSize, filters }),
+    ])
+    return json({ ...list, columns, totals })
+  } catch (err) {
+    // Defensive: avoid bubbling 500s into the client; return an empty payload with error message
+    const message = (err as Error)?.message || 'unknown'
+    return json({
+      rows: [],
+      columns: [],
+      totals: { unlinked: 0, linked: 0, conflicts: 0, all: 0 },
+      page: 1,
+      pageSize,
+      totalPages: 1,
+      error: message,
+    })
+  }
 }
 // <!-- END RBP GENERATED: importer-review-inline-v1 -->
