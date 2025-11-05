@@ -16,7 +16,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (!after) return json({ error: 'no_after_payload' }, { status: 400 })
     const preview = buildShopifyPreview(after, runId)
     const { ok, errors } = validateShopifyPreview(preview)
-    return json({ preview, valid: ok, errors })
+    // Include any prior publish attempt info for better diagnostics in UI
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const publish = (d as any)?.validation?.publish
+    return json({ preview, valid: ok, errors, publish })
   } catch (err) {
     return json({ error: (err as Error)?.message || 'unknown' }, { status: 500 })
   }

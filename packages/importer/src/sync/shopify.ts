@@ -77,12 +77,20 @@ async function upsertProductMetafield(
 ) {
   const existing = await listProductMetafields(shopify, productId)
   const found = existing.find((m: any) => m.namespace === namespace && m.key === key)
-  if (!found) {
-    await withRetry(() =>
-      shopify.metafield.create({ owner_resource: 'product', owner_id: productId, namespace, key, type, value }),
-    )
-  } else {
-    await withRetry(() => shopify.metafield.update(found.id, { type, value }))
+  try {
+    if (!found) {
+      await withRetry(() =>
+        shopify.metafield.create({ owner_resource: 'product', owner_id: productId, namespace, key, type, value }),
+      )
+    } else {
+      await withRetry(() => shopify.metafield.update(found.id, { type, value }))
+    }
+  } catch (e: any) {
+    const body = e?.response?.body ? safeStringify(e.response.body) : undefined
+    const msg = `metafield upsert failed for ${namespace}.${key}: ${e?.message || e}`
+    const err = new Error(body ? `${msg}; body=${body}` : msg)
+    ;(err as any).statusCode = e?.statusCode || e?.response?.status
+    throw err
   }
 }
 
@@ -216,6 +224,7 @@ export function validateShopifyPreview(p: ShopifyPreview): { ok: boolean; errors
   const errors: string[] = []
   const dec = /^-?\d+(?:\.\d+)?$/
   const int = /^-?\d+$/
+  const noNewlines = /^(?!.*[\r\n]).*$/
   if (!p.core.title) errors.push('title is required')
   if (!p.core.handle) errors.push('handle is required')
   if (p.variant.price != null && !dec.test(p.variant.price)) errors.push('variant.price must be a decimal string')
@@ -223,6 +232,9 @@ export function validateShopifyPreview(p: ShopifyPreview): { ok: boolean; errors
     errors.push('variant.compare_at_price must be a decimal string')
   if (p.variant.grams != null && !Number.isInteger(p.variant.grams)) errors.push('variant.grams must be an integer')
   if (!p.variant.sku) errors.push('variant.sku is required')
+  if (p.variant.sku && (!noNewlines.test(p.variant.sku) || p.variant.sku.length > 255)) {
+    errors.push('variant.sku must be <=255 chars and contain no newlines')
+  }
   for (const mf of p.metafields) {
     if (!mf.namespace || !mf.key || !mf.type) errors.push(`metafield missing fields: ${mf.namespace}.${mf.key}`)
     if (mf.type === 'number_integer' && !int.test(mf.value)) errors.push(`metafield ${mf.key} not integer`)
@@ -241,6 +253,29 @@ export function validateShopifyPreview(p: ShopifyPreview): { ok: boolean; errors
         JSON.parse(mf.value)
       } catch {
         errors.push(`metafield ${mf.key} json must be valid JSON`)
+      }
+    }
+    if (mf.type === 'single_line_text_field') {
+      if (!noNewlines.test(mf.value)) errors.push(`metafield ${mf.key} must not contain newlines`)
+      if (mf.value.length > 255) errors.push(`metafield ${mf.key} must be <=255 chars`)
+    }
+    if (mf.type?.startsWith('list.single_line_text_field')) {
+      try {
+        const arr = JSON.parse(mf.value)
+        if (Array.isArray(arr)) {
+          for (const v of arr) {
+            if (typeof v !== 'string') {
+              errors.push(`metafield ${mf.key} list elements must be strings`)
+              break
+            }
+            if (v.length > 255 || !noNewlines.test(v)) {
+              errors.push(`metafield ${mf.key} list elements must be <=255 chars and no newlines`)
+              break
+            }
+          }
+        }
+      } catch {
+        // already handled
       }
     }
   }
@@ -490,6 +525,7 @@ export async function upsertShopifyForRun(
                 at: new Date().toISOString(),
                 error: String(err?.message || err),
                 status: err?.statusCode || err?.response?.status || null,
+                detail: err?.response?.body ? safeStringify(err.response.body) : undefined,
               },
             } as any,
           },
@@ -515,3 +551,12 @@ export async function upsertShopifyForRun(
   return results
 }
 // <!-- END RBP GENERATED: shopify-sync-v1 -->
+
+function safeStringify(obj: any): string {
+  try {
+    if (typeof obj === 'string') return obj
+    return JSON.stringify(obj)
+  } catch {
+    return String(obj)
+  }
+}

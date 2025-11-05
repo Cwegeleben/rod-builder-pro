@@ -41,6 +41,15 @@ export default function RowExpandPanel({
     }
     valid?: boolean
     errors?: string[]
+    publish?: {
+      at?: string
+      action?: string
+      productId?: number
+      handle?: string
+      error?: string
+      status?: number
+      detail?: unknown
+    }
   }
   const preview = data.preview
   return (
@@ -51,6 +60,18 @@ export default function RowExpandPanel({
             <Text as="p" tone="critical">
               Cannot publish: {data.errors?.join(', ')}
             </Text>
+          </BlockStack>
+        ) : null}
+        {data.publish?.error ? (
+          <BlockStack gap="050">
+            <Text as="p" tone="critical">
+              Last publish error: {data.publish.error}
+            </Text>
+            {data.publish.detail ? (
+              <Text as="p" tone="subdued">
+                {formatVal(data.publish.detail as unknown as string)}
+              </Text>
+            ) : null}
           </BlockStack>
         ) : null}
         {preview ? (
