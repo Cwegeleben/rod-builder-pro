@@ -385,7 +385,28 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                   }}
                 >
                   <InlineStack align="space-between">
-                    <Link url={`/app/imports/${r.templateId}${location.search}`}>{r.name || r.templateId}</Link>
+                    <InlineStack gap="200" blockAlign="center">
+                      <Link url={`/app/imports/${r.templateId}${location.search}`}>{r.name || r.templateId}</Link>
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        {(() => {
+                          const parts: string[] = []
+                          if (typeof r.queuedCount === 'number' && r.queuedCount > 0) parts.push(`(${r.queuedCount})`)
+                          const lastRunAt = (r as unknown as { lastRunAt?: string }).lastRunAt
+                          if (typeof lastRunAt === 'string') {
+                            try {
+                              const t = Date.parse(lastRunAt)
+                              const d = Math.max(0, Math.floor((Date.now() - t) / 1000))
+                              const m = Math.floor(d / 60)
+                              const label = m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`
+                              parts.push(`• Last run ${label}`)
+                            } catch {
+                              /* ignore */
+                            }
+                          }
+                          return parts.join(' ')
+                        })()}
+                      </Text>
+                    </InlineStack>
                     <div>
                       <InlineStack gap="200" blockAlign="center">
                         <ImportRowStateBadge state={r.state} />

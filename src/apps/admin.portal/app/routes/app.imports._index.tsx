@@ -1,9 +1,11 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 import ImportList from '../components/importer/ImportList'
 import GlobalLogList from '../components/importer/GlobalLogList'
+import ActiveImportsTable from '../components/importer/ActiveImportsTable'
+import RecentRunsTable from '../components/importer/RecentRunsTable'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from '@remix-run/react'
-import { Page, BlockStack, Card, InlineStack, Text, Banner } from '@shopify/polaris'
+import { Page, BlockStack, Card, InlineStack, Text, Banner, Divider } from '@shopify/polaris'
 
 type ImportsHomeProps = {
   search?: string
@@ -76,9 +78,24 @@ export default function ImportsHome(props: ImportsHomeProps = {}) {
           <BlockStack gap="300">
             <InlineStack align="space-between">
               <Text as="h2" variant="headingSm">
-                Logs
+                Active imports
               </Text>
             </InlineStack>
+            <ActiveImportsTable />
+          </BlockStack>
+        </Card>
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between">
+              <Text as="h2" variant="headingSm">
+                Recent runs
+              </Text>
+            </InlineStack>
+            <RecentRunsTable />
+            <Divider />
+            <Text as="h3" variant="headingSm">
+              Logs
+            </Text>
             <GlobalLogList items={props.initialLogs} templateNames={props.templateNames} />
           </BlockStack>
         </Card>
