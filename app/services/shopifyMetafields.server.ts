@@ -97,7 +97,7 @@ export async function listProductMetafieldDefinitions(
     if (!list.length) {
       try {
         const gqlUrl = `${apiBase(shopName, client.options?.apiVersion)}/graphql.json`
-        const query = `query defs($ns: String!) { metafieldDefinitions(first: 100, ownerType: PRODUCT, namespace: $ns) { edges { node { id name key namespace type ownerType } } } }`
+        const query = `query defs($ns: String!) { metafieldDefinitions(first: 100, ownerType: PRODUCT, namespace: $ns) { edges { node { id name key namespace ownerType } } } }`
         const gqlResp = await fetch(gqlUrl, {
           method: 'POST',
           headers: {
