@@ -213,7 +213,7 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
         if (shouldGraphQL) {
           try {
             const gqlUrl = `${apiBase(shopName, client.options?.apiVersion)}/graphql.json`
-            const mutation = `mutation defCreate($input: MetafieldDefinitionInput!) { metafieldDefinitionCreate(metafieldDefinition: $input) { metafieldDefinition { id key namespace type ownerType } userErrors { field message code } } }`
+            const mutation = `mutation defCreate($definition: MetafieldDefinitionInput!) { metafieldDefinitionCreate(definition: $definition) { createdDefinition { id key namespace type ownerType } userErrors { field message code } } }`
             const gqlResp = await fetch(gqlUrl, {
               method: 'POST',
               headers: {
@@ -224,7 +224,7 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
               body: JSON.stringify({
                 query: mutation,
                 variables: {
-                  input: {
+                  definition: {
                     name: humanizeKey(key),
                     namespace: SPEC_NS,
                     key,
@@ -239,7 +239,7 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
             type GqlCreateResp = {
               data?: {
                 metafieldDefinitionCreate?: {
-                  metafieldDefinition?: {
+                  createdDefinition?: {
                     id?: string
                     key?: string
                     namespace?: string
@@ -259,7 +259,7 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
             }
             const userErrors: Array<{ message?: string; code?: string }> =
               gqlJson?.data?.metafieldDefinitionCreate?.userErrors || []
-            const createdDef = gqlJson?.data?.metafieldDefinitionCreate?.metafieldDefinition
+            const createdDef = gqlJson?.data?.metafieldDefinitionCreate?.createdDefinition
             if (createdDef && !userErrors.length) {
               created.push(key)
               console.warn('[metafields/create] GraphQL fallback success', { key })
