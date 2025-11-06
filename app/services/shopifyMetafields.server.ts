@@ -76,7 +76,20 @@ export async function listProductMetafieldDefinitions(
         Accept: 'application/json',
       },
     })
-    if (!res.ok) return []
+    let firstBodyText = ''
+    if (!res.ok) {
+      try {
+        firstBodyText = await res.text()
+      } catch {
+        /* ignore */
+      }
+      console.warn('[metafields/list] broad REST failed', {
+        status: res.status,
+        statusText: res.statusText,
+        body: firstBodyText.slice(0, 300),
+      })
+      return []
+    }
     const data = (await res.json()) as { metafield_definitions?: RawMetafieldDefinition[] }
     let list = Array.isArray(data?.metafield_definitions) ? data.metafield_definitions : []
     // If empty, retry with owner_type=product explicitly
@@ -88,9 +101,21 @@ export async function listProductMetafieldDefinitions(
           Accept: 'application/json',
         },
       })
+      let secondBodyText = ''
       if (res2.ok) {
         const data2 = (await res2.json()) as { metafield_definitions?: RawMetafieldDefinition[] }
         list = Array.isArray(data2?.metafield_definitions) ? data2.metafield_definitions : []
+      } else {
+        try {
+          secondBodyText = await res2.text()
+        } catch {
+          /* ignore */
+        }
+        console.warn('[metafields/list] product REST failed', {
+          status: res2.status,
+          statusText: res2.statusText,
+          body: secondBodyText.slice(0, 300),
+        })
       }
     }
     // GraphQL augmentation: query product definitions in our namespace and merge with REST list
@@ -113,6 +138,7 @@ export async function listProductMetafieldDefinitions(
           }
         }
         const edges = body?.data?.metafieldDefinitions?.edges || []
+        console.warn('[metafields/list] gql namespace edges', { count: edges.length })
         const toStr = (v: unknown): string => (v == null ? '' : String(v))
         const toNum = (v: unknown): number => {
           if (typeof v === 'number' && Number.isFinite(v)) return v
@@ -151,6 +177,32 @@ export async function listProductMetafieldDefinitions(
       }
     } catch {
       /* ignore gql fallback errors */
+    }
+    // Additional GraphQL unfiltered product definitions fetch for diagnostics
+    try {
+      const gqlUrl2 = `${apiBase(shopName, client.options?.apiVersion)}/graphql.json`
+      const query2 = `query allProductDefs { metafieldDefinitions(first: 100, ownerType: PRODUCT) { edges { node { id name key namespace ownerType } } } }`
+      const gqlResp2 = await fetch(gqlUrl2, {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ query: query2 }),
+      })
+      if (gqlResp2.ok) {
+        const body2 = (await gqlResp2.json()) as {
+          data?: { metafieldDefinitions?: { edges?: Array<{ node?: Partial<RawMetafieldDefinition> | null }> } }
+        }
+        const edges2 = body2?.data?.metafieldDefinitions?.edges || []
+        console.warn('[metafields/list] gql all product edges', { count: edges2.length })
+      } else {
+        const txt = await gqlResp2.text().catch(() => '')
+        console.warn('[metafields/list] gql all product failed', { status: gqlResp2.status, body: txt.slice(0, 240) })
+      }
+    } catch (e) {
+      console.warn('[metafields/list] gql all product exception', { message: (e as Error).message })
     }
     // Filter to product-only just in case
     return list.filter(d => String(d?.ownerType || '').toLowerCase() === 'product')

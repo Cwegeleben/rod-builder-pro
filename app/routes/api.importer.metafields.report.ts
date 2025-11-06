@@ -9,7 +9,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const target = url.searchParams.get('target') || ''
   if (target !== 'batson-rod-blanks') return json({ error: 'Unsupported target' }, { status: 400 })
   try {
-    const shop = process.env.SHOP_CUSTOM_DOMAIN || process.env.SHOP || ''
+    // Prefer canonical myshopify.com domain if available
+    const shop = process.env.SHOP || process.env.SHOP_CUSTOM_DOMAIN || ''
     if (!shop) throw new Error('SHOP not configured')
     const { accessToken, shopName } = await getAdminClient(shop)
     const report = await getBatsonDefinitionReport(shopName, accessToken)

@@ -11,7 +11,8 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent !== 'create' || target !== 'batson-rod-blanks')
     return json({ error: 'Unsupported intent/target' }, { status: 400 })
   try {
-    const shop = process.env.SHOP_CUSTOM_DOMAIN || process.env.SHOP || ''
+    // Prefer canonical myshopify.com domain if available
+    const shop = process.env.SHOP || process.env.SHOP_CUSTOM_DOMAIN || ''
     if (!shop) throw new Error('SHOP not configured')
     const { accessToken, shopName } = await getAdminClient(shop)
     const res = await createBatsonDefinitions(shopName, accessToken, true)
