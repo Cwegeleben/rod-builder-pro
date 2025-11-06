@@ -93,59 +93,64 @@ export async function listProductMetafieldDefinitions(
         list = Array.isArray(data2?.metafield_definitions) ? data2.metafield_definitions : []
       }
     }
-    // GraphQL fallback for API versions that under-report definitions via REST
-    if (!list.length) {
-      try {
-        const gqlUrl = `${apiBase(shopName, client.options?.apiVersion)}/graphql.json`
-        const query = `query defs($ns: String!) { metafieldDefinitions(first: 100, ownerType: PRODUCT, namespace: $ns) { edges { node { id name key namespace ownerType } } } }`
-        const gqlResp = await fetch(gqlUrl, {
-          method: 'POST',
-          headers: {
-            'X-Shopify-Access-Token': accessToken,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({ query, variables: { ns: 'rbp_spec' } }),
-        })
-        if (gqlResp.ok) {
-          const body = (await gqlResp.json()) as {
-            data?: {
-              metafieldDefinitions?: { edges?: Array<{ node?: Partial<RawMetafieldDefinition> | null | undefined }> }
-            }
+    // GraphQL augmentation: query product definitions in our namespace and merge with REST list
+    try {
+      const gqlUrl = `${apiBase(shopName, client.options?.apiVersion)}/graphql.json`
+      const query = `query defs($ns: String!) { metafieldDefinitions(first: 100, ownerType: PRODUCT, namespace: $ns) { edges { node { id name key namespace ownerType } } } }`
+      const gqlResp = await fetch(gqlUrl, {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ query, variables: { ns: 'rbp_spec' } }),
+      })
+      if (gqlResp.ok) {
+        const body = (await gqlResp.json()) as {
+          data?: {
+            metafieldDefinitions?: { edges?: Array<{ node?: Partial<RawMetafieldDefinition> | null | undefined }> }
           }
-          const edges = body?.data?.metafieldDefinitions?.edges || []
-          const toStr = (v: unknown): string => (v == null ? '' : String(v))
-          const toNum = (v: unknown): number => {
-            if (typeof v === 'number' && Number.isFinite(v)) return v
-            const n = Number(v as string)
-            return Number.isFinite(n) ? n : 0
-          }
-          const nodes = edges
-            .map(e => e.node)
-            .filter((n): n is Partial<RawMetafieldDefinition> => !!n)
-            .map(n => {
-              const node = n as {
-                id?: number | string
-                name?: unknown
-                key?: unknown
-                namespace?: unknown
-                type?: unknown
-                ownerType?: unknown
-              }
-              return {
-                id: toNum(node.id),
-                name: toStr(node.name),
-                key: toStr(node.key),
-                namespace: toStr(node.namespace),
-                type: toStr(node.type),
-                ownerType: toStr(node.ownerType),
-              } as RawMetafieldDefinition
-            })
-          if (nodes.length) list = nodes
         }
-      } catch {
-        /* ignore gql fallback errors */
+        const edges = body?.data?.metafieldDefinitions?.edges || []
+        const toStr = (v: unknown): string => (v == null ? '' : String(v))
+        const toNum = (v: unknown): number => {
+          if (typeof v === 'number' && Number.isFinite(v)) return v
+          const n = Number(v as string)
+          return Number.isFinite(n) ? n : 0
+        }
+        const nodes = edges
+          .map(e => e.node)
+          .filter((n): n is Partial<RawMetafieldDefinition> => !!n)
+          .map(n => {
+            const node = n as {
+              id?: number | string
+              name?: unknown
+              key?: unknown
+              namespace?: unknown
+              type?: unknown
+              ownerType?: unknown
+            }
+            return {
+              id: toNum(node.id),
+              name: toStr(node.name),
+              key: toStr(node.key),
+              namespace: toStr(node.namespace),
+              type: toStr(node.type),
+              ownerType: toStr(node.ownerType),
+            } as RawMetafieldDefinition
+          })
+        if (nodes.length) {
+          const byKey = new Map<string, RawMetafieldDefinition>()
+          for (const d of [...list, ...nodes]) {
+            const k = `${d.namespace}:${d.key}:${String(d.ownerType).toLowerCase()}`
+            byKey.set(k, d)
+          }
+          list = Array.from(byKey.values())
+        }
       }
+    } catch {
+      /* ignore gql fallback errors */
     }
     // Filter to product-only just in case
     return list.filter(d => String(d?.ownerType || '').toLowerCase() === 'product')
