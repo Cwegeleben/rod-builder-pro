@@ -213,9 +213,8 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
         if (shouldGraphQL) {
           try {
             const gqlUrl = `${apiBase(shopName, client.options?.apiVersion)}/graphql.json`
-            // GraphQL mutation: metafieldDefinitionCreate requires a selection set for the nested MetafieldDefinitionType (type { name valueType })
-            // Use metafieldDefinition (per Admin API) instead of createdDefinition; treat presence w/o userErrors as success.
-            const mutation = `mutation CreateMetafieldDefinition($definition: MetafieldDefinitionInput!) {\n  metafieldDefinitionCreate(definition: $definition) {\n    metafieldDefinition { id key namespace name ownerType type { name valueType } }\n    userErrors { field message code }\n  }\n}`
+            // GraphQL mutation: metafieldDefinitionCreate with proper selection set for type
+            const mutation = `mutation CreateMetafieldDefinition($definition: MetafieldDefinitionInput!) {\n  metafieldDefinitionCreate(definition: $definition) {\n    createdDefinition { id key namespace name ownerType type { name valueType } }\n    userErrors { field message code }\n  }\n}`
             const gqlResp = await fetch(gqlUrl, {
               method: 'POST',
               headers: {
@@ -241,7 +240,7 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
             type GqlCreateResp = {
               data?: {
                 metafieldDefinitionCreate?: {
-                  metafieldDefinition?: {
+                  createdDefinition?: {
                     id?: string
                     key?: string
                     namespace?: string
@@ -262,7 +261,7 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
             }
             const userErrors: Array<{ message?: string; code?: string }> =
               gqlJson?.data?.metafieldDefinitionCreate?.userErrors || []
-            const createdDef = gqlJson?.data?.metafieldDefinitionCreate?.metafieldDefinition
+            const createdDef = gqlJson?.data?.metafieldDefinitionCreate?.createdDefinition
             if (createdDef && !userErrors.length) {
               created.push(key)
               console.warn('[metafields/create] GraphQL fallback success', { key })
