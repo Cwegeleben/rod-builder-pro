@@ -208,6 +208,74 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
         // Read body ONCE (text), attempt JSON parse for message
         const bodyText = await res.text().catch(() => '')
         let msg = bodyText
+        // GraphQL fallback for creation when REST returns 406 or other validation errors
+        const shouldGraphQL = res.status === 406 || /Not Acceptable/i.test(res.statusText)
+        if (shouldGraphQL) {
+          try {
+            const gqlUrl = `${apiBase(shopName, client.options?.apiVersion)}/graphql.json`
+            const mutation = `mutation defCreate($input: MetafieldDefinitionInput!) { metafieldDefinitionCreate(metafieldDefinition: $input) { metafieldDefinition { id key namespace type ownerType } userErrors { field message code } } }`
+            const gqlResp = await fetch(gqlUrl, {
+              method: 'POST',
+              headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+              },
+              body: JSON.stringify({
+                query: mutation,
+                variables: {
+                  input: {
+                    name: humanizeKey(key),
+                    namespace: SPEC_NS,
+                    key,
+                    type: typeForKey(),
+                    ownerType: 'PRODUCT',
+                    description: 'Imported Batson Rod Blank specification',
+                  },
+                },
+              }),
+            })
+            const gqlText = await gqlResp.text()
+            type GqlCreateResp = {
+              data?: {
+                metafieldDefinitionCreate?: {
+                  metafieldDefinition?: {
+                    id?: string
+                    key?: string
+                    namespace?: string
+                    type?: string
+                    ownerType?: string
+                  } | null
+                  userErrors?: Array<{ field?: string[]; message?: string; code?: string }>
+                }
+              }
+            }
+            let gqlJson: GqlCreateResp | null = null
+            try {
+              gqlJson = JSON.parse(gqlText) as GqlCreateResp
+            } catch {
+              /* ignore */
+            }
+            const userErrors: Array<{ message?: string; code?: string }> =
+              gqlJson?.data?.metafieldDefinitionCreate?.userErrors || []
+            const createdDef = gqlJson?.data?.metafieldDefinitionCreate?.metafieldDefinition
+            if (createdDef && !userErrors.length) {
+              created.push(key)
+              console.warn('[metafields/create] GraphQL fallback success', { key })
+              continue
+            }
+            if (userErrors.length) {
+              const errMsg = userErrors.map(e => e.message || e.code || 'error').join(', ')
+              errors[key] = `REST 406 + GraphQL errors: ${errMsg}`
+              continue
+            }
+            errors[key] = `REST 406 + GraphQL fallback failed (${gqlResp.status})`
+            continue
+          } catch (gqlErr) {
+            errors[key] = `REST 406 + GraphQL exception: ${(gqlErr as Error).message}`
+            continue
+          }
+        }
         try {
           const asJson = JSON.parse(bodyText) as unknown
           if (asJson && typeof asJson === 'object' && 'errors' in (asJson as Record<string, unknown>)) {
