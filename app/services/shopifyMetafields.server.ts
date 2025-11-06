@@ -213,7 +213,7 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
         if (shouldGraphQL) {
           try {
             const gqlUrl = `${apiBase(shopName, client.options?.apiVersion)}/graphql.json`
-            const mutation = `mutation defCreate($definition: MetafieldDefinitionInput!) { metafieldDefinitionCreate(definition: $definition) { createdDefinition { id key namespace type ownerType } userErrors { field message code } } }`
+            const mutation = `mutation defCreate($definition: MetafieldDefinitionInput!) { metafieldDefinitionCreate(definition: $definition) { createdDefinition { id key namespace ownerType } userErrors { field message code } } }`
             const gqlResp = await fetch(gqlUrl, {
               method: 'POST',
               headers: {
