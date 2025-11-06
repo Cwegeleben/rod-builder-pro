@@ -30,6 +30,9 @@ import { useSearchParams, useFetcher, useLocation, useLoaderData, useParams } fr
 // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
 import { KNOWN_IMPORT_TARGETS, getTargetById } from '../server/importer/sites/targets'
 import { requireHqShopOr404 } from '../lib/access.server'
+import { useFetcher as useMFDefsFetcher } from '@remix-run/react'
+// Batson metafield definitions helpers (server-side import via action/loader)
+// Keys are created only when Batson Rod Blanks target is selected.
 // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
 
 export default function ImportSettings() {
@@ -57,7 +60,6 @@ export default function ImportSettings() {
   const [saveLoading, setSaveLoading] = React.useState<boolean>(false)
   const [saveError, setSaveError] = React.useState<string | null>(null)
   const [crawlLoading, setCrawlLoading] = React.useState<boolean>(false)
-  const [skipSuccessful, setSkipSuccessful] = React.useState<boolean>(true)
   // Overwrite confirmation (replace window.confirm)
   const [overwriteModalOpen, setOverwriteModalOpen] = React.useState<boolean>(false)
   const [overwriteStagedCount, setOverwriteStagedCount] = React.useState<number>(0)
@@ -112,6 +114,34 @@ export default function ImportSettings() {
   const [targetId, setTargetId] = React.useState<string>('batson-rod-blanks')
   const [sourceUrl, setSourceUrl] = React.useState<string>('https://batsonenterprises.com/rod-blanks')
   const [siteId, setSiteId] = React.useState<string>('batson-rod-blanks')
+  // Metafield definitions status fetcher
+  const defsFetcher = useMFDefsFetcher<{
+    report?: { total: number; missing: string[]; present: string[] }
+    error?: string
+    created?: string[]
+  }>()
+  const defsLoading = defsFetcher.state !== 'idle'
+  const defsReport = defsFetcher.data?.report
+  const defsMissing = defsReport?.missing || []
+  const defsPresent = defsReport?.present || []
+  const [defsCheckedAt, setDefsCheckedAt] = React.useState<string | null>(null)
+  const canCreateDefs = targetId === 'batson-rod-blanks' && defsMissing.length > 0 && !defsLoading
+  React.useEffect(() => {
+    if (targetId === 'batson-rod-blanks') {
+      // Auto-load report when target changes
+      defsFetcher.load(`/api/importer/metafields/report?target=batson-rod-blanks`)
+    }
+  }, [targetId])
+  React.useEffect(() => {
+    if (defsFetcher.data?.report) setDefsCheckedAt(new Date().toISOString())
+  }, [defsFetcher.data?.report])
+  function onCreateMetafieldDefs() {
+    if (defsLoading) return
+    defsFetcher.submit(
+      { intent: 'create', target: 'batson-rod-blanks' },
+      { method: 'post', action: '/api/importer/metafields/create' },
+    )
+  }
 
   function onTargetChange(id: string) {
     setTargetId(id)
@@ -204,8 +234,8 @@ export default function ImportSettings() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(
             confirmOverwrite
-              ? { templateId, confirmOverwrite: true, skipSuccessful, overwriteExisting: Boolean(forceClear) }
-              : { templateId, skipSuccessful },
+              ? { templateId, confirmOverwrite: true, overwriteExisting: Boolean(forceClear) }
+              : { templateId },
           ),
         })
         return { resp, data: (await resp.json()) as Record<string, unknown> }
@@ -242,6 +272,12 @@ export default function ImportSettings() {
           if (typeof c === 'number') qs.set('c', String(c))
           if (typeof eta === 'number') qs.set('eta', String(eta))
           if (typeof exp === 'number') qs.set('exp', String(exp))
+          // Fire a quick toast locally before redirect (visible if redirect blocked)
+          try {
+            setShowSavedToast(true)
+          } catch {
+            /* ignore toast errors */
+          }
           navigateToImports(qs)
         }
         setOverwriteModalOpen(true)
@@ -260,6 +296,12 @@ export default function ImportSettings() {
       if (typeof c === 'number') qs.set('c', String(c))
       if (typeof eta === 'number') qs.set('eta', String(eta))
       if (typeof exp === 'number') qs.set('exp', String(exp))
+      // Fire a quick toast locally before redirect (visible if redirect blocked)
+      try {
+        setShowSavedToast(true)
+      } catch {
+        /* ignore toast errors */
+      }
       // Navigate to Imports list (prefer absolute Admin URL when embedded)
       navigateToImports(qs)
     } catch (e) {
@@ -305,6 +347,7 @@ export default function ImportSettings() {
       backAction={{ content: 'Back to Imports', url: `/app/imports${location.search}` }}
     >
       <BlockStack gap="400">
+        {/* Metafield definitions UI moved into Target card below */}
         {/* Global top bar loader while discovery runs */}
         {discovering ? (
           <Frame>
@@ -399,6 +442,63 @@ export default function ImportSettings() {
               </div>
               {siteId ? <Badge tone="info">{`siteId: ${siteId}`}</Badge> : null}
             </InlineStack>
+            {targetId === 'batson-rod-blanks' ? (
+              <BlockStack gap="200">
+                <Text as="h2" variant="headingSm">
+                  Batson Rod Blank Metafield Definitions
+                </Text>
+                {!defsReport && defsLoading ? <SkeletonBodyText /> : null}
+                {defsReport ? (
+                  <InlineStack gap="300" wrap>
+                    <Text as="span" variant="bodyMd">
+                      Defined: {defsPresent.length}/{defsReport.total}
+                    </Text>
+                    {defsMissing.length ? (
+                      <Badge tone="attention">{`Missing: ${defsMissing.length}`}</Badge>
+                    ) : (
+                      <Badge tone="success">All present</Badge>
+                    )}
+                    {defsCheckedAt ? (
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        Checked {new Date(defsCheckedAt).toLocaleTimeString()}
+                      </Text>
+                    ) : null}
+                  </InlineStack>
+                ) : null}
+                {defsMissing.length ? (
+                  <Text as="p" variant="bodySm">
+                    Missing keys: {defsMissing.join(', ')}
+                  </Text>
+                ) : null}
+                {defsFetcher.data?.created?.length ? (
+                  <Banner tone="success" title="Metafields created">
+                    <p>{defsFetcher.data.created.join(', ')}</p>
+                  </Banner>
+                ) : null}
+                {defsFetcher.data?.error ? (
+                  <Banner tone="critical" title="Metafield creation failed">
+                    <p>{defsFetcher.data.error}</p>
+                  </Banner>
+                ) : null}
+                <InlineStack gap="200">
+                  <Button
+                    disabled={defsLoading}
+                    loading={defsLoading && !defsReport}
+                    onClick={() => defsFetcher.load(`/api/importer/metafields/report?target=batson-rod-blanks`)}
+                  >
+                    Re-test
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={!canCreateDefs}
+                    loading={defsLoading && !!defsReport}
+                    onClick={onCreateMetafieldDefs}
+                  >
+                    Create Missing
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            ) : null}
             <InlineStack gap="200" align="start">
               <Button
                 variant="primary"
@@ -412,7 +512,7 @@ export default function ImportSettings() {
                   fetcher.submit(data, { method: 'post', action: '/api/importer/crawl/discover' })
                 }}
               >
-                Discover series (with preview)
+                Discover
               </Button>
               {discovering ? <Spinner accessibilityLabel="Discovering series" size="small" /> : null}
               {/* Headless availability diagnostics removed for simplicity */}
@@ -471,12 +571,6 @@ export default function ImportSettings() {
               This will save the settings (name, selected target, and current seeds) and start a background crawl to
               prepare a Review. You can track progress from the Imports list.
             </Text>
-            <Checkbox
-              label="Skip series already successfully staged"
-              checked={skipSuccessful}
-              onChange={val => setSkipSuccessful(Boolean(val))}
-              helpText="Speeds up re-runs by skipping unchanged or previously-successful series."
-            />
             <InlineStack gap="200" align="start">
               <Button
                 variant="primary"
@@ -605,6 +699,18 @@ export default function ImportSettings() {
                     })
                     const d = (await r.json()) as { ok?: boolean; deleted?: number; error?: string }
                     if (!r.ok || !d?.ok) throw new Error(d?.error || 'Failed to clear staged rows')
+                    // Also clear saved seeds (persist and update UI)
+                    try {
+                      const res = await fetch(`/api/importer/targets/${templateId}/settings`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: importName, target: targetId, discoverSeedUrls: [] }),
+                      })
+                      // Best-effort: don't block on a failure here
+                      if (res.ok) setSeedsText('')
+                    } catch {
+                      /* ignore */
+                    }
                     setShowClearedToast(true)
                   } catch (err) {
                     setClearError((err as Error)?.message || 'Failed to clear staged rows')

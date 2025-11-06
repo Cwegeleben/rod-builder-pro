@@ -1,5 +1,5 @@
 // <!-- BEGIN RBP GENERATED: importer-publish-stage-v1 -->
-import type { ActionFunctionArgs } from '@remix-run/node'
+import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
 import { prisma } from '../db.server'
@@ -77,5 +77,21 @@ export async function action({ request }: ActionFunctionArgs) {
   })
 
   return json({ ok: true, runId, totals: counts })
+}
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requireHqShopOr404(request)
+  try {
+    const url = new URL(request.url)
+    const take = Math.min(100, Math.max(1, Number(url.searchParams.get('take') || 30)))
+    const runs = await prisma.importRun.findMany({
+      orderBy: { startedAt: 'desc' },
+      take,
+      select: { id: true, supplierId: true, startedAt: true, finishedAt: true, status: true, summary: true },
+    })
+    return json({ ok: true, runs })
+  } catch {
+    return json({ ok: false, runs: [] })
+  }
 }
 // <!-- END RBP GENERATED: importer-publish-stage-v1 -->

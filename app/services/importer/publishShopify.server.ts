@@ -4,7 +4,19 @@ import { getShopAccessToken } from '../shopifyAdmin.server'
 import { upsertShopifyForRun } from '../../../packages/importer/src/sync/shopify'
 
 export type PublishTotals = { created: number; updated: number; skipped: number; failed: number }
-export type PublishResult = { totals: PublishTotals; productIds: string[] }
+export type PublishDetailedTotals = {
+  created: number
+  updated: number
+  unchanged_active: number
+  unchanged_specs_backfilled: number
+  failed: number
+}
+export type PublishResult = {
+  totals: PublishTotals
+  totalsDetailed?: PublishDetailedTotals
+  productIds: string[]
+  shopDomain?: string
+}
 export type PublishProgress = { processed: number; target: number; startedAt: string; updatedAt: string }
 
 /**
@@ -14,10 +26,21 @@ export type PublishProgress = { processed: number; target: number; startedAt: st
 export async function publishRunToShopify({
   runId,
   dryRun = true,
+  shopDomain: shopDomainInput,
 }: {
   runId: string
   dryRun?: boolean
+  shopDomain?: string
 }): Promise<PublishResult> {
+  // Resolve templateId for logging (best-effort)
+  let templateId: string | null = null
+  try {
+    const snap = await prisma.runMappingSnapshot.findUnique({ where: { runId } })
+    templateId = snap?.templateId || null
+  } catch {
+    /* ignore */
+  }
+
   // Load approved diffs so we can iterate and emit progress
   const approved = await prisma.importDiff.findMany({
     where: { importRunId: runId, resolution: 'approve' },
@@ -44,6 +67,17 @@ export async function publishRunToShopify({
       where: { id: runId },
       data: { summary: next as unknown as import('@prisma/client').Prisma.InputJsonValue },
     })
+    // Log publish:start
+    if (templateId) {
+      await prisma.importLog.create({
+        data: {
+          templateId,
+          runId,
+          type: 'publish:start',
+          payload: { dryRun: !!dryRun, target },
+        },
+      })
+    }
   } catch {
     // best-effort; status endpoint will still fall back to counts
   }
@@ -99,14 +133,26 @@ export async function publishRunToShopify({
 
   // Real publish phase 1: create-only upsert for 'add' diffs
   // Determine shop domain: prefer explicit env override, else first offline session shop
-  let shopDomain = process.env.SHOP_CUSTOM_DOMAIN || process.env.SHOP || ''
+  // Determine target shop domain: prefer explicitly provided value (from session),
+  // then env overrides, then first offline session as fallback.
+  let shopDomain = shopDomainInput || process.env.SHOP_CUSTOM_DOMAIN || process.env.SHOP || ''
   if (!shopDomain) {
     const sess = await prisma.session.findFirst({ where: { isOnline: false } })
     if (sess?.shop) shopDomain = sess.shop
   }
   if (!shopDomain) {
     // Fallback: treat as no-op publish but keep totals from dry estimate
-    return { totals, productIds }
+    // Log publish:done with dry totals
+    try {
+      if (templateId) {
+        await prisma.importLog.create({
+          data: { templateId, runId, type: 'publish:done', payload: { totals } },
+        })
+      }
+    } catch {
+      /* ignore */
+    }
+    return { totals, productIds, shopDomain: undefined }
   }
 
   // Acquire token and perform create-only upsert
@@ -119,20 +165,70 @@ export async function publishRunToShopify({
     addsOnly: false,
   })
 
-  // Compute totals from results (creates + updates)
+  // Compute totals from results (creates + updates) and include failed by scanning per-diff diagnostics
+  // Compute failed count by checking diffs with publish.error (best-effort; use raw LIKE for SQLite TEXT JSON)
+  let failed = 0
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ c: number }>>(
+      'SELECT COUNT(1) as c FROM ImportDiff WHERE importRunId = ? AND validation LIKE \'%"publish"%\' AND validation LIKE \'%"error"%\'',
+      runId,
+    )
+    failed = Number(rows?.[0]?.c || 0)
+  } catch {
+    failed = 0
+  }
   const createdCount = results.filter(r => r.action === 'created').length
   const updatedCount = results.filter(r => r.action === 'updated').length
-  const failedCount = 0
-  const skippedCount = Math.max(0, target - (createdCount + updatedCount))
+  const skippedCount = Math.max(0, target - (createdCount + updatedCount + failed))
   const finalTotals: PublishTotals = {
     created: createdCount,
     updated: updatedCount,
     skipped: skippedCount,
-    failed: failedCount,
+    failed,
+  }
+  // Detailed totals: break out unchanged categories by skipReason
+  let unchangedActive = 0
+  let unchangedSpecs = 0
+  try {
+    const [unchangedActiveRows, unchangedSpecsRows] = await Promise.all([
+      prisma.$queryRawUnsafe<Array<{ c: number }>>(
+        'SELECT COUNT(1) as c FROM ImportDiff WHERE importRunId = ? AND validation LIKE \'%"publish"%\' AND validation LIKE \'%"skipReason":"unchanged-and-active"%\'',
+        runId,
+      ),
+      prisma.$queryRawUnsafe<Array<{ c: number }>>(
+        'SELECT COUNT(1) as c FROM ImportDiff WHERE importRunId = ? AND validation LIKE \'%"publish"%\' AND validation LIKE \'%"skipReason":"unchanged-specs-backfilled"%\'',
+        runId,
+      ),
+    ])
+    unchangedActive = Number(unchangedActiveRows?.[0]?.c || 0)
+    unchangedSpecs = Number(unchangedSpecsRows?.[0]?.c || 0)
+  } catch {
+    unchangedActive = 0
+    unchangedSpecs = 0
+  }
+  const totalsDetailed: PublishDetailedTotals = {
+    created: createdCount,
+    updated: updatedCount,
+    unchanged_active: unchangedActive,
+    unchanged_specs_backfilled: unchangedSpecs,
+    failed,
   }
   const createdIds = results.map(r => String(r.productId))
-  return { totals: finalTotals, productIds: createdIds }
-
-  return { totals, productIds }
+  // Log publish:done with final totals
+  try {
+    if (templateId) {
+      await prisma.importLog.create({
+        data: {
+          templateId,
+          runId,
+          type: 'publish:done',
+          payload: { totals: finalTotals, totalsDetailed, productIds: createdIds },
+        },
+      })
+    }
+  } catch {
+    /* ignore */
+  }
+  return { totals: finalTotals, totalsDetailed, productIds: createdIds, shopDomain }
 }
 // <!-- END RBP GENERATED: importer-publish-shopify-v1 -->

@@ -36,6 +36,7 @@
     "preflight:admin-templates-sync": "tsx scripts/preflight/adminTemplatesSync.ts",
     "preflight:templates-cost-field": "tsx scripts/preflight/templatesCostField.ts",
     "migrate:templates-cost": "tsx scripts/migrate/migrate-templates-cost.mts",
+    "migrate:backfill:publish-handles": "node scripts/migrate/backfill-publish-handles.mjs",
     "validate:templateversion-json": "node scripts/migrate/validate-templateversion-json.mjs",
     "db:check:partstaging": "node scripts/migrate/check-partstaging.mjs",
     "db:cleanup:empty-partstaging": "node scripts/migrate/cleanup-empty-partstaging.mjs",

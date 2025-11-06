@@ -2,6 +2,7 @@
 import ImportList from '../components/importer/ImportList'
 import GlobalLogList from '../components/importer/GlobalLogList'
 import ActiveImportsTable from '../components/importer/ActiveImportsTable'
+import RecentImportRuns from '../components/importer/RecentImportRuns'
 import RecentRunsTable from '../components/importer/RecentRunsTable'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from '@remix-run/react'
@@ -97,6 +98,16 @@ export default function ImportsHome(props: ImportsHomeProps = {}) {
               Logs
             </Text>
             <GlobalLogList items={props.initialLogs} templateNames={props.templateNames} />
+          </BlockStack>
+        </Card>
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between">
+              <Text as="h2" variant="headingSm">
+                Import runs
+              </Text>
+            </InlineStack>
+            <RecentImportRuns />
           </BlockStack>
         </Card>
       </BlockStack>

@@ -17,7 +17,8 @@ export default function RunOptionsModal({
   const fetcher = useFetcher<{ ok?: boolean; error?: string }>()
   const [seedUrl, setSeedUrl] = useState('')
   const [manualUrls, setManualUrls] = useState('')
-  const [skipSuccessful, setSkipSuccessful] = useState(true)
+  // Default unchecked so new runs include all candidates; users can opt in for faster re-runs
+  const [skipSuccessful, setSkipSuccessful] = useState(false)
 
   const busy = fetcher.state === 'submitting'
 
@@ -55,7 +56,12 @@ export default function RunOptionsModal({
             multiline={4}
             helpText="One per line"
           />
-          <Checkbox label="Skip already successful" checked={skipSuccessful} onChange={setSkipSuccessful} />
+          <Checkbox
+            label="Skip already successful"
+            checked={skipSuccessful}
+            onChange={setSkipSuccessful}
+            helpText="Unchecked: include all. Checked: speed up re-runs by skipping unchanged/successful items."
+          />
         </FormLayout>
       </Modal.Section>
     </Modal>

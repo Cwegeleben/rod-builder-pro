@@ -2,6 +2,7 @@
 import type { ActionFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
+import { authenticate } from '../shopify.server'
 import { prisma } from '../db.server'
 import type { Prisma } from '@prisma/client'
 import { publishRunToShopify } from '../services/importer/publishShopify.server'
@@ -29,18 +30,33 @@ export async function action({ request, params }: ActionFunctionArgs) {
   await prisma.importRun.update({ where: { id: runId }, data: { status: 'publishing' } })
 
   try {
-    const { totals, productIds } = await publishRunToShopify({ runId, dryRun })
+    // Prefer the installed shop domain from the current admin session when available
+    let sessionShop: string | undefined
+    try {
+      const { session } = await authenticate.admin(request)
+      sessionShop = (session as unknown as { shop?: string }).shop || undefined
+    } catch {
+      sessionShop = undefined
+    }
+    const { totals, totalsDetailed, productIds, shopDomain } = await publishRunToShopify({
+      runId,
+      dryRun,
+      shopDomain: sessionShop,
+    })
 
     // Store summary under run.summary.publish
     const summary = (run.summary as unknown as Record<string, unknown>) || {}
-    summary.publish = { totals, at: new Date().toISOString() }
+    summary.publish = { totals, totalsDetailed, at: new Date().toISOString(), shop: shopDomain || sessionShop || null }
     await prisma.importRun.update({
       where: { id: runId },
       data: { status: 'published', summary: summary as unknown as Prisma.InputJsonValue },
     })
 
     const filter = { tag: `importRun:${runId}` }
-    return json({ ok: true, runId, totals, productIds, filter }, { headers: { 'Cache-Control': 'no-store' } })
+    return json(
+      { ok: true, runId, totals, totalsDetailed, productIds, filter },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
   } catch (err: unknown) {
     const message =
       err instanceof Error
@@ -60,6 +76,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
         where: { id: runId },
         data: { status: 'review', summary: summary as unknown as Prisma.InputJsonValue },
       })
+      // Also best-effort: append a publish:error log so it appears in Recent runs
+      try {
+        const snap = await prisma.runMappingSnapshot.findUnique({ where: { runId } })
+        const templateId = snap?.templateId
+        if (templateId) {
+          await prisma.importLog.create({
+            data: { templateId, runId, type: 'publish:error', payload: { message } },
+          })
+        }
+      } catch {
+        /* ignore */
+      }
     } catch {
       /* ignore */
     }

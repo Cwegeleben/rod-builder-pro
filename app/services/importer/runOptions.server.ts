@@ -260,23 +260,65 @@ export async function startImportFromOptions(
       await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 30, details: { seeds: seeds.length } })
     await throwIfCancelled(runId)
     await stageFromSeriesParser(seeds)
-    await crawlBatson(seeds, {
+    const crawlRes = await crawlBatson(seeds, {
       templateKey: options.templateKey,
       politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
       supplierId,
       // Do not include previously saved seeds for series-targeted runs to avoid cross-series noise
       ignoreSavedSources: true,
     })
+    try {
+      if (runId && crawlRes) {
+        const run = await prisma.importRun.findUnique({ where: { id: runId } })
+        const prevSummary = (run?.summary as unknown as ImportRunSummary | undefined) || {}
+        const counts = { ...(prevSummary.counts || {}), headerSkip: crawlRes.headerSkipCount }
+        await prisma.importRun.update({
+          where: { id: runId },
+          data: { summary: { ...(prevSummary || {}), counts } as unknown as object },
+        })
+        await prisma.importLog.create({
+          data: {
+            templateId: options.notes?.replace(/^prepare:/, '') || 'n/a',
+            runId,
+            type: 'crawl:headers',
+            payload: { headerSkipCount: crawlRes.headerSkipCount, headerSkips: crawlRes.headerSkips.slice(0, 50) },
+          },
+        })
+      }
+    } catch {
+      /* ignore header skip logging errors */
+    }
   } else {
     if (runId)
       await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 30, details: { seeds: seeds.length } })
     await throwIfCancelled(runId)
-    await crawlBatson(seeds, {
+    const crawlRes = await crawlBatson(seeds, {
       templateKey: options.templateKey,
       // Conservative defaults for Fly Machines with headless Chromium
       politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
       supplierId,
     })
+    try {
+      if (runId && crawlRes) {
+        const run = await prisma.importRun.findUnique({ where: { id: runId } })
+        const prevSummary = (run?.summary as unknown as ImportRunSummary | undefined) || {}
+        const counts = { ...(prevSummary.counts || {}), headerSkip: crawlRes.headerSkipCount }
+        await prisma.importRun.update({
+          where: { id: runId },
+          data: { summary: { ...(prevSummary || {}), counts } as unknown as object },
+        })
+        await prisma.importLog.create({
+          data: {
+            templateId: options.notes?.replace(/^prepare:/, '') || 'n/a',
+            runId,
+            type: 'crawl:headers',
+            payload: { headerSkipCount: crawlRes.headerSkipCount, headerSkips: crawlRes.headerSkips.slice(0, 50) },
+          },
+        })
+      }
+    } catch {
+      /* ignore header skip logging errors */
+    }
   }
   if (runId) await setProgress(runId, { status: 'staging', phase: 'stage', percent: 60 })
   await throwIfCancelled(runId)

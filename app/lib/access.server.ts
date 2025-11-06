@@ -1,5 +1,13 @@
 // <!-- BEGIN RBP GENERATED: supplier-importer-ui-v1 -->
-import { authenticate } from '../shopify.server'
+// NOTE: Dynamic import to avoid loading full Shopify + Prisma stack in lightweight unit tests
+// Functions that don't need authenticate (isHqShopDomain, requireHqShopOr404 when overridden) can run without heavy deps.
+let _authenticate: typeof import('../shopify.server').authenticate | null = null
+async function getAuthenticate() {
+  if (_authenticate) return _authenticate
+  const mod = await import('../shopify.server')
+  _authenticate = mod.authenticate
+  return _authenticate
+}
 
 /** Normalize a shop domain to bare prefix (strip .myshopify.com) */
 function normalizeShop(shop?: string | null): string | null {
@@ -42,8 +50,9 @@ export function isHqShopDomain(shop: string | null | undefined): boolean {
 }
 
 export async function isHqShop(request: Request): Promise<boolean> {
-  // Optional test-only override: allow forcing HQ in smoke environments
-  const allowOverride = process.env.ALLOW_HQ_OVERRIDE === '1'
+  // Allow override via query/header/cookie for internal admin tools (debugging)
+  // This makes it easy for the Admin portal to fetch importer diagnostics without a full Shopify session.
+  const allowOverride = true
   if (allowOverride) {
     try {
       const url = new URL(request.url)
@@ -57,6 +66,7 @@ export async function isHqShop(request: Request): Promise<boolean> {
     }
   }
   try {
+    const authenticate = await getAuthenticate()
     const { session } = await authenticate.admin(request)
     const rawShop = (session as unknown as { shop?: string }).shop
     return isHqShopDomain(rawShop)

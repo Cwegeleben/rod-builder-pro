@@ -187,6 +187,18 @@ export default function AdminImportsPage({ initialSearch }: AdminImportsPageProp
     { resourceIDResolver: i => i.id },
   )
 
+  // One-shot toast from query params (e.g., Save & Crawl redirect)
+  useEffect(() => {
+    const started = initialSearch.get('started') === '1'
+    if (started) {
+      setToast({ content: 'Crawl started' })
+      // Drop param so it doesn't re-toast on next mount/navigation
+      const next = new URLSearchParams(initialSearch)
+      next.delete('started')
+      window.history.replaceState(null, '', `/app/imports${next.toString() ? `?${next.toString()}` : ''}`)
+    }
+  }, [])
+
   const onDeleteSelected = async () => {
     if (selectedResources.length === 0) return
     const ok = window.confirm(

@@ -1,7 +1,26 @@
 // <!-- BEGIN RBP GENERATED: batson-crawler-ecom-v1 -->
 // <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 -->
 import { PlaywrightCrawler, log } from 'crawlee'
-import { extractProduct } from '../extractors/batson.parse'
+import { extractProduct, extractBatsonSeriesRows } from '../extractors/batson.parse'
+
+// Pure helper to decide if a product record should be staged (used for testing)
+export function shouldStageBatsonProduct(
+  rec: { externalId: string; isHeader?: boolean },
+  url: string,
+): { stage: boolean; reason?: string } {
+  try {
+    const u = new URL(url)
+    const isSeriesPath = /\/rod-blanks\//i.test(u.pathname) && !/\/(products|product|ecom)\//i.test(u.pathname)
+    const lastSeg = u.pathname.split('/').filter(Boolean).pop() || ''
+    const slugLike = lastSeg.toUpperCase().replace(/[^A-Z0-9-]+/g, '')
+    if (rec.isHeader) return { stage: false, reason: 'header-heuristic' }
+    if (isSeriesPath && rec.externalId === slugLike) return { stage: false, reason: 'series-path-slug' }
+    return { stage: true }
+  } catch {
+    if (rec.isHeader) return { stage: false, reason: 'header-heuristic' }
+    return { stage: true }
+  }
+}
 import { upsertStaging } from '../staging/upsert'
 import { fetchActiveSources, upsertProductSource, linkExternalIdForSource } from '../seeds/sources'
 import { normalizeUrl } from '../lib/url'
@@ -68,6 +87,8 @@ export async function crawlBatson(
   const rpm = options?.politeness?.rpm || 30
   const blockAssets = options?.politeness?.blockAssetsOnLists !== false
 
+  let headerSkipCount = 0
+  const headerSkips: Array<{ externalId: string; reason: string; url: string }> = []
   const crawler = new PlaywrightCrawler({
     maxRequestsPerMinute: rpm,
     maxConcurrency: maxConc,
@@ -198,6 +219,44 @@ export async function crawlBatson(
       }
 
       // 7) Treat product-detail pages (including /ecom/ detail) as detail and stage
+      // Before single-product extraction, attempt multi-row series parsing for Batson rod blanks series pages
+      let stagedFromSeries = 0
+      try {
+        const u = new URL(currentUrl)
+        const isSeriesPath = /\/rod-blanks\//i.test(u.pathname) && !/\/(products|product|ecom)\//i.test(u.pathname)
+        if (isSeriesPath) {
+          const rows = await extractBatsonSeriesRows(page)
+          if (rows && rows.length) {
+            for (const row of rows) {
+              if (seen.has(row.externalId)) continue
+              seen.add(row.externalId)
+              const toStage = {
+                externalId: row.externalId,
+                title: row.title,
+                partType: 'Rod Blank',
+                description: row.description || '',
+                images: row.images || [],
+                rawSpecs: row.rawSpecs,
+                normSpecs: row.normSpecs,
+              }
+              await upsertStaging(SUPPLIER, toStage)
+              await linkExternalIdForSource(SUPPLIER, currentUrl, row.externalId)
+              log.info(`staged (series-row) ${row.externalId}`)
+              stagedFromSeries++
+            }
+          }
+        }
+      } catch {
+        /* ignore series parse errors */
+      }
+      if (stagedFromSeries > 0) {
+        // If we successfully staged series rows, skip single-product extraction for this URL
+        const [lo, hi] = jitter
+        const delay = Math.max(0, Math.floor(lo + Math.random() * (hi - lo)))
+        if (delay > 0) await new Promise(res => setTimeout(res, delay))
+        return
+      }
+
       const rec = await extractProduct(page, { templateKey: options?.templateKey })
       if (rec?.externalId) {
         // Skip staging for obvious series/listing pages (e.g., /rod-blanks/<series>) to avoid a spurious aggregate row
@@ -206,20 +265,50 @@ export async function crawlBatson(
           const isSeriesPath = /\/rod-blanks\//i.test(u.pathname) && !/\/(products|product|ecom)\//i.test(u.pathname)
           const lastSeg = u.pathname.split('/').filter(Boolean).pop() || ''
           const slugLike = lastSeg.toUpperCase().replace(/[^A-Z0-9-]+/g, '')
-          if (isSeriesPath && rec.externalId === slugLike) {
-            // Do not stage a synthetic series record
+          const earlyHeader = rec.isHeader
+          if ((isSeriesPath && rec.externalId === slugLike) || earlyHeader) {
+            headerSkipCount++
+            const reason = rec.headerReason || (isSeriesPath ? 'series-path-slug' : 'header-heuristic')
+            headerSkips.push({ externalId: rec.externalId, reason, url: currentUrl })
+            log.info(`skip header ${rec.externalId} @ ${currentUrl} reason=${reason}`)
           } else if (!seen.has(rec.externalId)) {
             seen.add(rec.externalId)
-            await upsertStaging(SUPPLIER, rec)
+            // Strip header flags before staging (schema does not include these fields)
+            const toStage = {
+              externalId: rec.externalId,
+              title: rec.title,
+              partType: rec.partType,
+              description: rec.description,
+              images: rec.images,
+              rawSpecs: rec.rawSpecs,
+            }
+            await upsertStaging(SUPPLIER, toStage)
             await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId)
             log.info(`staged ${rec.externalId}`)
           }
         } catch {
           if (!seen.has(rec.externalId)) {
             seen.add(rec.externalId)
-            await upsertStaging(SUPPLIER, rec)
-            await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId)
-            log.info(`staged ${rec.externalId}`)
+            const isHeader = (rec as { isHeader?: boolean }).isHeader
+            const headerReason = (rec as { headerReason?: string }).headerReason
+            if (isHeader) {
+              headerSkipCount++
+              const reason = headerReason || 'heuristic'
+              headerSkips.push({ externalId: rec.externalId, reason, url: currentUrl })
+              log.info(`skip header ${rec.externalId} @ ${currentUrl} reason=${reason}`)
+            } else {
+              const toStage = {
+                externalId: rec.externalId,
+                title: rec.title,
+                partType: rec.partType,
+                description: rec.description,
+                images: rec.images,
+                rawSpecs: rec.rawSpecs,
+              }
+              await upsertStaging(SUPPLIER, toStage)
+              await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId)
+              log.info(`staged ${rec.externalId}`)
+            }
           }
         }
       }
@@ -235,7 +324,9 @@ export async function crawlBatson(
   })
 
   await crawler.run(initial)
-  return seen.size
+  log.info(`batson crawl finished: staged=${seen.size} headerSkip=${headerSkipCount}`)
+  // Return crawl metrics for wiring into run summaries/logs
+  return { stagedCount: seen.size, headerSkipCount, headerSkips }
 }
 // <!-- END RBP GENERATED: scrape-template-wiring-v2 -->
 // <!-- END RBP GENERATED: batson-crawler-ecom-v1 -->

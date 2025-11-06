@@ -32,14 +32,15 @@ export default defineConfig({
           'SHOPIFY_API_KEY=dev',
           'SHOPIFY_API_SECRET=dev',
           'SCOPES=read_products',
-          // Build, generate prisma client, and attempt a soft migrate (ignore failures)
+          // Build Remix assets
           'npm run -s build',
           '&&',
           // Reset e2e sqlite db to ensure a clean schema
           `rm -f ${process.cwd()}/.tmp/e2e.sqlite || true`,
           '&&',
           `DATABASE_URL=${E2E_DB}`,
-          'npm run -s setup:full || npm run -s setup',
+          // Generate Prisma client only (skip migrate deploy for ephemeral DB)
+          'npm run -s setup',
           '&&',
           // For e2e on ephemeral SQLite, prefer db push over migrate
           `DATABASE_URL=${E2E_DB}`,
@@ -57,12 +58,10 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-
     {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
     },
-
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },

@@ -200,6 +200,26 @@
       "type": "shell",
       "command": "pnpm exec playwright test tests/e2e/importer.saveAndCrawl.inline.spec.ts",
       "group": "test"
+    },
+    {
+      "label": "Run unit tests",
+      "type": "shell",
+      "command": "npm run -s test:unit"
+    },
+    {
+      "label": "Typecheck new importer code",
+      "type": "shell",
+      "command": "npm run -s typecheck"
+    },
+    {
+      "label": "Run unit tests (importer version)",
+      "type": "shell",
+      "command": "npm run -s test:unit -- -t header|crawl|runOptions|headerSkip"
+    },
+    {
+      "label": "Typecheck and build (final)",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build"
     }
   ]
 }

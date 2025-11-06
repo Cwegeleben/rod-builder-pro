@@ -38,8 +38,15 @@ export default function RecentRunsTable() {
     const completed = Array.from(byRun.values()).filter(arr => {
       arr.sort((a, b) => (a.at < b.at ? -1 : 1))
       const last = arr[arr.length - 1]
+      if (!last) return false
+      // Treat both prepare and publish terminal events as completed runs
+      const t = last.type
       return (
-        last && (last.type === 'prepare:done' || last.type === 'prepare:error' || last.type === 'prepare:cancelled')
+        t === 'prepare:done' ||
+        t === 'prepare:error' ||
+        t === 'prepare:cancelled' ||
+        t === 'publish:done' ||
+        t === 'publish:error'
       )
     })
     // map to summary rows
@@ -66,7 +73,12 @@ export default function RecentRunsTable() {
       } catch {
         /* ignore */
       }
-      const status = last.type === 'prepare:done' ? 'success' : last.type === 'prepare:error' ? 'failed' : 'cancelled'
+      const status =
+        last.type === 'prepare:done' || last.type === 'publish:done'
+          ? 'success'
+          : last.type === 'prepare:error' || last.type === 'publish:error'
+            ? 'failed'
+            : 'cancelled'
       return { runId, templateId: tpl, startedAt: first.at, endedAt: last.at, totals, durationSec, status, rows: arr }
     })
   }, [logs])

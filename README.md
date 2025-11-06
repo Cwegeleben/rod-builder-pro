@@ -124,11 +124,39 @@ When setting the name follow this guidelines:
 
 ## Setting environment variables
 
-Check `.env.example` to review which are the required environment variables. You need to set the variables in staging and production. You need to set them using fly.io:
+Check `.env.example` to review the variables. For staging/production, set secrets on Fly (not in source control).
 
+Required for app boot (set as Fly secrets):
+
+- `SHOPIFY_API_KEY` — from your app in Shopify Partners
+- `SHOPIFY_API_SECRET` — from your app in Shopify Partners
+
+Provided via Fly config (already in `fly.production.toml`/`fly.staging.toml`):
+
+- `SHOPIFY_APP_URL` — public URL (e.g., `https://rbp-app.fly.dev`)
+- `SCOPES` — required app scopes
+- `PORT`, `HOST`, `DATABASE_URL` — server binding and SQLite path
+
+Optional (set as secrets only if you use the feature):
+
+- `SHOP_CUSTOM_DOMAIN` — restrict auth to a specific shop domain
+- `SECRET_CREDENTIALS_KEY` — 32-byte key for encrypting supplier creds (AES-256-GCM)
+- `ENABLE_SMOKES`, `SMOKE_TOKEN`, `SMOKE_ALLOW_PROD` — guarded smoke routes for ops
+- `PRICE_REFRESH_TOKEN` — bearer token for price/availability refresh hook
+- `IMPORTER_BG_ENABLED`, `VITE_IMPORTER_SSE_ENABLED` — importer / UI flags
+
+Examples (production):
+
+```bash
+fly secrets set SHOPIFY_API_KEY=xxx SHOPIFY_API_SECRET=yyy --config fly.production.toml
+# Optional operational flags
+fly secrets set ENABLE_SMOKES=1 SMOKE_TOKEN=change-me --config fly.production.toml
 ```
-fly secrets set FOO=bar --config fly.production.toml
-fly secrets set FOO=bar --config fly.staging.toml
+
+Examples (staging):
+
+```bash
+fly secrets set SHOPIFY_API_KEY=xxx SHOPIFY_API_SECRET=yyy --config fly.staging.toml
 ```
 
 ### Credentials encryption secret

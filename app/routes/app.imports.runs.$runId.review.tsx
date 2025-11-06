@@ -15,6 +15,7 @@ import {
   Text,
   InlineStack,
   ProgressBar,
+  Badge,
 } from '@shopify/polaris'
 import { prisma } from '../db.server'
 import { isHqShop } from '../lib/access.server'
@@ -218,9 +219,47 @@ export default function ReviewRunRoute() {
 
   const hasRows = (data?.rows?.length || 0) > 0
   const allZero = (data?.totals?.all || 0) === 0
+  // BEGIN RBP ADDED: publish + verify shop badges
+  const [publishShop, setPublishShop] = useState<string | null>(null)
+  const [verifyStats, setVerifyStats] = useState<{ shop: string | null; found: number; notFound: number } | null>(null)
+  useEffect(() => {
+    const url = `/api/importer/runs/${run.id}/debug?hq=1&nocache=${Date.now()}`
+    fetch(url)
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => {
+        if (!j) return
+        try {
+          const pubShop = j?.run?.summary?.publish?.shop || null
+          setPublishShop(typeof pubShop === 'string' && pubShop ? pubShop : null)
+          const v = j?.run?.summary?.verify || null
+          if (v && typeof v === 'object') {
+            const shop = typeof v.shop === 'string' ? v.shop : null
+            const found = typeof v.found === 'number' ? v.found : 0
+            const notFound = typeof v.notFound === 'number' ? v.notFound : 0
+            setVerifyStats({ shop, found, notFound })
+          }
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch(() => {})
+  }, [run.id])
+  // END RBP ADDED
   return (
     <Page title={title} subtitle={subtitle} backAction={{ content: 'Back to Imports', url: '/app/imports' }}>
       <BlockStack gap="400">
+        {/* BEGIN RBP ADDED: Transparency badges */}
+        {publishShop || verifyStats ? (
+          <InlineStack gap="200">
+            {publishShop ? <Badge tone="info">{`Published: ${publishShop}`}</Badge> : null}
+            {verifyStats ? (
+              <Badge tone={verifyStats.found > 0 ? 'success' : 'warning'}>
+                {`Verified ${verifyStats.found}/${verifyStats.found + verifyStats.notFound}`}
+              </Badge>
+            ) : null}
+          </InlineStack>
+        ) : null}
+        {/* END RBP ADDED */}
         {toast ? (
           <Frame>
             <Toast content={toast} duration={2000} onDismiss={() => setToast(null)} />
