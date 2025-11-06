@@ -6,6 +6,9 @@ export type ColumnDef = { key: string; label: string; type: 'string' | 'number' 
 export type RowCore = {
   id: string
   title: string | null
+  proposedTitle?: string | null
+  titleChanged?: boolean
+  prevTitle?: string | null
   externalId: string
   vendor: string
   status: 'staged' | 'approved' | 'rejected'
@@ -134,6 +137,10 @@ export async function queryStagedRows(
     const before = (d.before as unknown as PartLike) || null
     const after = (d.after as unknown as PartLike) || null
     const title = (after?.title || before?.title || null) as string | null
+    // Proposed normalized title is staged title (after.title) if present
+    const proposedTitle = (after?.title || null) as string | null
+    const prevTitle = (before?.title || null) as string | null
+    const titleChanged = Boolean(before?.title && proposedTitle && before.title !== proposedTitle)
     if (q) {
       const hay = `${title || ''} ${d.externalId}`.toLowerCase()
       if (!hay.includes(q.toLowerCase())) continue
@@ -141,6 +148,9 @@ export async function queryStagedRows(
     const core: RowCore = {
       id: d.id,
       title,
+      proposedTitle,
+      titleChanged,
+      prevTitle,
       externalId: d.externalId,
       vendor: inferVendor(before, after),
       status: mapResolutionToStatus(d.resolution),

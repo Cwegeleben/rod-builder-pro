@@ -749,6 +749,44 @@ export async function upsertShopifyForRun(
           } catch {
             /* ignore */
           }
+          // Additionally, allow title updates even when hash is unchanged so we can
+          // publish normalized titles without forcing a content hash change.
+          const currentTitle = String((product as any)?.title || '')
+          const needTitleUpdate = currentTitle !== core.title
+          if (needTitleUpdate) {
+            await withRetry(
+              () =>
+                callWithBody(() => shopify.product.update(Number(product.id), { title: core.title, status: 'active' })),
+              5,
+              onRetry,
+            )
+            const pid = Number(product.id)
+            const externalId = String(after.externalId)
+            results.push({ externalId, productId: pid, handle, action: 'updated' })
+            try {
+              await db.importDiff.update({
+                where: { id: d.id },
+                data: {
+                  validation: {
+                    ...(d.validation as any),
+                    publish: {
+                      at: new Date().toISOString(),
+                      action: 'updated',
+                      productId: pid,
+                      handle,
+                      status: 'active',
+                      webUrl: mkProductUrl(cfg.shopName, handle),
+                      skipReason: 'hash-unchanged-title-updated',
+                    },
+                  } as any,
+                },
+              })
+            } catch {
+              /* non-fatal */
+            }
+            // Title-only update path complete; skip further writes for this item.
+            continue
+          }
           if (ensureSpecs) {
             // Build preview solely to get metafields; skip core update (unchanged)
             const preview = buildShopifyPreview(after, runId)

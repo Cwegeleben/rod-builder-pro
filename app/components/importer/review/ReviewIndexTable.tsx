@@ -27,6 +27,9 @@ export default function ReviewIndexTable({
     core: {
       id: string
       title: string | null
+      proposedTitle?: string | null
+      titleChanged?: boolean
+      prevTitle?: string | null
       externalId: string
       vendor: string
       status: 'staged' | 'approved' | 'rejected'
@@ -125,9 +128,28 @@ export default function ReviewIndexTable({
           return (
             <IndexTable.Row id={r.core.id} key={r.core.id} position={index} selected={selectedIds.includes(r.core.id)}>
               <IndexTable.Cell>
-                <span style={{ cursor: 'pointer' }} onClick={() => onExpand(isExpanded ? null : r.core.id)}>
-                  {r.core.title || '—'}
-                </span>
+                <div style={{ cursor: 'pointer' }} onClick={() => onExpand(isExpanded ? null : r.core.id)}>
+                  <div>
+                    {r.core.proposedTitle || r.core.title || '—'}
+                    {r.core.titleChanged ? (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          padding: '2px 6px',
+                          borderRadius: 6,
+                          background: '#fff3cd',
+                          color: '#8a6d3b',
+                          fontSize: 12,
+                        }}
+                      >
+                        changed
+                      </span>
+                    ) : null}
+                  </div>
+                  {r.core.titleChanged && r.core.prevTitle ? (
+                    <div style={{ color: '#6d7175', fontSize: 12 }}>Prev: {r.core.prevTitle}</div>
+                  ) : null}
+                </div>
               </IndexTable.Cell>
               <IndexTable.Cell>
                 <span style={{ cursor: 'pointer' }} onClick={() => onExpand(isExpanded ? null : r.core.id)}>

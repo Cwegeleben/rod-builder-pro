@@ -186,7 +186,25 @@ export async function startImportFromOptions(
       for (const r of rows) {
         const externalId = String(r.raw.code || r.raw.model || '')
         if (!externalId) continue
-        const title = String(r.raw.model || r.raw.code || '')
+        // Compute normalized title at Save & Crawl time
+        let title = String(r.raw.model || r.raw.code || '')
+        try {
+          const { buildBatsonTitle } = await import('../../server/importer/products/titleNormalize')
+          const proposed = buildBatsonTitle({
+            code: r.raw.code,
+            model: r.raw.model,
+            series: r.spec.series,
+            length_label: r.spec.length_label,
+            length_in: r.spec.length_in,
+            material: r.spec.material,
+            power: r.spec.power,
+            pieces: r.spec.pieces,
+            color: r.spec.color,
+          })
+          if (proposed && proposed.trim()) title = proposed
+        } catch {
+          // fall back silently if normalization module unavailable
+        }
         const partType = 'Rod Blank'
         const description = ''
         const images: string[] = Array.from(
