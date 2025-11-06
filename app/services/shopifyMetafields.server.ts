@@ -250,9 +250,10 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
                 }
               }
             }
-            let gqlJson: GqlCreateResp | null = null
+            type GqlStd = GqlCreateResp & { errors?: Array<{ message?: string }> }
+            let gqlJson: GqlStd | null = null
             try {
-              gqlJson = JSON.parse(gqlText) as GqlCreateResp
+              gqlJson = JSON.parse(gqlText) as GqlStd
             } catch {
               /* ignore */
             }
@@ -266,10 +267,18 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
             }
             if (userErrors.length) {
               const errMsg = userErrors.map(e => e.message || e.code || 'error').join(', ')
+              console.warn('[metafields/create] GraphQL userErrors', { key, errMsg })
               errors[key] = `REST 406 + GraphQL errors: ${errMsg}`
               continue
             }
-            errors[key] = `REST 406 + GraphQL fallback failed (${gqlResp.status})`
+            const topErr = (gqlJson?.errors || []).map(e => e.message || 'error').join(', ')
+            console.warn('[metafields/create] GraphQL fallback failed', {
+              key,
+              status: gqlResp.status,
+              body: gqlText.slice(0, 240),
+              topErr,
+            })
+            errors[key] = `REST 406 + GraphQL fallback failed (${gqlResp.status})${topErr ? `: ${topErr}` : ''}`
             continue
           } catch (gqlErr) {
             errors[key] = `REST 406 + GraphQL exception: ${(gqlErr as Error).message}`
