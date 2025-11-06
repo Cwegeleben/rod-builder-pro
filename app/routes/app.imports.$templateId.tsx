@@ -576,6 +576,15 @@ export default function ImportSettings() {
                 variant="primary"
                 onClick={() => {
                   // Keep clicks client-side; avoid any native form submission if present upstream
+                  try {
+                    // Simple confirmation before starting the crawl
+                    const ok = window.confirm(
+                      'Are you sure you want to Save & Crawl? This may overwrite existing staged items.',
+                    )
+                    if (!ok) return
+                  } catch {
+                    // In non-browser contexts (unlikely here), proceed without confirm
+                  }
                   onSaveAndCrawl()
                 }}
                 loading={crawlLoading || saveLoading}

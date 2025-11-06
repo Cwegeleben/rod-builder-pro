@@ -56,7 +56,8 @@ export type RawMetafieldDefinition = {
 type ShopifyRawClient = ReturnType<typeof mkClient> & { options?: { apiVersion?: string } }
 
 function apiBase(shopName: string, apiVersion?: string) {
-  const v = apiVersion || '2024-10'
+  // Align REST base version with the client default to avoid capability mismatches
+  const v = apiVersion || '2025-01'
   return `https://${shopName}/admin/api/${v}`
 }
 
@@ -190,9 +191,8 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
           key,
           type: typeForKey(),
           description: 'Imported Batson Rod Blank specification',
-          // Owner scoping; include both for forward/backward compatibility
+          // Owner scoping; use owner_type only (owner_resource is no longer accepted on newer API versions)
           owner_type: 'product',
-          owner_resource: 'product',
         },
       }
       const res = await fetch(url, {
@@ -217,6 +217,12 @@ export async function createBatsonDefinitions(shopName: string, accessToken: str
           /* not json */
         }
         const combined = `${res.status} ${res.statusText}${msg ? `: ${msg}` : ''}`
+        // Temporary verbose logging to help diagnose 406/validation errors
+        try {
+          console.warn('[metafields/create] failed', { key, status: res.status, statusText: res.statusText, msg })
+        } catch {
+          /* ignore */
+        }
         // Treat duplicate/exists as success-idempotent
         if (/already\s+been\s+taken|exists|taken/i.test(combined)) {
           created.push(key)
