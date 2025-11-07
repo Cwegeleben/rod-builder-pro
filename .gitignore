@@ -30,6 +30,11 @@ database.sqlite
 /blob-report/
 /playwright/.cache/
 
+# Crawlee / runtime storage artifacts (avoid committing transient run state)
+storage/key_value_stores/
+storage/request_queues/
+storage/datasets/
+
 # Auth state (contains session cookies) – do not commit
 /tests/.auth/
 
