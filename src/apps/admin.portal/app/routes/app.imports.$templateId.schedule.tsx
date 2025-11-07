@@ -134,6 +134,9 @@ export default function ImportSchedulePage(props: Props = {}) {
               ? 'Scheduling available'
               : 'Enable after a published run'}
           </Text>
+          <Text as="span" tone="subdued" variant="bodySm">
+            Importer v2.3
+          </Text>
         </InlineStack>
         {banner ? (
           <Banner tone="warning" onDismiss={() => setBanner(null)}>
