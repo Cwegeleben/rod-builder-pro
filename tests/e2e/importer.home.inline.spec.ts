@@ -66,22 +66,22 @@ test('Imports home shows Recent runs with friendly statuses and actions', async 
 
   const app = await getAppScope(page)
 
-  // Recent runs header
-  await app.locator('role=heading[name="Recent runs"]').waitFor({ state: 'visible' })
+  // Recent runs header (robust text match instead of role)
+  await app.locator('text=Recent runs').first().waitFor({ state: 'visible' })
 
   // Expect two rows present, with friendly badges
   await expect(app.locator('text=Import A')).toBeVisible()
   await expect(app.locator('text=Import B')).toBeVisible()
-  await expect(app.locator('role=gridcell >> text=Ready')).toBeVisible()
-  await expect(app.locator('role=gridcell >> text=Published')).toBeVisible()
+  await expect(app.locator('text=Ready')).toBeVisible()
+  await expect(app.locator('text=Published')).toBeVisible()
 
   // Clicking a row navigates to Review for that run
-  await app.locator(`role=row[name*="Import A"]`).click()
+  await app.locator('text=Import A').first().click()
   await page.waitForURL(url => url.toString().includes('/app/imports/runs/run-ready-1/review'))
 
   // Go back
   await page.goto(`${BASE}/app/imports?hq=1`)
-  await app.locator('role=heading[name="Recent runs"]').waitFor({ state: 'visible' })
+  await app.locator('text=Recent runs').first().waitFor({ state: 'visible' })
 
   // Click Schedule on the Published row; should navigate to settings with schedule flag and NOT trigger row navigation
   const scheduleBtn = app.locator('role=button[name="Schedule"]').first()

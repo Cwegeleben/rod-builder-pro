@@ -55,16 +55,22 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
     ;(async () => {
       // Seed from server-loaded templates first (SSR-safe)
       if (Array.isArray(initialDbTemplates)) {
-        const seeded = initialDbTemplates.map(t => ({
-          templateId: t.id,
-          name: t.name || t.id,
-          state: (Object.values(ImportState) as string[]).includes(t.state)
-            ? (t.state as ImportState)
-            : ImportState.NEEDS_SETTINGS,
-          nextRunAt: undefined,
-          hadFailures: !!t.hadFailures,
-          lastRunAt: t.lastRunAt ?? null,
-        }))
+        const seeded = initialDbTemplates
+          .map(t => ({
+            templateId: t.id,
+            name: t.name || t.id,
+            state: (Object.values(ImportState) as string[]).includes(t.state)
+              ? (t.state as ImportState)
+              : ImportState.NEEDS_SETTINGS,
+            nextRunAt: undefined,
+            hadFailures: !!t.hadFailures,
+            lastRunAt: t.lastRunAt ?? null,
+          }))
+          .sort((a, b) => {
+            const at = a.lastRunAt ? Date.parse(a.lastRunAt) : 0
+            const bt = b.lastRunAt ? Date.parse(b.lastRunAt) : 0
+            return bt - at
+          })
         setRows(seeded)
       }
       try {
@@ -97,21 +103,36 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
           const list = Array.isArray(jr.templates) ? jr.templates : []
           // If API returns successfully, do not fall back to demo; show real rows (or empty state)
           setRows(
-            list.map(t => ({
-              templateId: t.id,
-              name: t.name || t.id,
-              state: (Object.values(ImportState) as string[]).includes(t.state)
-                ? (t.state as ImportState)
-                : ImportState.NEEDS_SETTINGS,
-              nextRunAt: undefined,
-              hadFailures: !!t.hadFailures,
-              preparing: t.preparing || undefined,
-              hasSeeds: !!t.hasSeeds,
-              hasStaged: !!t.hasStaged,
-              queuedCount: typeof t.queuedCount === 'number' ? t.queuedCount : 0,
-              runId: t.lastRunId || undefined,
-              lastRunAt: typeof t.lastRunAt === 'string' ? t.lastRunAt : null,
-            })),
+            list
+              .map(t => ({
+                templateId: t.id,
+                name: t.name || t.id,
+                state: (Object.values(ImportState) as string[]).includes(t.state)
+                  ? (t.state as ImportState)
+                  : ImportState.NEEDS_SETTINGS,
+                nextRunAt: undefined,
+                hadFailures: !!t.hadFailures,
+                preparing: t.preparing || undefined,
+                hasSeeds: !!t.hasSeeds,
+                hasStaged: !!t.hasStaged,
+                queuedCount: typeof t.queuedCount === 'number' ? t.queuedCount : 0,
+                runId: t.lastRunId || undefined,
+                lastRunAt: typeof t.lastRunAt === 'string' ? t.lastRunAt : null,
+              }))
+              .sort((a, b) => {
+                // Prefer preparing.startedAt if present, else lastRunAt; newest first
+                const aKey = a.preparing?.startedAt
+                  ? Date.parse(a.preparing.startedAt)
+                  : a.lastRunAt
+                    ? Date.parse(a.lastRunAt)
+                    : 0
+                const bKey = b.preparing?.startedAt
+                  ? Date.parse(b.preparing.startedAt)
+                  : b.lastRunAt
+                    ? Date.parse(b.lastRunAt)
+                    : 0
+                return bKey - aKey
+              }),
           )
           return
         }
