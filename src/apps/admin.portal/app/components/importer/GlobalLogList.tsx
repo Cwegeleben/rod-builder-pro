@@ -41,7 +41,7 @@ export default function GlobalLogList({
     setHydrated(true)
   }, [])
   const [filterType, setFilterType] = useState<
-    'all' | 'prepare' | 'settings' | 'approve' | 'error' | 'discovery' | 'scrape' | 'schedule' | 'recrawl'
+    'all' | 'prepare' | 'settings' | 'approve' | 'publish' | 'error' | 'discovery' | 'scrape' | 'schedule' | 'recrawl'
   >('all')
   // free-text search removed; only keep structured filters
   const [past, setPast] = useState<'all' | '1h' | '24h' | '7d'>('all')
@@ -49,6 +49,8 @@ export default function GlobalLogList({
   const [runIdFilter, setRunIdFilter] = useState('')
   const [cursor, setCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [groupByRun, setGroupByRun] = useState(false)
   const location = useLocation()
   const [live] = useState(true)
 
@@ -61,7 +63,12 @@ export default function GlobalLogList({
       return { tone: 'success', label: 'success' }
     if (t === 'scrape' || t === 'recrawl' || t.startsWith('recrawl:') || t === 'prepare:report')
       return { tone: 'attention', label: 'progress' }
-    if (t === 'schedule') return { tone: 'warning', label: 'scheduled' }
+    if (t.startsWith('publish:')) {
+      if (t.endsWith(':error')) return { tone: 'critical', label: 'publish' }
+      if (t.endsWith(':start')) return { tone: 'attention', label: 'publish' }
+      return { tone: 'success', label: 'publish' }
+    }
+    if (t === 'schedule' || t.startsWith('schedule:')) return { tone: 'warning', label: 'scheduled' }
     // Default informational
     return { tone: 'info', label: 'info' }
   }
@@ -70,22 +77,8 @@ export default function GlobalLogList({
     return <Badge tone={tone}>{label}</Badge>
   }
 
-  if (!items.length) {
-    return (
-      <Box padding="200" borderWidth="025" borderColor="border" borderRadius="100">
-        <EmptyState
-          heading="No logs yet"
-          secondaryAction={{
-            content: 'IndexTable docs',
-            url: 'https://polaris.shopify.com/components/data-display/index-table',
-          }}
-          image="https://cdn.shopify.com/shopifycloud/web/assets/v1/empty-state-illustration-2e6f7b2a1aa1b7a2c0a7b826fbc7f3b2b7d827f1b5a89e.svg"
-        >
-          <p>Activity from prepare, crawl, review, and publish will appear here.</p>
-        </EmptyState>
-      </Box>
-    )
-  }
+  // When no initial logs, still render filter controls so tests/e2e can fetch via Refresh.
+  const showInitialEmptyState = items.length === 0 && logItems.length === 0
   // Keep internal state in sync on first mount or when parent sends new items
   // (We do not override while live updates are flowing; parent generally only seeds initial list.)
   useMemo(() => {
@@ -143,7 +136,18 @@ export default function GlobalLogList({
       // (query removed)
       if (
         t &&
-        ['all', 'prepare', 'settings', 'approve', 'discovery', 'scrape', 'schedule', 'recrawl', 'error'].includes(t)
+        [
+          'all',
+          'prepare',
+          'settings',
+          'approve',
+          'publish',
+          'discovery',
+          'scrape',
+          'schedule',
+          'recrawl',
+          'error',
+        ].includes(t)
       )
         setFilterType(t)
       if (imp) setFilterImport(imp as 'all' | string)
@@ -235,6 +239,20 @@ export default function GlobalLogList({
       if (type === 'error' || type.endsWith(':error')) {
         return str((p as Record<string, unknown>)['message']) ?? payloadSnippet(payload)
       }
+      if (type.startsWith('publish:')) {
+        if (type.endsWith(':error')) return str(p['message']) ?? payloadSnippet(payload)
+        const totals = (p['totals'] as Record<string, unknown>) || {}
+        const c = num(totals['created']) ?? num(p['created'])
+        const u = num(totals['updated']) ?? num(p['updated'])
+        const s = num(totals['skipped']) ?? num(p['skipped'])
+        const f = num(totals['failed']) ?? num(p['failed'])
+        const parts: string[] = []
+        if (Number.isFinite(c)) parts.push(`created ${c}`)
+        if (Number.isFinite(u)) parts.push(`updated ${u}`)
+        if (Number.isFinite(s)) parts.push(`skipped ${s}`)
+        if (Number.isFinite(f)) parts.push(`failed ${f}`)
+        return parts.length ? parts.join(' • ') : payloadSnippet(payload)
+      }
       if (type === 'crawl:headers') {
         const count = num(p['count'])
         return Number.isFinite(count) ? `headers: ${count}` : 'headers'
@@ -277,10 +295,11 @@ export default function GlobalLogList({
     if (t.startsWith('prepare:')) return 'prepare'
     if (t === 'settings:saved') return 'settings'
     if (t === 'approve' || t === 'APPROVED' || t === 'approved') return 'approve'
+    if (t.startsWith('publish:')) return 'publish'
     if (t === 'error' || t.endsWith(':error')) return 'error'
     if (t === 'discovery') return 'discovery'
     if (t === 'scrape') return 'scrape'
-    if (t === 'schedule') return 'schedule'
+    if (t === 'schedule' || t.startsWith('schedule:')) return 'schedule'
     if (t === 'recrawl' || t.startsWith('recrawl:')) return 'recrawl'
     return 'all'
   }
@@ -344,6 +363,7 @@ export default function GlobalLogList({
                     { label: 'Prepare', value: 'prepare' },
                     { label: 'Settings', value: 'settings' },
                     { label: 'Approve', value: 'approve' },
+                    { label: 'Publish', value: 'publish' },
                     { label: 'Discovery', value: 'discovery' },
                     { label: 'Scrape', value: 'scrape' },
                     { label: 'Schedule', value: 'schedule' },
@@ -456,6 +476,34 @@ export default function GlobalLogList({
         >
           <InlineStack gap="200" align="end" />
         </Filters>
+        {/* Manual refresh button restored for testability / explicit merges */}
+        <InlineStack align="start" gap="200">
+          <Button
+            disabled={refreshing}
+            loading={refreshing}
+            onClick={async () => {
+              setRefreshing(true)
+              try {
+                const r = await fetch('/api/importer/logs')
+                if (r.ok) {
+                  const j = (await r.json()) as { logs?: LogRow[] }
+                  if (Array.isArray(j.logs) && j.logs.length) {
+                    setLogItems(cur => mergeLogs(cur, j.logs as LogRow[]))
+                  }
+                }
+              } catch {
+                // ignore
+              } finally {
+                setRefreshing(false)
+              }
+            }}
+          >
+            Refresh
+          </Button>
+          <Button variant="secondary" onClick={() => setGroupByRun(g => !g)}>
+            {groupByRun ? 'Flat list' : 'Group by run'}
+          </Button>
+        </InlineStack>
         <Divider />
         {/* Delete imports modal removed (per-import delete moved to settings page) */}
         {/* Active runs strip */}
@@ -495,8 +543,88 @@ export default function GlobalLogList({
             </Box>
           )
         })()}
-        {/* Flat logs table/list */}
-        {!hydrated ? null : DISABLE_INDEXTABLE ? (
+        {/* Grouped view */}
+        {groupByRun && hydrated ? (
+          <BlockStack gap="200">
+            {(() => {
+              const byRun = new Map<string, LogRow[]>()
+              for (const r of rows) {
+                if (!byRun.has(r.runId)) byRun.set(r.runId, [])
+                byRun.get(r.runId)!.push(r)
+              }
+              // Sort each run's logs newest->oldest already by rows order; ensure copy
+              const groups = [...byRun.entries()]
+              groups.sort((a, b) => {
+                // Compare newest log timestamps
+                const atA = a[1][0]?.at || ''
+                const atB = b[1][0]?.at || ''
+                return atA > atB ? -1 : 1
+              })
+              return groups.map(([runId, list]) => {
+                const latest = list[0]
+                return (
+                  <Box key={runId} padding="200" borderWidth="025" borderColor="border" borderRadius="050">
+                    <InlineStack gap="200" blockAlign="center">
+                      <span title={new Date(latest.at).toLocaleString()}>
+                        <Text as="span" tone="subdued" variant="bodySm">
+                          {rel(latest.at)}
+                        </Text>
+                      </span>
+                      <Badge>{templateNames[latest.templateId] || latest.templateId}</Badge>
+                      <span
+                        style={{
+                          fontFamily:
+                            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                          maxWidth: 240,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        <Link url={`/app/imports/runs/${runId}/review${location.search}`}>{runId}</Link>
+                      </span>
+                      {activeRunIds.has(runId) ? <Badge tone="attention">live</Badge> : null}
+                      <Badge tone="info">{`${list.length} events`}</Badge>
+                    </InlineStack>
+                    <Box paddingBlockStart="100">
+                      <BlockStack gap="050">
+                        {list.slice(0, 8).map(ev => (
+                          <InlineStack key={`${ev.at}|${ev.type}`} gap="150" blockAlign="center">
+                            {levelBadge(ev.type)}
+                            <span
+                              title={summarize(ev.type, ev.payload) || ''}
+                              style={{
+                                display: 'inline-block',
+                                maxWidth: 520,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              <Text as="span" tone="subdued" variant="bodySm">
+                                {summarize(ev.type, ev.payload) || ''}
+                              </Text>
+                            </span>
+                          </InlineStack>
+                        ))}
+                        {list.length > 8 ? (
+                          <Text as="span" tone="subdued" variant="bodySm">
+                            +{list.length - 8} more…
+                          </Text>
+                        ) : null}
+                      </BlockStack>
+                    </Box>
+                  </Box>
+                )
+              })
+            })()}
+            {rows.length === 0 ? (
+              <Text as="p" tone="subdued">
+                No logs match your filters.
+              </Text>
+            ) : null}
+          </BlockStack>
+        ) : !hydrated ? null : DISABLE_INDEXTABLE ? (
           <BlockStack gap="150">
             {rows.map(r => {
               const key = `${r.at}|${r.type}|${r.runId}`
@@ -556,85 +684,98 @@ export default function GlobalLogList({
             })}
           </BlockStack>
         ) : (
-          <IndexTable
-            resourceName={{ singular: 'log', plural: 'logs' }}
-            itemCount={rows.length}
-            selectable={false}
-            condensed
-            headings={[
-              { title: 'When' },
-              { title: 'Level' },
-              { title: 'Import' },
-              { title: 'Run' },
-              { title: 'Message' },
-            ]}
-          >
-            {rows.map((r, i) => {
-              const key = `${r.at}|${r.type}|${r.runId}`
-              const displayName = templateNames[r.templateId] || r.templateId
-              return (
-                <IndexTable.Row id={key} key={key} position={i}>
-                  <IndexTable.Cell>
-                    <span title={new Date(r.at).toLocaleString()}>
-                      <Text as="span" tone="subdued">
-                        {rel(r.at)}
-                      </Text>
-                    </span>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>{levelBadge(r.type)}</IndexTable.Cell>
-                  <IndexTable.Cell>
-                    <InlineStack gap="150" blockAlign="center">
-                      <Link url={`/app/imports/${r.templateId}${location.search}`}>
-                        <Badge>{displayName}</Badge>
-                      </Link>
-                      {displayName !== r.templateId ? (
-                        <Link url={`/app/imports/${r.templateId}${location.search}`}>
-                          <Text as="span" tone="subdued" variant="bodySm">
-                            ({r.templateId})
-                          </Text>
-                        </Link>
-                      ) : null}
-                    </InlineStack>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    <InlineStack gap="100" align="start">
-                      <Text as="span" tone="subdued">
-                        run
-                      </Text>
-                      <span
-                        style={{
-                          fontFamily:
-                            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                        }}
-                      >
-                        <Link url={`/app/imports/runs/${r.runId}/review${location.search}`}>{r.runId}</Link>
-                      </span>
-                      {activeRunIds.has(r.runId) ? <Badge tone="attention">live</Badge> : null}
-                    </InlineStack>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    <BlockStack gap="100">
-                      <span
-                        title={(() => {
-                          try {
-                            const s = summarize(r.type, r.payload) || ''
-                            const full = r.payload == null ? '' : JSON.stringify(r.payload)
-                            return full && full !== s ? full : s
-                          } catch {
-                            return summarize(r.type, r.payload) || ''
-                          }
-                        })()}
-                      >
-                        <Text as="span" tone="subdued" variant="bodySm">
-                          {summarize(r.type, r.payload) ?? ''}
+          <div style={{ maxHeight: '540px', overflowY: 'auto' }}>
+            <IndexTable
+              resourceName={{ singular: 'log', plural: 'logs' }}
+              itemCount={rows.length}
+              selectable={false}
+              condensed
+              headings={[
+                { title: 'When' },
+                { title: 'Level' },
+                { title: 'Import' },
+                { title: 'Run' },
+                { title: 'Message' },
+              ]}
+            >
+              {rows.map((r, i) => {
+                const key = `${r.at}|${r.type}|${r.runId}`
+                const displayName = templateNames[r.templateId] || r.templateId
+                return (
+                  <IndexTable.Row id={key} key={key} position={i}>
+                    <IndexTable.Cell>
+                      <span title={new Date(r.at).toLocaleString()}>
+                        <Text as="span" tone="subdued">
+                          {rel(r.at)}
                         </Text>
                       </span>
-                    </BlockStack>
-                  </IndexTable.Cell>
-                </IndexTable.Row>
-              )
-            })}
-          </IndexTable>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>{levelBadge(r.type)}</IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <InlineStack gap="150" blockAlign="center">
+                        <Link url={`/app/imports/${r.templateId}${location.search}`}>
+                          <Badge>{displayName}</Badge>
+                        </Link>
+                        {displayName !== r.templateId ? (
+                          <Link url={`/app/imports/${r.templateId}${location.search}`}>
+                            <Text as="span" tone="subdued" variant="bodySm">
+                              ({r.templateId})
+                            </Text>
+                          </Link>
+                        ) : null}
+                      </InlineStack>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <InlineStack gap="100" align="start">
+                        <Text as="span" tone="subdued">
+                          run
+                        </Text>
+                        <span
+                          style={{
+                            fontFamily:
+                              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                            maxWidth: 240,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <Link url={`/app/imports/runs/${r.runId}/review${location.search}`}>{r.runId}</Link>
+                        </span>
+                        {activeRunIds.has(r.runId) ? <Badge tone="attention">live</Badge> : null}
+                      </InlineStack>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <BlockStack gap="100">
+                        <span
+                          title={(() => {
+                            try {
+                              const s = summarize(r.type, r.payload) || ''
+                              const full = r.payload == null ? '' : JSON.stringify(r.payload)
+                              return full && full !== s ? full : s
+                            } catch {
+                              return summarize(r.type, r.payload) || ''
+                            }
+                          })()}
+                          style={{
+                            display: 'inline-block',
+                            maxWidth: 520,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <Text as="span" tone="subdued" variant="bodySm">
+                            {summarize(r.type, r.payload) ?? ''}
+                          </Text>
+                        </span>
+                      </BlockStack>
+                    </IndexTable.Cell>
+                  </IndexTable.Row>
+                )
+              })}
+            </IndexTable>
+          </div>
         )}
         {/* Load older */}
         <InlineStack align="center">
@@ -671,9 +812,24 @@ export default function GlobalLogList({
           </Button>
         </InlineStack>
         {rows.length === 0 ? (
-          <Text as="p" tone="subdued">
-            No logs match your filters.
-          </Text>
+          showInitialEmptyState ? (
+            <Box padding="200" borderWidth="025" borderColor="border" borderRadius="100">
+              <EmptyState
+                heading="No logs yet"
+                secondaryAction={{
+                  content: 'IndexTable docs',
+                  url: 'https://polaris.shopify.com/components/data-display/index-table',
+                }}
+                image="https://cdn.shopify.com/shopifycloud/web/assets/v1/empty-state-illustration-2e6f7b2a1aa1b7a2c0a7b826fbc7f3b2b7d827f1b5a89e.svg"
+              >
+                <p>Activity from prepare, crawl, review, and publish will appear here.</p>
+              </EmptyState>
+            </Box>
+          ) : (
+            <Text as="p" tone="subdued">
+              No logs match your filters.
+            </Text>
+          )
         ) : null}
       </BlockStack>
     </>

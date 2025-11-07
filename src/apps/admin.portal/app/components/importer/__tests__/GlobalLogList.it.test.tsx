@@ -123,6 +123,72 @@ describe('GlobalLogList (browser integration)', () => {
     await expect.element(screen.getByRole('link', { name: 'run-1' })).toBeVisible()
   })
 
+  test('publish filter shows only publish events and summarizes totals', async () => {
+    const now = Date.now()
+    const t1 = new Date(now - 3000).toISOString()
+    const t2 = new Date(now - 2000).toISOString()
+    const t3 = new Date(now - 1000).toISOString()
+    const items: LogRow[] = [
+      { at: t1, templateId: 'tplA', runId: 'run-1', type: 'prepare:start', payload: {} },
+      {
+        at: t2,
+        templateId: 'tplA',
+        runId: 'run-1',
+        type: 'publish:done',
+        payload: { totals: { created: 2, updated: 1, skipped: 0, failed: 0 } },
+      },
+      { at: t3, templateId: 'tplB', runId: 'run-2', type: 'error', payload: { message: 'oops' } },
+    ]
+
+    const screen = render(
+      <AppProvider i18n={en}>
+        <GlobalLogList items={items} templateNames={{ tplA: 'Import A', tplB: 'Import B' }} />
+      </AppProvider>,
+    )
+
+    // Open Type filter and select Publish, then apply
+    const moreFilters = screen.getByRole('button', { name: /More filters/i })
+    await moreFilters.click()
+    const typePublish = screen.getByRole('radio', { name: /Publish/i })
+    await typePublish.click()
+    const apply = screen.getByRole('button', { name: /Apply/i })
+    await apply.click()
+
+    // Expect only publish row content remains; summary should include created/updated
+    await expect.element(screen.getByText('Import A')).toBeVisible()
+    await expect.element(screen.getByText(/created 2/)).toBeVisible()
+    await expect.element(screen.getByText(/updated 1/)).toBeVisible()
+
+    // Non-publish rows should be filtered out (prepare, error)
+    let missing = 0
+    try {
+      screen.getByText('Import B')
+    } catch {
+      missing++
+    }
+    expect(missing).toBe(1)
+  })
+
+  test('reads publish type from URL and shows publish badge label', async () => {
+    window.history.replaceState({}, '', '/app/imports?type=publish')
+
+    const now = new Date().toISOString()
+    const items: LogRow[] = [
+      { at: now, templateId: 'tplA', runId: 'run-1', type: 'publish:start', payload: {} },
+      { at: now, templateId: 'tplA', runId: 'run-1', type: 'publish:done', payload: { totals: { created: 1 } } },
+    ]
+
+    const screen = render(
+      <AppProvider i18n={en}>
+        <GlobalLogList items={items} templateNames={{ tplA: 'Import A' }} />
+      </AppProvider>,
+    )
+
+    // Badge label should read 'publish' for publish:* types
+    // Badge label text should be present; use a generic text query
+    await expect.element(screen.getByText(/publish/i)).toBeVisible()
+  })
+
   test('load older appends more logs and preserves ordering', async () => {
     const now = Date.now()
     const t1 = new Date(now - 1000).toISOString()
@@ -157,6 +223,32 @@ describe('GlobalLogList (browser integration)', () => {
     // And existing links remain
     await expect.element(screen.getByRole('link', { name: 'run-1' })).toBeVisible()
     await expect.element(screen.getByRole('link', { name: 'run-2' })).toBeVisible()
+  })
+
+  test('group by run toggle groups rows and shows event counts', async () => {
+    const now = Date.now()
+    const t1 = new Date(now - 3000).toISOString()
+    const t2 = new Date(now - 2000).toISOString()
+    const t3 = new Date(now - 1000).toISOString()
+    const items: LogRow[] = [
+      { at: t1, templateId: 'tplA', runId: 'run-1', type: 'prepare:start', payload: {} },
+      { at: t2, templateId: 'tplA', runId: 'run-1', type: 'prepare:report', payload: { done: 1, total: 3 } },
+      { at: t3, templateId: 'tplA', runId: 'run-1', type: 'prepare:done', payload: { adds: 2 } },
+    ]
+
+    const screen = render(
+      <AppProvider i18n={en}>
+        <GlobalLogList items={items} templateNames={{ tplA: 'Import A' }} />
+      </AppProvider>,
+    )
+
+    const toggle = screen.getByRole('button', { name: /Group by run/i })
+    await toggle.click()
+
+    // Expect to see events count badge text
+    await expect.element(screen.getByText(/3 events/)).toBeVisible()
+    // And the run link still present
+    await expect.element(screen.getByRole('link', { name: 'run-1' })).toBeVisible()
   })
 
   test('load older respects Past filter by including since param', async () => {

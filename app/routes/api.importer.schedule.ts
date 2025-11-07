@@ -107,7 +107,7 @@ export async function action({ request }: ActionFunctionArgs) {
       data: {
         templateId,
         runId: `schedule-${Date.now()}`,
-        type: 'SCHEDULE_UPDATE',
+        type: 'schedule:update',
         payload: { enabled: merged.enabled, freq: merged.freq, at: merged.at, nextRunAt: merged.nextRunAt },
       },
     })

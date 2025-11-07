@@ -35,6 +35,26 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       at: typeof rawSchedule.at === 'string' ? rawSchedule.at : '09:00',
       nextRunAt: typeof rawSchedule.nextRunAt === 'string' ? rawSchedule.nextRunAt : undefined,
     }
+    // Observability: emit schedule:view (best-effort; ignore errors)
+    try {
+      await prisma.importLog.create({
+        data: {
+          templateId,
+          runId: `schedule-${Date.now()}`,
+          type: 'schedule:view',
+          payload: {
+            state: row.state,
+            enabled: sch.enabled,
+            freq: sch.freq,
+            at: sch.at,
+            nextRunAt: sch.nextRunAt,
+            ua: request.headers.get('user-agent') || undefined,
+          },
+        },
+      })
+    } catch {
+      // ignore logging failure
+    }
     return json<LoaderData>({
       ok: true,
       templateId,
