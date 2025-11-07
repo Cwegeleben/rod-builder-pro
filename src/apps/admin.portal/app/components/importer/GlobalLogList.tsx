@@ -515,18 +515,41 @@ export default function GlobalLogList({
                         <Link url={`/app/imports/${r.templateId}${location.search}`}>
                           <Badge>{displayName}</Badge>
                         </Link>
-                        <Text as="span" tone="subdued">
-                          run
-                        </Text>
-                        <Link url={`/app/imports/runs/${r.runId}/review${location.search}`}>{r.runId}</Link>
+                        <span
+                          style={{
+                            fontFamily:
+                              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                          }}
+                        >
+                          <Link url={`/app/imports/runs/${r.runId}/review${location.search}`}>{r.runId}</Link>
+                        </span>
                         {activeRunIds.has(r.runId) ? <Badge tone="attention">live</Badge> : null}
                       </InlineStack>
                     </InlineStack>
                   </InlineStack>
                   <Box paddingBlockStart="100">
-                    <Text as="span" tone="subdued" variant="bodySm">
-                      {summarize(r.type, r.payload) ?? ''}
-                    </Text>
+                    <span
+                      title={(() => {
+                        try {
+                          const s = summarize(r.type, r.payload) || ''
+                          const full = r.payload == null ? '' : JSON.stringify(r.payload)
+                          return full && full !== s ? full : s
+                        } catch {
+                          return summarize(r.type, r.payload) || ''
+                        }
+                      })()}
+                      style={{
+                        display: 'inline-block',
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        {summarize(r.type, r.payload) ?? ''}
+                      </Text>
+                    </span>
                   </Box>
                 </Box>
               )
@@ -578,15 +601,34 @@ export default function GlobalLogList({
                       <Text as="span" tone="subdued">
                         run
                       </Text>
-                      <Link url={`/app/imports/runs/${r.runId}/review${location.search}`}>{r.runId}</Link>
+                      <span
+                        style={{
+                          fontFamily:
+                            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                        }}
+                      >
+                        <Link url={`/app/imports/runs/${r.runId}/review${location.search}`}>{r.runId}</Link>
+                      </span>
                       {activeRunIds.has(r.runId) ? <Badge tone="attention">live</Badge> : null}
                     </InlineStack>
                   </IndexTable.Cell>
                   <IndexTable.Cell>
                     <BlockStack gap="100">
-                      <Text as="span" tone="subdued" variant="bodySm">
-                        {summarize(r.type, r.payload) ?? ''}
-                      </Text>
+                      <span
+                        title={(() => {
+                          try {
+                            const s = summarize(r.type, r.payload) || ''
+                            const full = r.payload == null ? '' : JSON.stringify(r.payload)
+                            return full && full !== s ? full : s
+                          } catch {
+                            return summarize(r.type, r.payload) || ''
+                          }
+                        })()}
+                      >
+                        <Text as="span" tone="subdued" variant="bodySm">
+                          {summarize(r.type, r.payload) ?? ''}
+                        </Text>
+                      </span>
                     </BlockStack>
                   </IndexTable.Cell>
                 </IndexTable.Row>
