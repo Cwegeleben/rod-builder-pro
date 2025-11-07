@@ -689,7 +689,6 @@ export default function GlobalLogList({
               resourceName={{ singular: 'log', plural: 'logs' }}
               itemCount={rows.length}
               selectable={false}
-              condensed
               headings={[
                 { title: 'When' },
                 { title: 'Level' },
