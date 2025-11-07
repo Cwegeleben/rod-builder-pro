@@ -16,25 +16,19 @@ primary_region = 'sjc'
 [env]
   PORT = '3000'
   HOST = '0.0.0.0'
-  # Persist Prisma SQLite database on the mounted volume
-  DATABASE_URL = 'file:/data/dev.sqlite'
   SCOPES = 'write_products,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions'
   SHOPIFY_APP_URL = 'https://rbp-app.fly.dev'
   ENABLE_SMOKES = 'true'
   SMOKE_ALLOW_PROD = '1'
-  SMOKE_TOKEN = 'smoke-ok'
   # Allow any dev HQ shop to access HQ-gated routes; tighten to exact bare if desired via HQ_SHOPS
   HQ_SHOPS_REGEX = '^rbp-hq.*dev.*$'
   # Temporarily allow HQ override via URL (?hq=1), cookie (rbp_hq=1), or header (x-hq-override: 1)
   # This enables direct access to debugging/status endpoints outside the embedded Admin during troubleshooting
-  ALLOW_HQ_OVERRIDE = '1'
+  ALLOW_HQ_OVERRIDE = '0'
   # Cap V8 old space for a 2GB machine (leave ~25% native overhead)
   NODE_OPTIONS = '--max-old-space-size=1536'
   # Help Crawlee detect available memory correctly in containerized env
   CRAWLEE_MEMORY_MBYTES = '1536'
-  # <!-- BEGIN RBP GENERATED: importer-discover-headless-harden-v1 -->
-  PLAYWRIGHT_AVAILABLE = '1'
-  # <!-- END RBP GENERATED: importer-discover-headless-harden-v1 -->
 
 [processes]
   app = 'scripts/start-production.sh'

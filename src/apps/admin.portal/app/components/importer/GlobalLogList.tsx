@@ -1,21 +1,21 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation } from '@remix-run/react'
 import {
   Text,
   Badge,
   InlineStack,
   BlockStack,
   Box,
-  Button,
   Filters,
   ChoiceList,
   Divider,
-  Collapsible,
   IndexTable,
   Link,
   EmptyState,
+  TextField,
+  Button,
 } from '@shopify/polaris'
-import { Modal } from '@shopify/polaris'
 
 type LogRow = {
   at: string
@@ -32,8 +32,8 @@ export default function GlobalLogList({
   items?: LogRow[]
   templateNames?: Record<string, string>
 }) {
-  // Temporary: disable Polaris IndexTable to avoid td/li nesting errors in embedded context
-  const DISABLE_INDEXTABLE = true
+  // Enable Polaris IndexTable; keep client-only hydration to avoid SSR/CSR condensed mode mismatches
+  const DISABLE_INDEXTABLE = false
   const [logItems, setLogItems] = useState<LogRow[]>(items)
   const [hydrated, setHydrated] = useState(false)
   // Defer IndexTable rendering to client to avoid SSR/CSR mismatches in condensed mode
@@ -43,48 +43,31 @@ export default function GlobalLogList({
   const [filterType, setFilterType] = useState<
     'all' | 'prepare' | 'settings' | 'approve' | 'error' | 'discovery' | 'scrape' | 'schedule' | 'recrawl'
   >('all')
-  const [query, setQuery] = useState('')
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  // free-text search removed; only keep structured filters
   const [past, setPast] = useState<'all' | '1h' | '24h' | '7d'>('all')
+  const [filterImport, setFilterImport] = useState<'all' | string>('all')
+  const [runIdFilter, setRunIdFilter] = useState('')
   const [cursor, setCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [deleteOpen, setDeleteOpen] = useState(false)
+  const location = useLocation()
+  const [live] = useState(true)
 
-  const badge = (t: LogRow['type']) => {
-    switch (t) {
-      case 'discovery':
-        return <Badge tone="info">discovery</Badge>
-      case 'scrape':
-        return <Badge tone="attention">scrape</Badge>
-      case 'drafts':
-        return <Badge>drafts</Badge>
-      case 'approve':
-      case 'APPROVED':
-      case 'approved':
-        return <Badge tone="success">approve</Badge>
-      case 'abort':
-        return <Badge tone="critical">abort</Badge>
-      case 'schedule':
-        return <Badge tone="info">schedule</Badge>
-      case 'recrawl':
-        return <Badge tone="attention">recrawl</Badge>
-      case 'error':
-        return <Badge tone="critical">error</Badge>
-      case 'template:created':
-        return <Badge tone="success">created</Badge>
-      case 'settings:saved':
-        return <Badge tone="info">settings</Badge>
-      case 'prepare:start':
-        return <Badge tone="info">prepare</Badge>
-      case 'prepare:report':
-        return <Badge tone="attention">progress</Badge>
-      case 'prepare:done':
-        return <Badge tone="success">prepared</Badge>
-      case 'prepare:error':
-        return <Badge tone="critical">prep error</Badge>
-      default:
-        return <Badge>{t}</Badge>
-    }
+  // Map raw type -> high-level level badge
+  const levelForType = (
+    t: string,
+  ): { tone: 'success' | 'critical' | 'attention' | 'warning' | 'info'; label: string } => {
+    if (t === 'error' || t.endsWith(':error') || t === 'abort') return { tone: 'critical', label: 'error' }
+    if (t === 'approve' || t === 'APPROVED' || t === 'approved' || t === 'template:created' || t === 'prepare:done')
+      return { tone: 'success', label: 'success' }
+    if (t === 'scrape' || t === 'recrawl' || t.startsWith('recrawl:') || t === 'prepare:report')
+      return { tone: 'attention', label: 'progress' }
+    if (t === 'schedule') return { tone: 'warning', label: 'scheduled' }
+    // Default informational
+    return { tone: 'info', label: 'info' }
+  }
+  const levelBadge = (t: LogRow['type']) => {
+    const { tone, label } = levelForType(t)
+    return <Badge tone={tone}>{label}</Badge>
   }
 
   if (!items.length) {
@@ -92,9 +75,8 @@ export default function GlobalLogList({
       <Box padding="200" borderWidth="025" borderColor="border" borderRadius="100">
         <EmptyState
           heading="No logs yet"
-          action={{ content: 'Refresh', onAction: () => window.location.reload() }}
           secondaryAction={{
-            content: 'Learn more',
+            content: 'IndexTable docs',
             url: 'https://polaris.shopify.com/components/data-display/index-table',
           }}
           image="https://cdn.shopify.com/shopifycloud/web/assets/v1/empty-state-illustration-2e6f7b2a1aa1b7a2c0a7b826fbc7f3b2b7d827f1b5a89e.svg"
@@ -109,8 +91,92 @@ export default function GlobalLogList({
   useMemo(() => {
     if (Array.isArray(items) && items.length && logItems.length === 0) {
       setLogItems(items)
+      try {
+        const last = items[items.length - 1]
+        setCursor(last ? last.at : null)
+      } catch {
+        // ignore
+      }
     }
   }, [items])
+
+  // Silent SSE stream: auto-merge latest logs in background when live enabled
+  useEffect(() => {
+    if (!live) return
+    let es: EventSource | null = null
+    try {
+      es = new EventSource('/api/importer/logs/stream')
+      es.onmessage = ev => {
+        try {
+          const data = JSON.parse(ev.data || '{}') as { logs?: LogRow[] }
+          if (Array.isArray(data.logs) && data.logs.length) {
+            setLogItems(cur => mergeLogs(cur, data.logs!))
+          }
+        } catch {
+          // ignore malformed
+        }
+      }
+      es.onerror = () => {
+        // Let the browser retry automatically; if it closes, we fallback silently
+      }
+    } catch {
+      // SSE not supported; ignore
+    }
+    return () => {
+      try {
+        es?.close()
+      } catch {
+        /* noop */
+      }
+    }
+  }, [live])
+
+  // Read initial filters from URL on mount (client only)
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return
+      const sp = new URLSearchParams(window.location.search || '')
+      const t = sp.get('type') as typeof filterType | null
+      const imp = sp.get('import')
+      const run = sp.get('run')
+      const p = sp.get('past') as typeof past | null
+      // (query removed)
+      if (
+        t &&
+        ['all', 'prepare', 'settings', 'approve', 'discovery', 'scrape', 'schedule', 'recrawl', 'error'].includes(t)
+      )
+        setFilterType(t)
+      if (imp) setFilterImport(imp as 'all' | string)
+      if (run) setRunIdFilter(run)
+      if (p && ['all', '1h', '24h', '7d'].includes(p)) setPast(p)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  // Persist filters to URL (replaceState) on change
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return
+      const sp = new URLSearchParams(window.location.search || '')
+      const setOrDel = (k: string, v: string | null | undefined) => {
+        if (v && v !== 'all' && v !== '') sp.set(k, v)
+        else sp.delete(k)
+      }
+      setOrDel('type', filterType)
+      setOrDel('import', filterImport)
+      setOrDel('run', runIdFilter)
+      setOrDel('past', past)
+      // query removed from persistence
+      const qs = sp.toString()
+      const next = `${window.location.pathname}${qs ? `?${qs}` : ''}`
+      if (next !== `${window.location.pathname}${window.location.search}`) {
+        window.history.replaceState(null, '', next)
+      }
+    } catch {
+      // ignore history failures
+    }
+  }, [filterType, filterImport, runIdFilter, past])
 
   // compact JSON preview for row
   const payloadSnippet = (payload: unknown): string | null => {
@@ -169,7 +235,11 @@ export default function GlobalLogList({
       if (type === 'error' || type.endsWith(':error')) {
         return str((p as Record<string, unknown>)['message']) ?? payloadSnippet(payload)
       }
-      if (type === 'discovery' || type === 'scrape' || type === 'recrawl') {
+      if (type === 'crawl:headers') {
+        const count = num(p['count'])
+        return Number.isFinite(count) ? `headers: ${count}` : 'headers'
+      }
+      if (type === 'discovery' || type === 'scrape' || type === 'recrawl' || type.startsWith('recrawl:')) {
         const u = str(p['url']) ?? str(p['seed']) ?? str(p['source'])
         return u ?? payloadSnippet(payload)
       }
@@ -211,47 +281,55 @@ export default function GlobalLogList({
     if (t === 'discovery') return 'discovery'
     if (t === 'scrape') return 'scrape'
     if (t === 'schedule') return 'schedule'
-    if (t === 'recrawl') return 'recrawl'
+    if (t === 'recrawl' || t.startsWith('recrawl:')) return 'recrawl'
     return 'all'
   }
 
-  // filter + group by templateId
+  // filter rows (flat list)
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
     return logItems.filter(r => {
       if (filterType !== 'all' && typeCategory(r.type) !== filterType) return false
-      if (!q) return true
-      const hay = `${r.templateId} ${r.runId} ${r.type} ${payloadSnippet(r.payload) || ''}`.toLowerCase()
-      return hay.includes(q)
+      if (filterImport !== 'all' && r.templateId !== filterImport) return false
+      if (runIdFilter && !r.runId.toLowerCase().includes(runIdFilter.trim().toLowerCase())) return false
+      return true
     })
-  }, [logItems, filterType, query])
-
-  const grouped = useMemo(() => {
-    const g = new Map<string, LogRow[]>()
-    for (const r of filtered) {
-      if (!g.has(r.templateId)) g.set(r.templateId, [])
-      g.get(r.templateId)!.push(r)
-    }
-    // sort each group desc by time
-    for (const [k, arr] of g.entries()) {
-      arr.sort((a, b) => (a.at > b.at ? -1 : 1))
-      g.set(k, arr)
-    }
-    return g
+  }, [logItems, filterType, filterImport, runIdFilter])
+  // newest -> oldest
+  const rows = useMemo(() => {
+    const arr = [...filtered]
+    arr.sort((a, b) => (a.at > b.at ? -1 : 1))
+    return arr
   }, [filtered])
+
+  // Determine active runs: latest log per run is a prepare:* that is not done/error
+  const activeRunIds = useMemo(() => {
+    const latest = new Map<string, LogRow>()
+    for (const l of logItems) {
+      const prev = latest.get(l.runId)
+      if (!prev || prev.at < l.at) latest.set(l.runId, l)
+    }
+    const set = new Set<string>()
+    for (const [rid, row] of latest.entries()) {
+      if (row.type.startsWith('prepare:') && row.type !== 'prepare:done' && row.type !== 'prepare:error') {
+        set.add(rid)
+      }
+    }
+    return set
+  }, [logItems])
 
   return (
     <>
-      {/* Controls */}
+      {/* Controls (search/delete removed; keep structured filters). Live SSE runs silently. */}
       <BlockStack gap="200">
         <Filters
-          queryValue={query}
-          onQueryChange={setQuery}
-          onQueryClear={() => setQuery('')}
+          queryValue=""
+          onQueryChange={() => {}}
+          onQueryClear={() => {}}
           onClearAll={() => {
-            setQuery('')
             setFilterType('all')
             setPast('all')
+            setFilterImport('all')
+            setRunIdFilter('')
           }}
           filters={[
             {
@@ -275,6 +353,37 @@ export default function GlobalLogList({
                   selected={[filterType]}
                   onChange={vals => setFilterType((vals[0] as typeof filterType) || 'all')}
                   allowMultiple={false}
+                />
+              ),
+            },
+            {
+              key: 'import',
+              label: 'Import',
+              filter: (
+                <ChoiceList
+                  title="Import"
+                  titleHidden
+                  choices={[
+                    { label: 'All', value: 'all' },
+                    ...Object.entries(templateNames).map(([id, name]) => ({ label: name || id, value: id })),
+                  ]}
+                  selected={[filterImport]}
+                  onChange={vals => setFilterImport(((vals[0] as string) || 'all') as 'all' | string)}
+                  allowMultiple={false}
+                />
+              ),
+            },
+            {
+              key: 'run',
+              label: 'Run ID',
+              filter: (
+                <TextField
+                  label="Run ID"
+                  labelHidden
+                  value={runIdFilter}
+                  onChange={setRunIdFilter}
+                  autoComplete="off"
+                  placeholder="Filter by run id"
                 />
               ),
             },
@@ -306,6 +415,24 @@ export default function GlobalLogList({
                     label: `Type: ${filterType}`,
                     onRemove: () => setFilterType('all'),
                   },
+                  ...(filterImport !== 'all'
+                    ? [
+                        {
+                          key: 'import',
+                          label: `Import: ${templateNames[filterImport] || filterImport}`,
+                          onRemove: () => setFilterImport('all'),
+                        },
+                      ]
+                    : []),
+                  ...(runIdFilter
+                    ? [
+                        {
+                          key: 'run',
+                          label: `Run: ${runIdFilter}`,
+                          onRemove: () => setRunIdFilter(''),
+                        },
+                      ]
+                    : []),
                   ...(past !== 'all'
                     ? [
                         {
@@ -327,42 +454,14 @@ export default function GlobalLogList({
                 : []
           }
         >
-          <InlineStack gap="200" align="end">
-            <Button tone="critical" onClick={() => setDeleteOpen(true)} accessibilityLabel="Delete imports">
-              Delete imports…
-            </Button>
-            <LiveControls
-              onRefreshRequest={async () => {
-                try {
-                  const qs = new URLSearchParams()
-                  if (past !== 'all') qs.set('since', past)
-                  const r = await fetch(`/api/importer/logs?${qs.toString()}`)
-                  if (r.ok) {
-                    const j = (await r.json()) as { logs?: LogRow[] }
-                    if (Array.isArray(j.logs)) setLogItems(j.logs)
-                    // reset cursor based on newest batch
-                    const last = j.logs && j.logs[j.logs.length - 1]
-                    setCursor(last ? last.at : null)
-                  }
-                } catch {
-                  // ignore
-                }
-              }}
-              onLogs={rows => {
-                if (Array.isArray(rows)) setLogItems(rows)
-                const last = rows && rows[rows.length - 1]
-                setCursor(last ? last.at : null)
-              }}
-            />
-          </InlineStack>
+          <InlineStack gap="200" align="end" />
         </Filters>
         <Divider />
-        {/* Delete imports modal */}
-        <DeleteImports open={deleteOpen} onClose={() => setDeleteOpen(false)} templates={templateNames} />
+        {/* Delete imports modal removed (per-import delete moved to settings page) */}
         {/* Active runs strip */}
         {(() => {
           const latestByRun = new Map<string, LogRow>()
-          for (const l of logItems) {
+          for (const l of rows) {
             const prev = latestByRun.get(l.runId)
             if (!prev || prev.at < l.at) latestByRun.set(l.runId, l)
           }
@@ -396,188 +495,140 @@ export default function GlobalLogList({
             </Box>
           )
         })()}
-        {[...grouped.entries()].map(([tpl, rows]) => {
-          const resourceName = { singular: 'log', plural: 'logs' }
-          const displayName = templateNames[tpl] || tpl
-          return (
-            <Box key={tpl} padding="200" borderWidth="025" borderColor="border" borderRadius="100">
-              <BlockStack gap="200">
-                <InlineStack align="space-between">
-                  <InlineStack gap="200">
-                    <Text as="h3" variant="headingSm">
-                      template {displayName}
-                    </Text>
-                    {displayName !== tpl ? (
-                      <Text as="span" tone="subdued" variant="bodySm">
-                        ({tpl})
-                      </Text>
-                    ) : null}
-                    <Badge>{String(rows.length)}</Badge>
+        {/* Flat logs table/list */}
+        {!hydrated ? null : DISABLE_INDEXTABLE ? (
+          <BlockStack gap="150">
+            {rows.map(r => {
+              const key = `${r.at}|${r.type}|${r.runId}`
+              const displayName = templateNames[r.templateId] || r.templateId
+              return (
+                <Box key={key} padding="200" borderWidth="025" borderColor="border" borderRadius="050">
+                  <InlineStack align="space-between" blockAlign="start">
+                    <InlineStack gap="200" blockAlign="center">
+                      <span title={new Date(r.at).toLocaleString()}>
+                        <Text as="span" tone="subdued">
+                          {rel(r.at)}
+                        </Text>
+                      </span>
+                      {levelBadge(r.type)}
+                      <InlineStack gap="100" align="start">
+                        <Link url={`/app/imports/${r.templateId}${location.search}`}>
+                          <Badge>{displayName}</Badge>
+                        </Link>
+                        <Text as="span" tone="subdued">
+                          run
+                        </Text>
+                        <Link url={`/app/imports/runs/${r.runId}/review${location.search}`}>{r.runId}</Link>
+                        {activeRunIds.has(r.runId) ? <Badge tone="attention">live</Badge> : null}
+                      </InlineStack>
+                    </InlineStack>
                   </InlineStack>
-                </InlineStack>
-                {/* Render simple list fallback to avoid IndexTable condensed mismatches */}
-                {!hydrated ? null : DISABLE_INDEXTABLE ? (
-                  <BlockStack gap="150">
-                    {rows.map((r, i) => {
-                      const key = `${r.at}|${r.type}|${r.runId}`
-                      const isOpen = !!expanded[key]
-                      return (
-                        <Box key={key} padding="200" borderWidth="025" borderColor="border" borderRadius="050">
-                          <InlineStack align="space-between" blockAlign="start">
-                            <InlineStack gap="200" blockAlign="center">
-                              <Text as="span" tone="subdued">
-                                {rel(r.at)}
-                              </Text>
-                              {badge(r.type)}
-                              <InlineStack gap="100" align="start">
-                                <Text as="span" tone="subdued">
-                                  run
-                                </Text>
-                                <Link url={`/app/imports/runs/${r.runId}/review`}>{r.runId}</Link>
-                              </InlineStack>
-                            </InlineStack>
-                            <InlineStack gap="100">
-                              <Button onClick={() => setExpanded(cur => ({ ...cur, [key]: !cur[key] }))}>
-                                {isOpen ? 'Hide' : 'Details'}
-                              </Button>
-                              <Button
-                                variant="plain"
-                                onClick={async () => {
-                                  try {
-                                    await navigator.clipboard.writeText(JSON.stringify(r.payload ?? null, null, 2))
-                                  } catch {
-                                    // ignore copy errors
-                                  }
-                                }}
-                              >
-                                Copy
-                              </Button>
-                            </InlineStack>
-                          </InlineStack>
-                          <Box paddingBlockStart="100">
-                            <Text as="span" tone="subdued" variant="bodySm">
-                              {summarize(r.type, r.payload) ?? ''}
-                            </Text>
-                          </Box>
-                          <Collapsible open={isOpen} id={`log-${i}`}>
-                            <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
-                              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0 }}>
-                                {JSON.stringify(r.payload ?? null, null, 2)}
-                              </pre>
-                            </div>
-                          </Collapsible>
-                        </Box>
-                      )
-                    })}
-                  </BlockStack>
-                ) : (
-                  <IndexTable
-                    resourceName={resourceName}
-                    itemCount={rows.length}
-                    selectable={false}
-                    condensed
-                    headings={[
-                      { title: 'When' },
-                      { title: 'Type' },
-                      { title: 'Run' },
-                      { title: 'Summary' },
-                      { title: 'Actions' },
-                    ]}
-                  >
-                    {rows.map((r, i) => {
-                      const key = `${r.at}|${r.type}|${r.runId}`
-                      const isOpen = !!expanded[key]
-                      return (
-                        <IndexTable.Row id={key} key={key} position={i}>
-                          <IndexTable.Cell>
-                            <Text as="span" tone="subdued">
-                              {rel(r.at)}
-                            </Text>
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>{badge(r.type)}</IndexTable.Cell>
-                          <IndexTable.Cell>
-                            <InlineStack gap="100" align="start">
-                              <Text as="span" tone="subdued">
-                                run
-                              </Text>
-                              <Link url={`/app/imports/runs/${r.runId}/review`}>{r.runId}</Link>
-                            </InlineStack>
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>
-                            <BlockStack gap="100">
-                              <Text as="span" tone="subdued" variant="bodySm">
-                                {summarize(r.type, r.payload) ?? ''}
-                              </Text>
-                              <Collapsible open={isOpen} id={`log-${i}`}>
-                                <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
-                                  <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0 }}>
-                                    {JSON.stringify(r.payload ?? null, null, 2)}
-                                  </pre>
-                                </div>
-                              </Collapsible>
-                            </BlockStack>
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>
-                            <Button
-                              accessibilityLabel="Toggle details"
-                              onClick={() => setExpanded(cur => ({ ...cur, [key]: !cur[key] }))}
-                            >
-                              {isOpen ? 'Hide' : 'Details'}
-                            </Button>
-                            <Button
-                              variant="plain"
-                              accessibilityLabel="Copy payload"
-                              onClick={async () => {
-                                try {
-                                  await navigator.clipboard.writeText(JSON.stringify(r.payload ?? null, null, 2))
-                                } catch {
-                                  // ignore
-                                }
-                              }}
-                            >
-                              Copy
-                            </Button>
-                          </IndexTable.Cell>
-                        </IndexTable.Row>
-                      )
-                    })}
-                  </IndexTable>
-                )}
-                {/* Load older */}
-                <InlineStack align="center">
-                  <Button
-                    loading={loadingMore}
-                    onClick={async () => {
-                      if (!cursor) return
-                      setLoadingMore(true)
-                      try {
-                        const qs = new URLSearchParams()
-                        qs.set('before', cursor)
-                        if (past !== 'all') qs.set('since', past)
-                        const r = await fetch(`/api/importer/logs?${qs.toString()}`)
-                        if (r.ok) {
-                          const j = (await r.json()) as { logs?: LogRow[] }
-                          if (Array.isArray(j.logs) && j.logs.length) {
-                            setLogItems(cur => [...cur, ...j.logs!])
-                            const last = j.logs[j.logs.length - 1]
-                            setCursor(last ? last.at : cursor)
-                          }
-                        }
-                      } catch {
-                        // ignore
-                      } finally {
-                        setLoadingMore(false)
-                      }
-                    }}
-                  >
-                    Load older
-                  </Button>
-                </InlineStack>
-              </BlockStack>
-            </Box>
-          )
-        })}
-        {grouped.size === 0 ? (
+                  <Box paddingBlockStart="100">
+                    <Text as="span" tone="subdued" variant="bodySm">
+                      {summarize(r.type, r.payload) ?? ''}
+                    </Text>
+                  </Box>
+                </Box>
+              )
+            })}
+          </BlockStack>
+        ) : (
+          <IndexTable
+            resourceName={{ singular: 'log', plural: 'logs' }}
+            itemCount={rows.length}
+            selectable={false}
+            condensed
+            headings={[
+              { title: 'When' },
+              { title: 'Level' },
+              { title: 'Import' },
+              { title: 'Run' },
+              { title: 'Message' },
+            ]}
+          >
+            {rows.map((r, i) => {
+              const key = `${r.at}|${r.type}|${r.runId}`
+              const displayName = templateNames[r.templateId] || r.templateId
+              return (
+                <IndexTable.Row id={key} key={key} position={i}>
+                  <IndexTable.Cell>
+                    <span title={new Date(r.at).toLocaleString()}>
+                      <Text as="span" tone="subdued">
+                        {rel(r.at)}
+                      </Text>
+                    </span>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>{levelBadge(r.type)}</IndexTable.Cell>
+                  <IndexTable.Cell>
+                    <InlineStack gap="150" blockAlign="center">
+                      <Link url={`/app/imports/${r.templateId}${location.search}`}>
+                        <Badge>{displayName}</Badge>
+                      </Link>
+                      {displayName !== r.templateId ? (
+                        <Link url={`/app/imports/${r.templateId}${location.search}`}>
+                          <Text as="span" tone="subdued" variant="bodySm">
+                            ({r.templateId})
+                          </Text>
+                        </Link>
+                      ) : null}
+                    </InlineStack>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    <InlineStack gap="100" align="start">
+                      <Text as="span" tone="subdued">
+                        run
+                      </Text>
+                      <Link url={`/app/imports/runs/${r.runId}/review${location.search}`}>{r.runId}</Link>
+                      {activeRunIds.has(r.runId) ? <Badge tone="attention">live</Badge> : null}
+                    </InlineStack>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    <BlockStack gap="100">
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        {summarize(r.type, r.payload) ?? ''}
+                      </Text>
+                    </BlockStack>
+                  </IndexTable.Cell>
+                </IndexTable.Row>
+              )
+            })}
+          </IndexTable>
+        )}
+        {/* Load older */}
+        <InlineStack align="center">
+          <Button
+            loading={loadingMore}
+            disabled={!cursor || loadingMore}
+            onClick={async () => {
+              if (!cursor) return
+              setLoadingMore(true)
+              try {
+                const qs = new URLSearchParams()
+                qs.set('before', cursor)
+                if (past !== 'all') qs.set('since', past)
+                const r = await fetch(`/api/importer/logs?${qs.toString()}`)
+                if (r.ok) {
+                  const j = (await r.json()) as { logs?: LogRow[] }
+                  if (Array.isArray(j.logs) && j.logs.length) {
+                    setLogItems(cur => {
+                      const next = mergeLogs(cur, j.logs as LogRow[])
+                      const oldest = next[next.length - 1]
+                      setCursor(oldest ? oldest.at : cursor)
+                      return next
+                    })
+                  }
+                }
+              } catch {
+                // ignore
+              } finally {
+                setLoadingMore(false)
+              }
+            }}
+          >
+            Load older
+          </Button>
+        </InlineStack>
+        {rows.length === 0 ? (
           <Text as="p" tone="subdued">
             No logs match your filters.
           </Text>
@@ -587,115 +638,21 @@ export default function GlobalLogList({
   )
 }
 
-// Lightweight live controls component embedded to keep the parent clean
-function LiveControls({
-  onRefreshRequest,
-  onLogs,
-}: {
-  onRefreshRequest?: () => void
-  onLogs?: (rows: LogRow[]) => void
-}) {
-  const [live, setLive] = useState(false)
-  const [connected, setConnected] = useState(false)
-
-  // Manage EventSource lifecycle
-  useMemo(() => {
-    let es: EventSource | null = null
-    if (live) {
-      try {
-        es = new EventSource('/api/importer/logs/stream')
-        es.onopen = () => setConnected(true)
-        es.onerror = () => setConnected(false)
-        es.onmessage = ev => {
-          try {
-            const data = JSON.parse(ev.data)
-            if (Array.isArray(data?.logs)) onLogs?.(data.logs as LogRow[])
-          } catch {
-            // ignore
-          }
-        }
-      } catch {
-        setConnected(false)
-      }
-    }
-    return () => {
-      if (es) es.close()
-      setConnected(false)
-    }
-  }, [live])
-
-  return (
-    <InlineStack gap="200" align="end">
-      <Button pressed={live} onClick={() => setLive(v => !v)}>
-        {live ? (connected ? 'Live (on)' : 'Live (reconnecting)') : 'Live'}
-      </Button>
-      <Button onClick={() => onRefreshRequest?.()}>Refresh</Button>
-    </InlineStack>
-  )
+// Merge helper: dedupe by composite key and sort newest->oldest
+function mergeLogs(a: LogRow[], b: LogRow[]): LogRow[] {
+  const out: LogRow[] = []
+  const seen = new Set<string>()
+  const add = (r: LogRow) => {
+    const k = `${r.at}|${r.type}|${r.runId}|${r.templateId}`
+    if (seen.has(k)) return
+    seen.add(k)
+    out.push(r)
+  }
+  for (const r of a) add(r)
+  for (const r of b) add(r)
+  out.sort((x, y) => (x.at > y.at ? -1 : 1))
+  return out
 }
 
-function DeleteImports({
-  open,
-  onClose,
-  templates,
-}: {
-  open: boolean
-  onClose: () => void
-  templates: Record<string, string>
-}) {
-  const [selected, setSelected] = useState<string[]>([])
-  const options = useMemo(
-    () => Object.entries(templates).map(([id, name]) => ({ label: name, value: id })),
-    [templates],
-  )
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Delete imports"
-      primaryAction={{
-        content: 'Delete',
-        destructive: true,
-        onAction: async () => {
-          if (!selected.length) return onClose()
-          try {
-            await fetch('/api/importer/delete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ templateIds: selected }),
-            })
-          } catch {
-            // ignore
-          } finally {
-            onClose()
-            // reload to reflect updated list/logs
-            try {
-              window.location.reload()
-            } catch {
-              // ignore reload errors
-            }
-          }
-        },
-      }}
-      secondaryActions={[{ content: 'Cancel', onAction: onClose }]}
-    >
-      <Modal.Section>
-        <BlockStack gap="200">
-          <Text as="p">
-            Select the imports to delete. This will remove their settings, logs, and any staged items for their
-            supplier.
-          </Text>
-          <ChoiceList
-            allowMultiple
-            title="Imports"
-            titleHidden
-            choices={options}
-            selected={selected}
-            onChange={vals => setSelected(vals as string[])}
-          />
-        </BlockStack>
-      </Modal.Section>
-    </Modal>
-  )
-}
+// Live streaming & bulk delete UI removed
 // <!-- END RBP GENERATED: importer-v2-3 -->

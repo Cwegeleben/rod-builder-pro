@@ -4,16 +4,27 @@ import { test, expect } from '@playwright/test'
 const BASE = process.env.PW_BASE_URL || process.env.BASE_URL || 'http://127.0.0.1:3000'
 const Q = '?hq=1'
 
-async function getAppScope(
-  page: import('@playwright/test').Page,
-): Promise<{ locator: (sel: string) => import('@playwright/test').Locator; url: () => string }> {
+async function getAppScope(page: import('@playwright/test').Page): Promise<{
+  locator: (sel: string) => import('@playwright/test').Locator
+  getByLabel: (name: string | RegExp) => import('@playwright/test').Locator
+  url: () => string
+}> {
   if (page.url().startsWith(BASE)) {
-    return { locator: (sel: string) => page.locator(sel), url: () => page.url() }
+    return {
+      locator: (sel: string) => page.locator(sel),
+      getByLabel: (name: string | RegExp) => page.getByLabel(name),
+      url: () => page.url(),
+    }
   }
   const deadline = Date.now() + 10_000
   while (Date.now() < deadline) {
     const frame = page.frames().find(f => f.url().startsWith(BASE))
-    if (frame) return { locator: (sel: string) => frame.locator(sel), url: () => frame.url() }
+    if (frame)
+      return {
+        locator: (sel: string) => frame.locator(sel),
+        getByLabel: (name: string | RegExp) => frame.getByLabel(name),
+        url: () => frame.url(),
+      }
     await page.waitForTimeout(200)
   }
   throw new Error(`App frame not found (looked for src starting with ${BASE})`)
@@ -57,24 +68,7 @@ test('Save & Crawl redirects with started params and starts progress polling', a
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'preparing' }) })
   })
 
-  // Capture redirects invoked by Save & Crawl
-  await page.addInitScript(() => {
-    // @ts-expect-error test injector
-    window.__navs = []
-    const assign = (url: string | URL) => {
-      // @ts-expect-error test injector
-      window.__navs.push(String(url))
-    }
-    Object.defineProperty(window.location, 'assign', { value: assign })
-    // Also hook top for embedded-style redirects
-    try {
-      if (window.top && window.top !== window) {
-        Object.defineProperty(window.top.location, 'assign', { value: assign })
-      }
-    } catch {
-      /* ignore cross-origin */
-    }
-  })
+  // No need to hook location.assign; we'll assert on final URL after navigation
 
   // Navigate to settings
   const res = await page.goto(`${BASE}/app/imports/${templateId}${Q}`)
@@ -84,32 +78,23 @@ test('Save & Crawl redirects with started params and starts progress polling', a
 
   // Fill seeds (Batson domain to satisfy seed scope guard)
   const seed = 'https://batsonenterprises.com/collections/blanks'
-  const label = app.locator('label:has-text("Series URLs")').first()
-  const inputId = await label.getAttribute('for')
-  if (!inputId) test.skip(true, 'Series URLs field not found in this environment')
-  const seedsField = app.locator(`#${inputId}`)
+  // Prefer accessible label to locate the multiline TextField; fallback to label[for] when necessary
+  let seedsField = app.getByLabel('Series URLs').first()
+  if (!(await seedsField.count())) {
+    const label = app.locator('label:has-text("Series URLs")').first()
+    const inputId = await label.getAttribute('for')
+    if (!inputId) test.skip(true, 'Series URLs field not found in this environment')
+    seedsField = app.locator(`#${inputId}`)
+  }
   await seedsField.fill(seed)
 
   // Click Save and Crawl
   await app.locator('role=button[name="Save and Crawl"]').click()
 
   // Expect a redirect to /app/imports with started params
-  await expect
-    .poll(
-      async () =>
-        (await page.evaluate(
-          () => (window as unknown as { __navs?: string[] }).__navs?.slice(-1)?.[0] || '',
-        )) as string,
-      {
-        timeout: 10_000,
-      },
-    )
-    .not.toBe('')
-
-  const captured = (await page.evaluate(
-    () => (window as unknown as { __navs?: string[] }).__navs?.slice(-1)?.[0] || '',
-  )) as string
-  const url = new URL(captured, BASE)
+  await page.waitForURL('**/app/imports**started=1**', { timeout: 15_000 })
+  const current = page.url()
+  const url = new URL(current, BASE)
   expect(url.pathname.endsWith('/app/imports')).toBeTruthy()
   expect(url.searchParams.get('started')).toBe('1')
   expect(url.searchParams.get('tpl')).toBe(templateId)

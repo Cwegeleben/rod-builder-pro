@@ -1,7 +1,6 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 import ImportList from '../components/importer/ImportList'
 import GlobalLogList from '../components/importer/GlobalLogList'
-import RecentRunsTable from '../components/importer/RecentRunsTable'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from '@remix-run/react'
 import { Page, BlockStack, Card, InlineStack, Text, Banner } from '@shopify/polaris'
@@ -40,6 +39,20 @@ export default function ImportsHome(props: ImportsHomeProps = {}) {
   return (
     <Page title="Imports" primaryAction={{ content: 'Add import', url: addImportHref }}>
       <BlockStack gap="400">
+        {/* Success banner when an import was deleted from the Settings page */}
+        {(() => {
+          try {
+            const sp = new URLSearchParams(qs || '')
+            if (sp.get('deleted') !== '1') return null
+            return (
+              <Banner tone="success" title="Deleted successfully">
+                <p>The import was removed.</p>
+              </Banner>
+            )
+          } catch {
+            return null
+          }
+        })()}
         {/* Ephemeral banner when a crawl is started from Settings */}
         {(() => {
           try {
@@ -73,18 +86,7 @@ export default function ImportsHome(props: ImportsHomeProps = {}) {
             <ImportList initialDbTemplates={props.initialDbTemplates} />
           </BlockStack>
         </Card>
-        {/* Active imports card removed per requirements */}
-        <Card>
-          <BlockStack gap="300">
-            <InlineStack align="space-between">
-              <Text as="h2" variant="headingSm">
-                Recent runs
-              </Text>
-            </InlineStack>
-            {/* Replace noisy logs section with a compact, one-line-per-run list */}
-            <RecentRunsTable />
-          </BlockStack>
-        </Card>
+        {/* Recent runs card removed per requirements; a flat logs table provides run navigation */}
         <Card>
           <BlockStack gap="300">
             <InlineStack align="space-between">

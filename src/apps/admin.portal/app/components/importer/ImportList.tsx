@@ -41,7 +41,7 @@ type InitialDbTemplate = {
 // NOTE: For Logic Pass 1 we simulate a single row pulled from adapters
 export default function ImportList({ initialDbTemplates }: { initialDbTemplates?: InitialDbTemplate[] } = {}) {
   // Temporary: disable Polaris IndexTable on this page to avoid td/li hydration issues in embedded Admin
-  const DISABLE_INDEXTABLE = true
+  const DISABLE_INDEXTABLE = false
   const [rows, setRows] = useState<Row[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
@@ -435,7 +435,7 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
               onAction: () => bulkDelete(selected),
             },
           ]}
-          headings={[{ title: 'Name' }, { title: 'State' }, { title: 'Next run' }, { title: 'Actions' }]}
+          headings={[{ title: 'Import' }, { title: 'State' }, { title: 'Next run' }, { title: 'Actions' }]}
         >
           {rows.map((r, index) => {
             const isBusy = busy === r.templateId
@@ -456,7 +456,35 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                 selected={selected.includes(r.templateId)}
               >
                 <IndexTable.Cell>
-                  <Link url={`/app/imports/${r.templateId}${location.search}`}>{r.name || r.templateId}</Link>
+                  <div>
+                    <Link url={`/app/imports/${r.templateId}${location.search}`}>{r.name || r.templateId}</Link>
+                    <div>
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        {r.name && r.name !== r.templateId ? ` (${r.templateId})` : ''}
+                      </Text>
+                    </div>
+                    <div>
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        {(() => {
+                          if (r.preparing) return 'Preparing…'
+                          const lastRunAt = r.lastRunAt
+                          if (typeof lastRunAt === 'string') {
+                            try {
+                              const t = Date.parse(lastRunAt)
+                              const diff = Math.max(0, Math.floor((Date.now() - t) / 1000))
+                              const m = Math.floor(diff / 60)
+                              const label = m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`
+                              return `Last run ${label}${r.hadFailures ? ' • failed' : ''}`
+                            } catch {
+                              return 'Last run —'
+                            }
+                          }
+                          return 'No runs yet'
+                        })()}
+                        {typeof r.queuedCount === 'number' && r.queuedCount > 0 ? ` • ${r.queuedCount} queued` : ''}
+                      </Text>
+                    </div>
+                  </div>
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   {r.preparing ? (
@@ -499,16 +527,19 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   <ButtonGroup>
-                    {/* Simplified: only inline schedule toggle when eligible; link in Name cell opens Settings */}
+                    {/* Primary navigation */}
+                    <Link url={`/app/imports/${r.templateId}/schedule${location.search}`}>Schedule</Link>
+                    {/* Secondary actions */}
+                    {r.runId ? (
+                      <Link url={`/app/imports/runs/${encodeURIComponent(r.runId)}/review${location.search}`}>
+                        Review
+                      </Link>
+                    ) : null}
+                    {/* Inline schedule toggle when eligible */}
                     {r.state === ImportState.APPROVED || r.state === ImportState.SCHEDULED ? (
                       <Button loading={isBusy} onClick={() => toggleSchedule(r, r.state !== ImportState.SCHEDULED)}>
                         {r.state === ImportState.SCHEDULED ? 'Disable schedule' : 'Enable schedule'}
                       </Button>
-                    ) : null}
-                    {r.runId ? (
-                      <Link url={`/app/imports/runs/${encodeURIComponent(r.runId)}/review${location.search}`}>
-                        View last run
-                      </Link>
                     ) : null}
                   </ButtonGroup>
                 </IndexTable.Cell>

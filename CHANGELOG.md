@@ -7,6 +7,18 @@
 - Resolved failed Prisma migration `20251006062503_reset_with_template_version` by marking it rolled back in production and replacing its contents with a documented no-op placeholder to preserve ordering.
 - Aligned `TemplateVersion.dataJson` field type back to `String` in schema to match production; future upgrade to `Json` will be delivered via a forward-only migration.
 - Reset local dev DB to eliminate drift and ensure clean migration history after placeholder insertion.
+- Hardened production config for Importer v2.3 rollout:
+  - Moved `DATABASE_URL` and `SMOKE_TOKEN` from Fly app env to Fly secrets; removed from `fly.production.toml`.
+  - Set `ALLOW_HQ_OVERRIDE=0` in production (disable URL/cookie/header HQ override).
+  - Kept health checks and Remix server binding unchanged.
+
+### Importer v2.3
+
+- Imports page: Restored Import Logs as a flat Polaris IndexTable with filters (Type, Import, Run, Past, Query), SSE live updates, Refresh, pagination (Load older), and dedupe; removed Recent Runs.
+- Import List: Sorted by most recent activity (preparing.start or lastRunAt); simplified actions with inline schedule toggle and link to last run.
+- Tests: Added integration tests for Import Logs (empty state, refresh, merge/dedupe, load older, combined filters, live SSE) and new coverage ensuring Past filter + Load older include `since`.
+- E2E: Stabilized imports progress/queueing/save-and-crawl specs with accessible selectors and URL assertions.
+- UX polish: Persist filters in the URL (read on mount, write on change), added "Copy run link" action with success toast in both table and fallback views, and disabled "Load older" when loading or without a valid cursor.
 
 ### Tooling
 

@@ -1,6 +1,6 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 import { importerActions } from '../state/importerMachine'
-import { useSearchParams, useFetcher } from '@remix-run/react'
+import { useSearchParams, useFetcher, useParams } from '@remix-run/react'
 // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
 // Define local targets for admin portal UI to avoid cross-app import
 // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
@@ -28,6 +28,7 @@ function getTargetById(id: string): ImportTarget | undefined {
 export default function ImportSettings() {
   const [params] = useSearchParams()
   const justCreated = params.get('created') === '1'
+  const { templateId } = useParams()
   // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
   const fetcher = useFetcher<{ urls?: string[]; debug?: Record<string, unknown> }>()
   const [targetId, setTargetId] = React.useState<string>('batson-rod-blanks')
@@ -204,6 +205,31 @@ export default function ImportSettings() {
       <div className="mt-3">
         <button onClick={onSave} className="rounded border px-3 py-1">
           Save Settings
+        </button>
+      </div>
+      <div className="mt-4">
+        <button
+          type="button"
+          className="rounded border border-red-300 bg-red-50 px-3 py-1 text-red-700"
+          onClick={async () => {
+            const id = String(templateId || '').trim()
+            if (!id) return
+            const ok = window.confirm(
+              'Delete this import and related data (staged parts, sources, runs)? This cannot be undone.',
+            )
+            if (!ok) return
+            try {
+              const fd = new FormData()
+              fd.set('templateId', id)
+              await fetch('/api/importer/delete', { method: 'POST', body: fd })
+              // Navigate back to imports list
+              window.location.assign('/app/imports?deleted=1')
+            } catch {
+              alert('Failed to delete. Please try again.')
+            }
+          }}
+        >
+          Delete import…
         </button>
       </div>
     </div>

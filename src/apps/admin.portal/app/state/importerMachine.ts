@@ -38,6 +38,9 @@ type StoredConfig = {
   counts?: ImportCounts
   schedule?: ScheduleConfig
   hadFailures?: boolean
+  lastRunAt?: string
+  // Snapshot of last published state (diff key/hash pairs)
+  publishedSnapshot?: Array<{ key: string; hash: string }>
 }
 
 const _configs = new Map<TemplateId, StoredConfig>()
@@ -47,7 +50,17 @@ const _logs: Array<{
   at: string
   templateId: string
   runId: string
-  type: 'discovery' | 'scrape' | 'drafts' | 'approve' | 'abort' | 'schedule' | 'recrawl' | 'error'
+  type:
+    | 'discovery'
+    | 'scrape'
+    | 'drafts'
+    | 'approve'
+    | 'abort'
+    | 'schedule'
+    | 'recrawl'
+    | 'recrawl:start'
+    | 'recrawl:done'
+    | 'error'
   payload: unknown
 }> = []
 
@@ -71,6 +84,17 @@ export const importerAdapters = {
       counts: cfg.counts ? { ...cfg.counts } : undefined,
       schedule: cfg.schedule ? { ...cfg.schedule } : undefined,
     }
+  },
+  getPublishedSnapshot: async (templateId: TemplateId): Promise<Array<{ key: string; hash: string }>> => {
+    const cfg = await importerAdapters.getImportConfig(templateId)
+    return Array.isArray(cfg.publishedSnapshot) ? [...cfg.publishedSnapshot] : []
+  },
+  savePublishedSnapshot: async (
+    templateId: TemplateId,
+    snapshot: Array<{ key: string; hash: string }>,
+  ): Promise<void> => {
+    const cfg = await importerAdapters.getImportConfig(templateId)
+    await importerAdapters.saveImportConfig(templateId, { ...cfg, publishedSnapshot: [...snapshot] })
   },
   saveImportConfig: async (templateId: TemplateId, patch: Partial<StoredConfig>): Promise<void> => {
     const cur = await importerAdapters.getImportConfig(templateId)
@@ -99,6 +123,29 @@ export const importerAdapters = {
   getFlags: async (_templateId: string) => {
     void _templateId
     return { createDraftsOnRecrawl: false as boolean }
+  },
+
+  // Helper to compute a stable key/hash for an item
+  itemKey: (item: unknown): string => {
+    try {
+      const o = item as Record<string, unknown>
+      // Prefer a stable source identity if present
+      const k = (o?.url as string) || (o?.sourceUrl as string) || (o?.id as string)
+      if (k) return String(k)
+    } catch {
+      /* noop */
+    }
+    return `item:${Math.random().toString(36).slice(2)}`
+  },
+  itemHash: (item: unknown): string => {
+    try {
+      const json = JSON.stringify(item, Object.keys(item as object).sort())
+      let h = 0
+      for (let i = 0; i < json.length; i++) h = (h * 31 + json.charCodeAt(i)) | 0
+      return String(h)
+    } catch {
+      return '0'
+    }
   },
 
   // helper: compute next run time based on now, freq and HH:mm "at"
@@ -189,7 +236,17 @@ export const importerAdapters = {
   logEvent: async (
     templateId: TemplateId,
     runId: string,
-    type: 'discovery' | 'scrape' | 'drafts' | 'approve' | 'abort' | 'schedule' | 'recrawl' | 'error',
+    type:
+      | 'discovery'
+      | 'scrape'
+      | 'drafts'
+      | 'approve'
+      | 'abort'
+      | 'schedule'
+      | 'recrawl'
+      | 'recrawl:start'
+      | 'recrawl:done'
+      | 'error',
     payload: unknown,
   ) => {
     _logs.push({ at: new Date().toISOString(), templateId, runId, type, payload })
@@ -365,33 +422,48 @@ export const importerActions = {
     if (cfg.state !== ImportState.APPROVED && cfg.state !== ImportState.SCHEDULED) return
     const runId = importerAdapters.newRunId()
     try {
+      await importerAdapters.logEvent(templateId, runId, 'recrawl:start', {})
       const urls = await importerAdapters.discoverProductUrls(templateId)
       const scrape = await importerAdapters.scrapeProducts(templateId, urls)
       const flags = await importerAdapters.getFlags(templateId)
+      // Build new snapshot
+      const items = (scrape.successes as Array<{ data: unknown }>).map(s => s.data)
+      const newSnap = items.map(it => ({ key: importerAdapters.itemKey(it), hash: importerAdapters.itemHash(it) }))
+      const prevSnap = await importerAdapters.getPublishedSnapshot(templateId)
+      const prevMap = new Map(prevSnap.map(x => [x.key, x.hash]))
+      // Compute delta: added or changed
+      const deltaItems: unknown[] = []
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i]
+        const k = newSnap[i].key
+        const h = newSnap[i].hash
+        const prevH = prevMap.get(k)
+        if (!prevH || prevH !== h) deltaItems.push(it)
+      }
       let result: { updatedIds?: string[]; skippedIds?: string[]; failed?: unknown[]; draftIds?: string[] }
       if (flags.createDraftsOnRecrawl) {
-        const drafts = await importerAdapters.createDraftProducts(
-          templateId,
-          runId,
-          (scrape.successes as Array<{ data: unknown }>).map(s => s.data),
-        )
+        const drafts = await importerAdapters.createDraftProducts(templateId, runId, deltaItems)
         result = { updatedIds: [], skippedIds: [], failed: scrape.failures, draftIds: drafts.productIds }
         await importerAdapters.logEvent(templateId, runId, 'drafts', { count: drafts.productIds.length })
       } else {
-        result = await importerAdapters.updateExistingProducts(
-          templateId,
-          (scrape.successes as Array<{ data: unknown }>).map(s => s.data),
-        )
+        result = await importerAdapters.updateExistingProducts(templateId, deltaItems)
       }
-      await importerAdapters.logEvent(templateId, runId, 'recrawl', result)
+      await importerAdapters.savePublishedSnapshot(templateId, newSnap)
+      await importerAdapters.logEvent(templateId, runId, 'recrawl:done', {
+        updated: result.updatedIds?.length || 0,
+        drafts: result.draftIds?.length || 0,
+        skipped: result.skippedIds?.length || 0,
+        failed: result.failed?.length || 0,
+        delta: deltaItems.length,
+      })
       const hadFailures = (result.failed?.length || 0) > 0
       await importerAdapters.saveImportConfig(templateId, {
         ...cfg,
         counts: {
           added: 0,
-          updated: result.updatedIds?.length || 0,
+          updated: result.updatedIds?.length || result.draftIds?.length || 0,
           failed: result.failed?.length || 0,
-          skipped: result.skippedIds?.length || 0,
+          skipped: result.skippedIds?.length || Math.max(0, items.length - (result.updatedIds?.length || 0)),
         },
         lastRunAt: new Date().toISOString(),
         state: hadFailures ? ImportState.SCHEDULED : cfg.state,

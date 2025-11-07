@@ -347,7 +347,7 @@ model ImportTemplate {
   id            String   @id
   name          String
   // importer v2.3 config/state blob (template-first 1:1)
-  importConfig  Json     @default("{}")
+  importConfig  Json
   // quick status for Home row
   state         String   @default("NEEDS_SETTINGS")
   lastRunAt     DateTime?

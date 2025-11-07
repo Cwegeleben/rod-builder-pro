@@ -1,13 +1,32 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from '@remix-run/react'
+import { useParams, useNavigate, useLocation } from '@remix-run/react'
 import { ImportState, type ScheduleConfig } from '../state/importerMachine'
+import {
+  Page,
+  Card,
+  BlockStack,
+  InlineStack,
+  Text,
+  Divider,
+  Checkbox,
+  Select,
+  TextField,
+  Button,
+  Frame,
+  Toast,
+  Banner,
+} from '@shopify/polaris'
 
 export default function ImportSchedulePage() {
   const { templateId: tplParam } = useParams()
   const templateId = tplParam || 'DEMO-TEMPLATE'
+  const navigate = useNavigate()
+  const location = useLocation()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [busyRecrawl, setBusyRecrawl] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const [state, setState] = useState<ImportState>(ImportState.NEEDS_SETTINGS)
   // client-side preview only
@@ -59,7 +78,7 @@ export default function ImportSchedulePage() {
     e.preventDefault()
     setBanner(null)
     if (form.enabled && !canEnable) {
-      setBanner('Schedule available after approval.')
+      setBanner('Schedule is available after a published run.')
       return
     }
     setSaving(true)
@@ -71,78 +90,139 @@ export default function ImportSchedulePage() {
         body: JSON.stringify({ templateId, enabled: form.enabled, freq: form.freq, at: form.at }),
       })
       if (!resp.ok) setBanner('Failed to save schedule')
-      // Redirect back to imports home
-      window.location.assign('/app/imports')
+      else setToast('Schedule saved')
+      // Navigate back preserving embedded session params
+      try {
+        const back = `/app/imports${location.search || ''}`
+        navigate(back)
+      } catch {
+        window.location.assign('/app/imports')
+      }
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <div className="max-w-xl">
-      <h1 className="mb-4 text-xl font-semibold">Schedule</h1>
-      {loading ? (
-        <div className="text-sm text-slate-500">Loading…</div>
-      ) : (
-        <form onSubmit={onSave} className="space-y-4">
-          {banner ? <div className="rounded bg-amber-100 p-2 text-sm text-amber-800">{banner}</div> : null}
-          <div className="flex items-center gap-2">
-            <input
-              id="enabled"
-              type="checkbox"
-              checked={!!form.enabled}
-              onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))}
-              disabled={!canEnable && !form.enabled}
-            />
-            <label htmlFor="enabled" className="select-none">
-              Enabled
-            </label>
-            {!canEnable && !form.enabled ? (
-              <span className="ml-2 text-xs text-slate-500">Available after approval</span>
-            ) : null}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col text-sm">
-              <span className="mb-1">Frequency</span>
-              <select
-                value={form.freq}
-                onChange={e => setForm(f => ({ ...f, freq: e.target.value as ScheduleConfig['freq'] }))}
-                className="rounded border px-2 py-1"
-              >
-                <option value="daily">daily</option>
-                <option value="weekly">weekly</option>
-                <option value="monthly">monthly</option>
-              </select>
-            </label>
-
-            <label className="flex flex-col text-sm">
-              <span className="mb-1">Time</span>
-              <input
-                type="time"
-                value={form.at || '09:00'}
-                onChange={e => setForm(f => ({ ...f, at: e.target.value }))}
-                className="rounded border px-2 py-1"
-              />
-            </label>
-          </div>
-
-          <div className="text-sm text-slate-600">
-            Next run:{' '}
-            {form.enabled ? (nextPreview ? new Date(nextPreview).toLocaleString?.() || nextPreview : '—') : '—'}
-          </div>
-
-          <div className="flex gap-2">
-            <button type="submit" disabled={saving} className="rounded border px-3 py-1.5">
-              Save
-            </button>
-            <a href="/app/imports" className="rounded border px-3 py-1.5">
-              Cancel
-            </a>
-          </div>
-        </form>
-      )}
-    </div>
+    <>
+      {toast ? (
+        <Frame>
+          <Toast content={toast} duration={1600} onDismiss={() => setToast(null)} />
+        </Frame>
+      ) : null}
+      <Page
+        title="Schedule"
+        backAction={{
+          content: 'Back',
+          onAction: () => navigate(`/app/imports${location.search || ''}`),
+        }}
+      >
+        {banner ? (
+          <Banner tone="warning" onDismiss={() => setBanner(null)}>
+            <p>{banner}</p>
+          </Banner>
+        ) : null}
+        <BlockStack gap="400">
+          <Card>
+            {loading ? (
+              <BlockStack gap="200">
+                <Text as="p" tone="subdued">
+                  Loading…
+                </Text>
+              </BlockStack>
+            ) : (
+              <form onSubmit={onSave}>
+                <BlockStack gap="400">
+                  <InlineStack gap="300" blockAlign="center">
+                    <Checkbox
+                      label="Enable schedule"
+                      checked={!!form.enabled}
+                      onChange={(checked: boolean) => setForm(f => ({ ...f, enabled: checked }))}
+                      disabled={!canEnable && !form.enabled}
+                    />
+                    {!canEnable && !form.enabled ? (
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        Available after a published run
+                      </Text>
+                    ) : null}
+                  </InlineStack>
+                  <Divider />
+                  <InlineStack gap="400">
+                    <div style={{ minWidth: 220 }}>
+                      <Select
+                        label="Frequency"
+                        options={[
+                          { label: 'Daily', value: 'daily' },
+                          { label: 'Weekly', value: 'weekly' },
+                          { label: 'Monthly', value: 'monthly' },
+                        ]}
+                        value={form.freq}
+                        onChange={v => setForm(f => ({ ...f, freq: v as ScheduleConfig['freq'] }))}
+                        disabled={!form.enabled}
+                      />
+                    </div>
+                    <div style={{ minWidth: 180 }}>
+                      <TextField
+                        label="Time"
+                        type="time"
+                        value={form.at || '09:00'}
+                        onChange={v => setForm(f => ({ ...f, at: v }))}
+                        autoComplete="off"
+                        disabled={!form.enabled}
+                      />
+                    </div>
+                  </InlineStack>
+                  <Text as="p" tone="subdued">
+                    Next run:{' '}
+                    {form.enabled ? (nextPreview ? new Date(nextPreview).toLocaleString?.() || nextPreview : '—') : '—'}
+                  </Text>
+                  <InlineStack gap="200">
+                    <Button submit loading={saving}>
+                      Save
+                    </Button>
+                    <Button onClick={() => navigate(`/app/imports${location.search || ''}`)}>Cancel</Button>
+                  </InlineStack>
+                </BlockStack>
+              </form>
+            )}
+          </Card>
+          <Card>
+            <BlockStack gap="200">
+              <Text as="h3" variant="headingSm">
+                Recrawl
+              </Text>
+              <Text as="p" tone="subdued">
+                Recrawl will fetch current data and publish updates only when changes are detected.
+              </Text>
+              <InlineStack>
+                <Button
+                  onClick={async () => {
+                    setBusyRecrawl(true)
+                    try {
+                      const resp = await fetch('/api/importer/recrawl', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ templateId }),
+                      })
+                      if (!resp.ok) throw new Error('Failed to start recrawl')
+                      setToast('Recrawl started')
+                    } catch (e) {
+                      setBanner((e as Error)?.message || 'Failed to start recrawl')
+                    } finally {
+                      setBusyRecrawl(false)
+                    }
+                  }}
+                  loading={busyRecrawl}
+                  disabled={!(state === ImportState.APPROVED || state === ImportState.SCHEDULED)}
+                >
+                  Recrawl now
+                </Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </BlockStack>
+      </Page>
+    </>
   )
 }
 // <!-- END RBP GENERATED: importer-v2-3 -->

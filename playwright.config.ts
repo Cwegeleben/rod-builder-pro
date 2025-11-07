@@ -38,15 +38,15 @@ export default defineConfig({
           // Reset e2e sqlite db to ensure a clean schema
           `rm -f ${process.cwd()}/.tmp/e2e.sqlite || true`,
           '&&',
-          // Optionally skip Prisma client generation and db push if PW_SKIP_DB_PUSH=1
+          // Optionally skip Prisma client generation and migrations if PW_SKIP_DB_PUSH=1
           ...(process.env.PW_SKIP_DB_PUSH === '1'
-            ? ['echo "[e2e] Skipping Prisma generate and db push"']
+            ? ['echo "[e2e] Skipping Prisma generate and migrate deploy"']
             : [
                 `DATABASE_URL=${E2E_DB}`,
                 // Generate Prisma client only (skip migrate deploy for ephemeral DB)
                 'npm run -s setup',
                 '&&',
-                // For e2e on ephemeral SQLite, prefer db push over migrate
+                // For e2e on ephemeral SQLite, prefer db push over migrate to avoid legacy migration quirks
                 `DATABASE_URL=${E2E_DB}`,
                 'npx prisma db push --accept-data-loss',
               ]),

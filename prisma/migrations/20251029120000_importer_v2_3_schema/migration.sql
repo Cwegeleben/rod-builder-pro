@@ -1,11 +1,11 @@
 -- Create Importer v2.3 tables: ImportTemplate, ImportLog
--- Compatible with SQLite; JSONB is tolerated as text affinity in SQLite.
+-- SQLite-compatible: use TEXT columns for JSON payloads and configs
 
 -- CreateTable ImportTemplate
 CREATE TABLE IF NOT EXISTS "ImportTemplate" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
-    "importConfig" JSONB NOT NULL DEFAULT '{}',
+    "importConfig" TEXT NOT NULL DEFAULT '{}',
     "state" TEXT NOT NULL DEFAULT 'NEEDS_SETTINGS',
     "lastRunAt" DATETIME,
     "hadFailures" BOOLEAN NOT NULL DEFAULT false
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS "ImportLog" (
     "templateId" TEXT NOT NULL,
     "runId" TEXT NOT NULL,
     "type" TEXT NOT NULL,
-    "payload" JSONB NOT NULL,
+    "payload" TEXT NOT NULL,
     "at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "ImportLog_templateId_fkey" FOREIGN KEY ("templateId") REFERENCES "ImportTemplate" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );

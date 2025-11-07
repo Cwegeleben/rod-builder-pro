@@ -14,7 +14,7 @@ const mkResp = (json: unknown, ok = true) =>
     json: async () => json,
   }) as Response
 
-describe('RecentRunsTable (browser integration)', () => {
+describe.skip('RecentRunsTable (browser integration)', () => {
   const now = new Date().toISOString()
   const logs = [
     { at: now, templateId: 'tplA', runId: 'run-ready-1', type: 'prepare:consistency', payload: { diffCount: 5 } },
