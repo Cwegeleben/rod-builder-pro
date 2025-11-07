@@ -16,23 +16,33 @@ import {
   Frame,
   Toast,
   Banner,
+  Link,
 } from '@shopify/polaris'
 
-export default function ImportSchedulePage() {
+type Props = {
+  initialTemplateName?: string
+  initialState?: string
+  initialSchedule?: ScheduleConfig
+}
+
+export default function ImportSchedulePage(props: Props = {}) {
   const { templateId: tplParam } = useParams()
   const templateId = tplParam || 'DEMO-TEMPLATE'
   const navigate = useNavigate()
   const location = useLocation()
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!props.initialSchedule)
   const [saving, setSaving] = useState(false)
   const [busyRecrawl, setBusyRecrawl] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
-  const [state, setState] = useState<ImportState>(ImportState.NEEDS_SETTINGS)
+  const [state, setState] = useState<ImportState>((props.initialState as ImportState) || ImportState.NEEDS_SETTINGS)
   // client-side preview only
-  const [form, setForm] = useState<ScheduleConfig>({ enabled: false, freq: 'none', at: '09:00', nextRunAt: undefined })
+  const [form, setForm] = useState<ScheduleConfig>(
+    props.initialSchedule || { enabled: false, freq: 'none', at: '09:00', nextRunAt: undefined },
+  )
 
   useEffect(() => {
+    if (props.initialSchedule) return
     ;(async () => {
       try {
         const res = await fetch(`/api/importer/schedule?templateId=${encodeURIComponent(templateId)}`)
@@ -49,7 +59,7 @@ export default function ImportSchedulePage() {
       }
       setLoading(false)
     })()
-  }, [templateId])
+  }, [templateId, props.initialSchedule])
 
   const nextPreview = useMemo(() => {
     const compute = (nowIso: string, cfg: ScheduleConfig): string | undefined => {
@@ -111,12 +121,20 @@ export default function ImportSchedulePage() {
         </Frame>
       ) : null}
       <Page
-        title="Schedule"
+        title={`Schedule — ${props.initialTemplateName || templateId}`}
         backAction={{
           content: 'Back',
           onAction: () => navigate(`/app/imports${location.search || ''}`),
         }}
       >
+        <InlineStack gap="300" blockAlign="center">
+          <Link url={`/app/imports/${templateId}${location.search}`}>Manage settings</Link>
+          <Text as="span" tone="subdued" variant="bodySm">
+            {state === ImportState.APPROVED || state === ImportState.SCHEDULED
+              ? 'Scheduling available'
+              : 'Enable after a published run'}
+          </Text>
+        </InlineStack>
         {banner ? (
           <Banner tone="warning" onDismiss={() => setBanner(null)}>
             <p>{banner}</p>
