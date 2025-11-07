@@ -2,8 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from '@remix-run/react'
 import ImportRowStateBadge from './ImportRowStateBadge'
-import ShopifyFilterLink from './ShopifyFilterLink'
-import { importerActions, importerAdapters, ImportState } from '../../state/importerMachine'
+import { ImportState } from '../../state/importerMachine'
 import {
   IndexTable,
   Button,
@@ -28,6 +27,7 @@ type Row = {
   hasSeeds?: boolean
   hasStaged?: boolean
   queuedCount?: number
+  lastRunAt?: string | null
 }
 
 type InitialDbTemplate = {
@@ -63,6 +63,7 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
             : ImportState.NEEDS_SETTINGS,
           nextRunAt: undefined,
           hadFailures: !!t.hadFailures,
+          lastRunAt: t.lastRunAt ?? null,
         }))
         setRows(seeded)
       }
@@ -86,6 +87,7 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
               state: string
               hadFailures?: boolean
               lastRunAt?: string | null
+              lastRunId?: string | null
               preparing?: { runId: string; startedAt?: string; etaSeconds?: number } | null
               hasSeeds?: boolean
               hasStaged?: boolean
@@ -107,6 +109,8 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
               hasSeeds: !!t.hasSeeds,
               hasStaged: !!t.hasStaged,
               queuedCount: typeof t.queuedCount === 'number' ? t.queuedCount : 0,
+              runId: t.lastRunId || undefined,
+              lastRunAt: typeof t.lastRunAt === 'string' ? t.lastRunAt : null,
             })),
           )
           return
@@ -179,133 +183,34 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
   }, [rows])
 
   // Validate action removed
-  async function doApprove(r: Row) {
-    if (!confirm('Publish all drafts for this run?')) return
-    setBusy(r.templateId)
-    try {
-      const resp = await fetch('/api/importer/approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId: r.templateId }),
-      })
-      if (!resp.ok) throw new Error('Approve failed')
-    } finally {
-      setBusy(null)
-    }
-    // Refresh from API
-    try {
-      const sp = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
-      sp.set('kind', 'import-templates')
-      const res = await fetch(`/api/importer/templates?${sp.toString()}`)
-      if (res.ok) {
-        const jr = (await res.json()) as {
-          templates?: Array<{ id: string; name?: string; state: string; hadFailures?: boolean }>
-        }
-        const list = Array.isArray(jr.templates) ? jr.templates : []
-        setRows(
-          list.map(t => ({
-            templateId: t.id,
-            name: t.name || t.id,
-            state: (Object.values(ImportState) as string[]).includes(t.state)
-              ? (t.state as ImportState)
-              : ImportState.NEEDS_SETTINGS,
-            nextRunAt: undefined,
-            hadFailures: !!t.hadFailures,
-          })),
-        )
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  async function doReset(r: Row) {
-    if (!confirm('Delete drafts and reset this import?')) return
-    setBusy(r.templateId)
-    try {
-      const resp = await fetch('/api/importer/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId: r.templateId }),
-      })
-      if (!resp.ok) throw new Error('Reset failed')
-    } finally {
-      setBusy(null)
-    }
-    // Refresh from API
-    try {
-      const sp = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
-      sp.set('kind', 'import-templates')
-      const res = await fetch(`/api/importer/templates?${sp.toString()}`)
-      if (res.ok) {
-        const jr = (await res.json()) as {
-          templates?: Array<{ id: string; name?: string; state: string; hadFailures?: boolean }>
-        }
-        const list = Array.isArray(jr.templates) ? jr.templates : []
-        setRows(
-          list.map(t => ({
-            templateId: t.id,
-            name: t.name || t.id,
-            state: (Object.values(ImportState) as string[]).includes(t.state)
-              ? (t.state as ImportState)
-              : ImportState.NEEDS_SETTINGS,
-            nextRunAt: undefined,
-            hadFailures: !!t.hadFailures,
-          })),
-        )
-      }
-    } catch {
-      /* ignore */
-    }
-  }
+  // Removed approve/reset/delete/run-now from simplified list UI
 
-  async function doDelete(r: Row) {
-    if (
-      !confirm(
-        'Delete this import and related data? This will remove its settings, logs, and any staged items for its supplier.',
-      )
-    )
-      return
+  async function toggleSchedule(r: Row, enabled: boolean) {
     setBusy(r.templateId)
     try {
-      const resp = await fetch('/api/importer/delete', {
+      const resp = await fetch('/api/importer/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateIds: [r.templateId] }),
+        body: JSON.stringify({ templateId: r.templateId, enabled }),
       })
-      if (!resp.ok) throw new Error('Delete failed')
-      // Remove from list optimistically
-      setRows(cur => cur.filter(x => x.templateId !== r.templateId))
-    } catch {
-      setError('Delete failed')
+      if (!resp.ok) throw new Error('Schedule update failed')
+      const jr = (await resp.json()) as {
+        ok?: boolean
+        state?: string
+        schedule?: { nextRunAt?: string | null; enabled?: boolean; freq?: string; at?: string }
+      }
+      const nextState = (jr.state as ImportState) || (enabled ? ImportState.SCHEDULED : ImportState.APPROVED)
+      const nextRunAt = jr.schedule?.nextRunAt || undefined
+      setRows(cur => cur.map(x => (x.templateId === r.templateId ? { ...x, state: nextState, nextRunAt } : x)))
+      setToast(enabled ? 'Schedule enabled' : 'Schedule disabled')
+    } catch (e) {
+      setError((e as Error)?.message || 'Schedule update failed')
     } finally {
       setBusy(null)
     }
   }
 
-  async function doRunNow(r: Row) {
-    setBusy(r.templateId)
-    try {
-      await importerActions.recrawlRunNow(r.templateId)
-    } finally {
-      setBusy(null)
-    }
-    const [cfg, sched] = await Promise.all([
-      importerAdapters.getImportConfig(r.templateId),
-      importerAdapters.getSchedule(r.templateId),
-    ])
-    setRows(cur =>
-      cur.map(x =>
-        x.templateId === r.templateId
-          ? {
-              ...x,
-              state: cfg.state,
-              hadFailures: (cfg as { hadFailures?: boolean }).hadFailures,
-              nextRunAt: sched.nextRunAt,
-            }
-          : x,
-      ),
-    )
-  }
+  // doRunNow removed from simplified list UI
 
   // doPrepare removed: Full Discover is launched from Settings page header
 
@@ -363,7 +268,6 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
         <div>
           <div style={{ display: 'grid', gap: 12 }}>
             {rows.map(r => {
-              const isBusy = busy === r.templateId
               const nextRun = r.nextRunAt
                 ? (() => {
                     try {
@@ -376,12 +280,27 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
               return (
                 <div
                   key={r.templateId}
+                  role="button"
+                  tabIndex={0}
+                  onClick={e => {
+                    // avoid triggering when clicking on explicit links/buttons
+                    const t = e.target as HTMLElement
+                    if (t.closest('a,button,[role="button"][data-no-row-nav]')) return
+                    window.location.assign(`/app/imports/${encodeURIComponent(r.templateId)}${location.search}`)
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      window.location.assign(`/app/imports/${encodeURIComponent(r.templateId)}${location.search}`)
+                    }
+                  }}
                   style={{
                     border: '1px solid var(--p-color-border)',
                     borderRadius: 8,
                     padding: 12,
                     display: 'grid',
                     gap: 8,
+                    cursor: 'pointer',
                   }}
                 >
                   <InlineStack align="space-between">
@@ -391,7 +310,7 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                         {(() => {
                           const parts: string[] = []
                           if (typeof r.queuedCount === 'number' && r.queuedCount > 0) parts.push(`(${r.queuedCount})`)
-                          const lastRunAt = (r as unknown as { lastRunAt?: string }).lastRunAt
+                          const lastRunAt = r.lastRunAt
                           if (typeof lastRunAt === 'string') {
                             try {
                               const t = Date.parse(lastRunAt)
@@ -413,6 +332,11 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                         {r.queuedCount && r.queuedCount > 0 ? (
                           <Text as="span" tone="subdued">{`• ${r.queuedCount} queued`}</Text>
                         ) : null}
+                        {r.runId ? (
+                          <Link url={`/app/imports/runs/${encodeURIComponent(r.runId)}/review${location.search}`}>
+                            View last run
+                          </Link>
+                        ) : null}
                       </InlineStack>
                     </div>
                   </InlineStack>
@@ -421,80 +345,15 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                       {r.state === ImportState.SCHEDULED ? nextRun : '—'}
                     </Text>
                     <ButtonGroup>
-                      <Button
-                        url={`/app/imports/${r.templateId}/review${location.search}`}
-                        disabled={!!r.preparing || r.hasSeeds === false || r.hasStaged === false}
-                        accessibilityLabel={
-                          r.hasSeeds === false
-                            ? 'Add seeds in settings to enable Review'
-                            : r.hasStaged === false
-                              ? 'Run Prepare review to discover items before reviewing'
-                              : undefined
-                        }
-                      >
-                        Review
-                      </Button>
-                      <Button url={`/app/imports/${r.templateId}${location.search}`}>
-                        {r.state === ImportState.NEEDS_SETTINGS ? 'Edit settings' : 'Settings'}
-                      </Button>
-                      {r.state === ImportState.READY_TO_APPROVE && (
-                        <>
-                          {r.runId ? <ShopifyFilterLink runId={r.runId} /> : null}
-                          <Button loading={isBusy} onClick={() => doApprove(r)}>
-                            Approve
-                          </Button>
-                          <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
-                            Reset drafts
-                          </Button>
-                          <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
-                            Delete import
-                          </Button>
-                        </>
-                      )}
-                      {r.state === ImportState.APPROVED && (
-                        <>
-                          <Button url={`/app/imports/${r.templateId}/schedule`}>Schedule</Button>
-                          <Button loading={isBusy} onClick={() => doRunNow(r)}>
-                            Run Now
-                          </Button>
-                          <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
-                            Reset drafts
-                          </Button>
-                          <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
-                            Delete import
-                          </Button>
-                        </>
-                      )}
-                      {r.state === ImportState.SCHEDULED && (
-                        <>
-                          <Button url={`/app/imports/${r.templateId}/schedule`}>Schedule</Button>
-                          <Button loading={isBusy} onClick={() => doRunNow(r)}>
-                            Run Now
-                          </Button>
-                          <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
-                            Reset drafts
-                          </Button>
-                          <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
-                            Delete import
-                          </Button>
-                          {r.hadFailures ? (
-                            <Text as="span" tone="critical">
-                              Last run had failures
-                            </Text>
-                          ) : null}
-                        </>
-                      )}
-                      {r.state !== ImportState.APPROVED && r.state !== ImportState.SCHEDULED && (
-                        <>
-                          <Button disabled>Schedule</Button>
-                          <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
-                            Reset drafts
-                          </Button>
-                          <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
-                            Delete import
-                          </Button>
-                        </>
-                      )}
+                      {r.state === ImportState.APPROVED || r.state === ImportState.SCHEDULED ? (
+                        <Button
+                          data-no-row-nav
+                          loading={busy === r.templateId}
+                          onClick={() => toggleSchedule(r, r.state !== ImportState.SCHEDULED)}
+                        >
+                          {r.state === ImportState.SCHEDULED ? 'Disable schedule' : 'Enable schedule'}
+                        </Button>
+                      ) : null}
                     </ButtonGroup>
                   </InlineStack>
                   {r.preparing ? (
@@ -619,83 +478,17 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   <ButtonGroup>
-                    {/* Prepare removed from Imports list; launch Full Discover from Settings page */}
-                    {/* Review disabled during prepare, when no seeds configured, or when nothing discovered yet */}
-                    <Button
-                      url={`/app/imports/${r.templateId}/review${location.search}`}
-                      disabled={!!r.preparing || r.hasSeeds === false || r.hasStaged === false}
-                      accessibilityLabel={
-                        r.hasSeeds === false
-                          ? 'Add seeds in settings to enable Review'
-                          : r.hasStaged === false
-                            ? 'Run Prepare review to discover items before reviewing'
-                            : undefined
-                      }
-                    >
-                      Review
-                    </Button>
-                    <Button url={`/app/imports/${r.templateId}${location.search}`}>
-                      {r.state === ImportState.NEEDS_SETTINGS ? 'Edit settings' : 'Settings'}
-                    </Button>
-                    {/* Validate flow removed from list UI */}
-                    {r.state === ImportState.READY_TO_APPROVE && (
-                      <>
-                        {r.runId ? <ShopifyFilterLink runId={r.runId} /> : null}
-                        <Button loading={isBusy} onClick={() => doApprove(r)}>
-                          Approve
-                        </Button>
-                        <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
-                          Reset drafts
-                        </Button>
-                        <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
-                          Delete import
-                        </Button>
-                      </>
-                    )}
-                    {r.state === ImportState.APPROVED && (
-                      <>
-                        <Button url={`/app/imports/${r.templateId}/schedule`}>Schedule</Button>
-                        <Button loading={isBusy} onClick={() => doRunNow(r)}>
-                          Run Now
-                        </Button>
-                        <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
-                          Reset drafts
-                        </Button>
-                        <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
-                          Delete import
-                        </Button>
-                      </>
-                    )}
-                    {r.state === ImportState.SCHEDULED && (
-                      <>
-                        <Button url={`/app/imports/${r.templateId}/schedule`}>Schedule</Button>
-                        <Button loading={isBusy} onClick={() => doRunNow(r)}>
-                          Run Now
-                        </Button>
-                        <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
-                          Reset drafts
-                        </Button>
-                        <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
-                          Delete import
-                        </Button>
-                        {r.hadFailures ? (
-                          <Text as="span" tone="critical">
-                            Last run had failures
-                          </Text>
-                        ) : null}
-                      </>
-                    )}
-                    {r.state !== ImportState.APPROVED && r.state !== ImportState.SCHEDULED && (
-                      <>
-                        <Button disabled>Schedule</Button>
-                        <Button tone="critical" loading={isBusy} onClick={() => doReset(r)}>
-                          Reset drafts
-                        </Button>
-                        <Button tone="critical" variant="primary" loading={isBusy} onClick={() => doDelete(r)}>
-                          Delete import
-                        </Button>
-                      </>
-                    )}
+                    {/* Simplified: only inline schedule toggle when eligible; link in Name cell opens Settings */}
+                    {r.state === ImportState.APPROVED || r.state === ImportState.SCHEDULED ? (
+                      <Button loading={isBusy} onClick={() => toggleSchedule(r, r.state !== ImportState.SCHEDULED)}>
+                        {r.state === ImportState.SCHEDULED ? 'Disable schedule' : 'Enable schedule'}
+                      </Button>
+                    ) : null}
+                    {r.runId ? (
+                      <Link url={`/app/imports/runs/${encodeURIComponent(r.runId)}/review${location.search}`}>
+                        View last run
+                      </Link>
+                    ) : null}
                   </ButtonGroup>
                 </IndexTable.Cell>
               </IndexTable.Row>

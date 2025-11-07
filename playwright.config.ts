@@ -38,13 +38,18 @@ export default defineConfig({
           // Reset e2e sqlite db to ensure a clean schema
           `rm -f ${process.cwd()}/.tmp/e2e.sqlite || true`,
           '&&',
-          `DATABASE_URL=${E2E_DB}`,
-          // Generate Prisma client only (skip migrate deploy for ephemeral DB)
-          'npm run -s setup',
-          '&&',
-          // For e2e on ephemeral SQLite, prefer db push over migrate
-          `DATABASE_URL=${E2E_DB}`,
-          'npx prisma db push --accept-data-loss',
+          // Optionally skip Prisma client generation and db push if PW_SKIP_DB_PUSH=1
+          ...(process.env.PW_SKIP_DB_PUSH === '1'
+            ? ['echo "[e2e] Skipping Prisma generate and db push"']
+            : [
+                `DATABASE_URL=${E2E_DB}`,
+                // Generate Prisma client only (skip migrate deploy for ephemeral DB)
+                'npm run -s setup',
+                '&&',
+                // For e2e on ephemeral SQLite, prefer db push over migrate
+                `DATABASE_URL=${E2E_DB}`,
+                'npx prisma db push --accept-data-loss',
+              ]),
           '&&',
           `DATABASE_URL=${E2E_DB}`,
           'ALLOW_HQ_OVERRIDE=1 SHOPIFY_APP_URL=http://127.0.0.1:3000 SHOPIFY_API_KEY=dev SHOPIFY_API_SECRET=dev SCOPES=read_products npm run -s start',

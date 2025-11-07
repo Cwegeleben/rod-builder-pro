@@ -1,11 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Badge, Card, IndexTable, InlineStack, Modal, Text } from '@shopify/polaris'
+import { Badge, Button, Card, IndexTable, InlineStack, Text } from '@shopify/polaris'
 
 type LogRow = { at: string; templateId: string; runId: string; type: string; payload?: unknown }
 
+type RunStatus =
+  | 'created'
+  | 'discover'
+  | 'crawling'
+  | 'staging'
+  | 'diffing'
+  | 'staged'
+  | 'publishing'
+  | 'published'
+  | 'failed'
+  | 'cancelled'
+
 export default function RecentRunsTable() {
   const [logs, setLogs] = useState<LogRow[]>([])
-  const [openRun, setOpenRun] = useState<{ runId: string; rows: LogRow[] } | null>(null)
+  const [statusByRun, setStatusByRun] = useState<Record<string, { status: RunStatus; startedAt?: string }>>({})
 
   useEffect(() => {
     let active = true
@@ -35,22 +47,8 @@ export default function RecentRunsTable() {
       if (!byRun.has(l.runId)) byRun.set(l.runId, [])
       byRun.get(l.runId)!.push(l)
     }
-    const completed = Array.from(byRun.values()).filter(arr => {
-      arr.sort((a, b) => (a.at < b.at ? -1 : 1))
-      const last = arr[arr.length - 1]
-      if (!last) return false
-      // Treat both prepare and publish terminal events as completed runs
-      const t = last.type
-      return (
-        t === 'prepare:done' ||
-        t === 'prepare:error' ||
-        t === 'prepare:cancelled' ||
-        t === 'publish:done' ||
-        t === 'publish:error'
-      )
-    })
-    // map to summary rows
-    return completed.map(arr => {
+    // map to summary rows; include any run groups we see, newest first
+    const groups = Array.from(byRun.values()).map(arr => {
       const first = arr[0]
       const last = arr[arr.length - 1]
       const tpl = first.templateId
@@ -70,21 +68,37 @@ export default function RecentRunsTable() {
           totals.adds = (p['adds'] as number) || (p['staged'] as number) || 0
           totals.errors = (p['errors'] as number) || 0
         }
+        const consistency = arr.find(x => x.type === 'prepare:consistency')
+        if (consistency) {
+          const p = (consistency.payload || {}) as Record<string, unknown>
+          const dc = (p['diffCount'] as number) || 0
+          const sc = (p['stagedCount'] as number) || 0
+          totals.staged = dc || sc || totals.staged
+        }
       } catch {
         /* ignore */
       }
-      const status =
-        last.type === 'prepare:done' || last.type === 'publish:done'
-          ? 'success'
-          : last.type === 'prepare:error' || last.type === 'publish:error'
-            ? 'failed'
-            : 'cancelled'
-      return { runId, templateId: tpl, startedAt: first.at, endedAt: last.at, totals, durationSec, status, rows: arr }
+      // status hint from logs
+      let hint: RunStatus | null = null
+      const t = last?.type || ''
+      if (/^publish:error$/.test(t)) hint = 'failed'
+      else if (/^crawl:headers$/.test(t)) hint = 'crawling'
+      else if (/^prepare:consistency$/.test(t)) hint = 'staged'
+      return { runId, templateId: tpl, startedAt: first.at, endedAt: last?.at, totals, durationSec, hint, rows: arr }
     })
+    // newest first
+    groups.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))
+    return groups
   }, [logs])
 
   const headings = useMemo(() => {
-    return [{ title: 'Template' }, { title: 'Totals' }, { title: 'Duration' }, { title: 'Status' }, { title: 'Run' }]
+    return [
+      { title: 'Template' },
+      { title: 'Totals' },
+      { title: 'Duration' },
+      { title: 'Status' },
+      { title: 'Actions' },
+    ]
   }, []) as unknown as [{ title: string }, ...Array<{ title: string }>]
 
   const formatDuration = (s?: number) => {
@@ -108,6 +122,73 @@ export default function RecentRunsTable() {
     }
   }
 
+  // Fetch live run status snapshots for the top 20 runs to derive friendly status
+  useEffect(() => {
+    let active = true
+    const top = runs.slice(0, 20)
+    if (!top.length) return
+    const load = async () => {
+      try {
+        const entries = await Promise.all(
+          top.map(async r => {
+            try {
+              const resp = await fetch(`/api/importer/runs/${encodeURIComponent(r.runId)}/status`, {
+                headers: { 'Cache-Control': 'no-store' },
+              })
+              if (!resp.ok) return [r.runId, null] as const
+              const j = (await resp.json()) as { status?: RunStatus; startedAt?: string }
+              return [r.runId, { status: (j.status || 'created') as RunStatus, startedAt: j.startedAt }] as const
+            } catch {
+              return [r.runId, null] as const
+            }
+          }),
+        )
+        if (!active) return
+        const next: Record<string, { status: RunStatus; startedAt?: string }> = {}
+        for (const [id, s] of entries) if (s) next[id] = s
+        setStatusByRun(prev => ({ ...prev, ...next }))
+      } catch {
+        /* ignore */
+      }
+    }
+    load()
+    const t = setInterval(load, 30000)
+    return () => {
+      active = false
+      clearInterval(t)
+    }
+  }, [runs])
+
+  const friendly = (
+    runId: string,
+    hint: RunStatus | null,
+  ): { label: string; tone?: 'success' | 'critical' | 'info' } => {
+    const snap = statusByRun[runId]
+    const st = (snap?.status || hint || 'created') as RunStatus
+    switch (st) {
+      case 'published':
+        return { label: 'Published', tone: 'success' }
+      case 'publishing':
+        return { label: 'Publishing', tone: 'info' }
+      case 'staged':
+        return { label: 'Ready', tone: 'info' }
+      case 'diffing':
+      case 'staging':
+        return { label: 'Preparing', tone: 'info' }
+      case 'crawling':
+        return { label: 'Crawling headers', tone: 'info' }
+      case 'discover':
+      case 'created':
+        return { label: 'Created' }
+      case 'failed':
+        return { label: 'Publish failed', tone: 'critical' }
+      case 'cancelled':
+        return { label: 'Cancelled', tone: 'critical' }
+      default:
+        return { label: String(st) }
+    }
+  }
+
   return (
     <Card>
       <IndexTable resourceName={{ singular: 'run', plural: 'runs' }} itemCount={runs.length} headings={headings}>
@@ -116,7 +197,10 @@ export default function RecentRunsTable() {
             id={r.runId}
             key={r.runId}
             position={index}
-            onClick={() => setOpenRun({ runId: r.runId, rows: r.rows })}
+            onClick={() => {
+              // Navigate to Review for this run
+              window.location.assign(`/app/imports/runs/${encodeURIComponent(r.runId)}/review`)
+            }}
           >
             <IndexTable.Cell>
               <InlineStack gap="200" blockAlign="center">
@@ -134,52 +218,39 @@ export default function RecentRunsTable() {
             </IndexTable.Cell>
             <IndexTable.Cell>{formatDuration(r.durationSec)}</IndexTable.Cell>
             <IndexTable.Cell>
-              <Badge tone={r.status === 'success' ? 'success' : r.status === 'failed' ? 'critical' : undefined}>
-                {r.status}
-              </Badge>
+              {(() => {
+                const f = friendly(r.runId, r.hint as RunStatus | null)
+                return <Badge tone={f.tone}>{f.label}</Badge>
+              })()}
             </IndexTable.Cell>
             <IndexTable.Cell>
-              <Text as="span" tone="subdued" variant="bodySm">
-                {r.runId}
-              </Text>
+              {(() => {
+                const f = friendly(r.runId, r.hint as RunStatus | null)
+                if (f.label !== 'Published') return null
+                return (
+                  <span
+                    onMouseDown={e => e.stopPropagation()}
+                    onMouseUp={e => e.stopPropagation()}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <Button
+                      size="slim"
+                      onClick={() => {
+                        const ok = window.confirm('Schedule this import to run automatically?')
+                        if (!ok) return
+                        // Navigate to Import Settings where scheduling can be configured
+                        window.location.assign(`/app/imports/${encodeURIComponent(r.templateId)}?schedule=1`)
+                      }}
+                    >
+                      Schedule
+                    </Button>
+                  </span>
+                )
+              })()}
             </IndexTable.Cell>
           </IndexTable.Row>
         ))}
       </IndexTable>
-      <Modal
-        open={!!openRun}
-        onClose={() => setOpenRun(null)}
-        title={openRun ? `Run ${openRun.runId}` : ''}
-        primaryAction={{ content: 'Close', onAction: () => setOpenRun(null) }}
-      >
-        <Modal.Section>
-          {openRun ? (
-            <div style={{ maxHeight: 420, overflow: 'auto' }}>
-              {openRun.rows.map(r => (
-                <div key={`${r.at}|${r.type}`} style={{ padding: 8, borderBottom: '1px solid var(--p-color-border)' }}>
-                  <InlineStack gap="200" blockAlign="center">
-                    <Text as="span" tone="subdued" variant="bodySm">
-                      {new Date(r.at).toLocaleTimeString()}
-                    </Text>
-                    <Badge>{r.type}</Badge>
-                  </InlineStack>
-                  <div style={{ marginTop: 4 }}>
-                    <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>
-                      {(() => {
-                        try {
-                          return JSON.stringify(r.payload ?? null, null, 2)
-                        } catch {
-                          return String(r.payload)
-                        }
-                      })()}
-                    </pre>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </Modal.Section>
-      </Modal>
     </Card>
   )
 }

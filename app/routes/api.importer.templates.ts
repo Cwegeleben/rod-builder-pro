@@ -92,6 +92,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           let hasSeeds = false
           let seedCount = 0
           let hasStaged = false
+          let lastRunId: string | null = null
           try {
             const cfg = (r.importConfig as Record<string, unknown>) || {}
             const settings = (cfg['settings'] as Record<string, unknown>) || {}
@@ -107,6 +108,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
               if (supplierId) {
                 const count = await (prisma as any).partStaging.count({ where: { supplierId } })
                 hasStaged = count > 0
+                // Resolve latest run id for this supplier
+                const lastRun = await (prisma as any).importRun.findFirst({
+                  where: { supplierId },
+                  orderBy: { startedAt: 'desc' },
+                  select: { id: true },
+                })
+                lastRunId = lastRun?.id || null
               }
             }
           } catch {
@@ -116,7 +124,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           delete (rest as any).preparingRunId
           delete (rest as any).importConfig
           const queuedCount = queuedByTemplate[r.id] || 0
-          return { ...rest, preparing, hasSeeds, seedCount, hasStaged, queuedCount }
+          return { ...rest, preparing, hasSeeds, seedCount, hasStaged, queuedCount, lastRunId }
         }),
       )
       return new Response(JSON.stringify({ templates: out }), {

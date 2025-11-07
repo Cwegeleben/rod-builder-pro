@@ -1,12 +1,10 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 import ImportList from '../components/importer/ImportList'
 import GlobalLogList from '../components/importer/GlobalLogList'
-import ActiveImportsTable from '../components/importer/ActiveImportsTable'
-import RecentImportRuns from '../components/importer/RecentImportRuns'
 import RecentRunsTable from '../components/importer/RecentRunsTable'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from '@remix-run/react'
-import { Page, BlockStack, Card, InlineStack, Text, Banner, Divider } from '@shopify/polaris'
+import { Page, BlockStack, Card, InlineStack, Text, Banner } from '@shopify/polaris'
 
 type ImportsHomeProps = {
   search?: string
@@ -69,22 +67,13 @@ export default function ImportsHome(props: ImportsHomeProps = {}) {
           <BlockStack gap="300">
             <InlineStack align="space-between">
               <Text as="h2" variant="headingSm">
-                Your imports
+                Imports List
               </Text>
             </InlineStack>
             <ImportList initialDbTemplates={props.initialDbTemplates} />
           </BlockStack>
         </Card>
-        <Card>
-          <BlockStack gap="300">
-            <InlineStack align="space-between">
-              <Text as="h2" variant="headingSm">
-                Active imports
-              </Text>
-            </InlineStack>
-            <ActiveImportsTable />
-          </BlockStack>
-        </Card>
+        {/* Active imports card removed per requirements */}
         <Card>
           <BlockStack gap="300">
             <InlineStack align="space-between">
@@ -92,22 +81,19 @@ export default function ImportsHome(props: ImportsHomeProps = {}) {
                 Recent runs
               </Text>
             </InlineStack>
+            {/* Replace noisy logs section with a compact, one-line-per-run list */}
             <RecentRunsTable />
-            <Divider />
-            <Text as="h3" variant="headingSm">
-              Logs
-            </Text>
-            <GlobalLogList items={props.initialLogs} templateNames={props.templateNames} />
           </BlockStack>
         </Card>
         <Card>
           <BlockStack gap="300">
             <InlineStack align="space-between">
               <Text as="h2" variant="headingSm">
-                Import runs
+                Import Logs
               </Text>
             </InlineStack>
-            <RecentImportRuns />
+            {/* Show global import logs here (most recent first handled internally) */}
+            <GlobalLogList items={props.initialLogs} templateNames={props.templateNames} />
           </BlockStack>
         </Card>
       </BlockStack>
