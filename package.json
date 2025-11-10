@@ -35,6 +35,7 @@
     "preflight:admin-links": "tsx scripts/preflight/adminLinks.ts",
     "preflight:admin-templates-sync": "tsx scripts/preflight/adminTemplatesSync.ts",
     "preflight:templates-cost-field": "tsx scripts/preflight/templatesCostField.ts",
+    "smoke:single-seed": "node scripts/smoke/single-seed-run.mjs",
     "migrate:templates-cost": "tsx scripts/migrate/migrate-templates-cost.mts",
     "migrate:backfill:publish-handles": "node scripts/migrate/backfill-publish-handles.mjs",
     "validate:templateversion-json": "node scripts/migrate/validate-templateversion-json.mjs",

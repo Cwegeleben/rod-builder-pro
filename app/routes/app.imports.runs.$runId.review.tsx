@@ -89,6 +89,13 @@ export default function ReviewRunRoute() {
     skipped: number
     failed: number
   } | null>(null)
+  const [bypassDryRunLoading, setBypassDryRunLoading] = useState(false)
+  const [bypassDryRunResult, setBypassDryRunResult] = useState<null | {
+    created: number
+    updated: number
+    skipped: number
+    failed: number
+  }>(null)
   const [dryRun, setDryRun] = useState(false)
   const [publishProgress, setPublishProgress] = useState<number>(0)
   const [publishEtaMs, setPublishEtaMs] = useState<number | null>(null)
@@ -443,6 +450,51 @@ export default function ReviewRunRoute() {
             </Button>
           ) : null}
         </InlineStack>
+        {/* Diagnostic bypass dry-run publish: visible when diag=1 & token present in URL */}
+        {(() => {
+          const diag = params.get('diag') === '1'
+          const token = params.get('token') || ''
+          if (!diag || !token) return null
+          return (
+            <InlineStack gap="200" blockAlign="center">
+              <Button
+                disabled={bypassDryRunLoading || hasConflicts || approvedCount === 0}
+                loading={bypassDryRunLoading}
+                onClick={async () => {
+                  setBypassDryRunLoading(true)
+                  setBypassDryRunResult(null)
+                  try {
+                    const url = new URL(`/api/importer/runs/${run.id}/publish/shopify`, window.location.origin)
+                    url.searchParams.set('diag', '1')
+                    url.searchParams.set('token', token)
+                    const resp = await fetch(url.toString(), {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ dryRun: true }),
+                    })
+                    const jr = await resp.json()
+                    if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Bypass dry-run failed')
+                    if (jr?.totals) setBypassDryRunResult(jr.totals)
+                    setToast(
+                      `Bypass dry-run — C:${jr?.totals?.created || 0} U:${jr?.totals?.updated || 0} S:${jr?.totals?.skipped || 0} F:${jr?.totals?.failed || 0}`,
+                    )
+                  } catch (e) {
+                    setToast((e as Error)?.message || 'Bypass dry-run failed')
+                  } finally {
+                    setBypassDryRunLoading(false)
+                  }
+                }}
+              >
+                Diagnostic Dry Run (Bypass)
+              </Button>
+              {bypassDryRunResult ? (
+                <Badge tone="success">
+                  {`Diag Totals C:${bypassDryRunResult.created} U:${bypassDryRunResult.updated} S:${bypassDryRunResult.skipped} F:${bypassDryRunResult.failed}`}
+                </Badge>
+              ) : null}
+            </InlineStack>
+          )
+        })()}
         {!smokeMode ? (
           <InlineStack gap="200" blockAlign="center">
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
