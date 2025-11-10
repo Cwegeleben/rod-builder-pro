@@ -55,6 +55,11 @@ export default function ImportSettingsIndex() {
   // Track if the user (or a discover action) has modified the seeds so we don't overwrite with loader-saved values
   const [hasUserEditedSeeds, setHasUserEditedSeeds] = React.useState<boolean>(false)
   const [showSavedToast, setShowSavedToast] = React.useState<boolean>(false)
+  const [recrawlToast, setRecrawlToast] = React.useState<string | null>(null)
+  // Track recrawl async state (reserved for future button loading indicator)
+  const [recrawlLoading, setRecrawlLoading] = React.useState<boolean>(false)
+  const [recrawlGoal, setRecrawlGoal] = React.useState<number | null>(null)
+  const [recrawlConfirmOpen, setRecrawlConfirmOpen] = React.useState<boolean>(false)
   // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
   const [saveLoading, setSaveLoading] = React.useState<boolean>(false)
   const [saveError, setSaveError] = React.useState<string | null>(null)
@@ -73,6 +78,18 @@ export default function ImportSettingsIndex() {
   const [clearCount, setClearCount] = React.useState<number | null>(null)
   const [clearError, setClearError] = React.useState<string | null>(null)
   const [showClearedToast, setShowClearedToast] = React.useState<boolean>(false)
+  // Delete import modal state
+  const [deleteModalOpen, setDeleteModalOpen] = React.useState<boolean>(false)
+  const [deleteLoading, setDeleteLoading] = React.useState<boolean>(false)
+  const [deleteError, setDeleteError] = React.useState<string | null>(null)
+  const [deleteCounts, setDeleteCounts] = React.useState<{
+    templates?: number
+    logs?: number
+    staging?: number
+    sources?: number
+    runs?: number
+    diffs?: number
+  } | null>(null)
   // Mount diagnostics marker
   const debug = typeof location.search === 'string' && /[?&]debugRoute=1(&|$)/.test(location.search)
   React.useEffect(() => {
@@ -408,6 +425,11 @@ export default function ImportSettingsIndex() {
             <Toast content="Settings saved" onDismiss={() => setShowSavedToast(false)} duration={2000} />
           </Frame>
         ) : null}
+        {recrawlToast ? (
+          <Frame>
+            <Toast content={recrawlToast} onDismiss={() => setRecrawlToast(null)} duration={3000} />
+          </Frame>
+        ) : null}
         {showClearedToast ? (
           <Frame>
             <Toast content="Cleared staged rows" onDismiss={() => setShowClearedToast(false)} duration={3000} />
@@ -622,12 +644,55 @@ export default function ImportSettingsIndex() {
               >
                 Save and Crawl
               </Button>
+              <Button variant="secondary" disabled={!templateId} onClick={() => setRecrawlConfirmOpen(true)}>
+                Update All (Recrawl + Publish)
+              </Button>
+              {recrawlGoal != null ? <Badge tone="info">{`Goal: ${recrawlGoal} item(s)`}</Badge> : null}
               <Button
                 url={`/app/imports/${templateId}/review${location.search}`}
                 variant="secondary"
                 disabled={!templateId}
               >
                 Review
+              </Button>
+              <Button
+                tone="critical"
+                variant="secondary"
+                disabled={!templateId}
+                onClick={async () => {
+                  if (!templateId) return
+                  setDeleteError(null)
+                  setDeleteLoading(true)
+                  try {
+                    const resp = await fetch('/api/importer/delete?dry=1', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ templateIds: [templateId] }),
+                    })
+                    const jr = (await resp.json()) as {
+                      ok?: boolean
+                      counts?: {
+                        templates?: number
+                        logs?: number
+                        staging?: number
+                        sources?: number
+                        runs?: number
+                        diffs?: number
+                      }
+                      error?: string
+                    }
+                    if (!resp.ok || jr?.ok === false) throw new Error(jr?.error || 'Failed to preview delete')
+                    setDeleteCounts(jr.counts || null)
+                    setDeleteModalOpen(true)
+                  } catch (e) {
+                    setDeleteError((e as Error)?.message || 'Failed to preview delete')
+                  } finally {
+                    setDeleteLoading(false)
+                  }
+                }}
+                loading={deleteLoading}
+              >
+                Delete import…
               </Button>
               <Button
                 tone="critical"
@@ -856,9 +921,14 @@ export default function ImportSettingsIndex() {
                     const r = await fetch('/api/importer/staging/clear', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ templateId }),
+                      body: JSON.stringify({ templateId, alsoSeeds: true }),
                     })
-                    const d = (await r.json()) as { ok?: boolean; deleted?: number; error?: string }
+                    const d = (await r.json()) as {
+                      ok?: boolean
+                      deleted?: number
+                      seedsDeleted?: number
+                      error?: string
+                    }
                     if (!r.ok || !d?.ok) throw new Error(d?.error || 'Failed to clear staged rows')
                     try {
                       const res = await fetch(`/api/importer/targets/${templateId}/settings`, {
@@ -897,12 +967,134 @@ export default function ImportSettingsIndex() {
                       (<code>{siteId}</code>)
                     </>
                   ) : null}
-                  .
+                  . It will also clear the saved seed URLs for this template.
                 </Text>
                 {typeof clearCount === 'number' ? (
                   <Text as="p" tone="subdued">
                     {clearCount} row(s) currently staged.
                   </Text>
+                ) : null}
+              </Modal.Section>
+            </Modal>
+          </Frame>
+        ) : null}
+
+        {recrawlConfirmOpen ? (
+          <Frame>
+            <Modal
+              open
+              title="Recrawl & Publish to Shopify?"
+              onClose={() => setRecrawlConfirmOpen(false)}
+              primaryAction={{
+                content: 'Start Recrawl + Publish',
+                loading: recrawlLoading,
+                onAction: async () => {
+                  if (!templateId) return
+                  try {
+                    setRecrawlToast('Recrawl started…')
+                    setRecrawlLoading(true)
+                    const resp = await fetch('/api/importer/recrawl', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ templateId, approveAdds: true, publish: true, dryRun: false }),
+                    })
+                    const jr = await resp.json()
+                    if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Recrawl failed')
+                    if (typeof jr.goal === 'number') setRecrawlGoal(jr.goal)
+                    const t = jr?.publish?.totals
+                    if (t && typeof t.created === 'number') {
+                      setRecrawlToast(
+                        `Published — C:${t.created} U:${t.updated ?? 0} S:${t.skipped ?? 0} F:${t.failed ?? 0}`,
+                      )
+                    } else {
+                      setRecrawlToast('Recrawl completed')
+                    }
+                  } catch (e) {
+                    setSaveError((e as Error)?.message || 'Recrawl failed')
+                  } finally {
+                    setRecrawlLoading(false)
+                    setRecrawlConfirmOpen(false)
+                  }
+                },
+              }}
+              secondaryActions={[{ content: 'Cancel', onAction: () => setRecrawlConfirmOpen(false) }]}
+            >
+              <Modal.Section>
+                <Text as="p">
+                  This will re-discover and stage items, auto-approve new items, then publish to Shopify. If a prepare
+                  or publish is currently running, it will be blocked.
+                </Text>
+                {recrawlGoal != null ? (
+                  <Text as="p" tone="subdued">{`Goal: ${recrawlGoal} approved item(s) will be published.`}</Text>
+                ) : null}
+              </Modal.Section>
+            </Modal>
+          </Frame>
+        ) : null}
+
+        {deleteModalOpen ? (
+          <Frame>
+            <Modal
+              open
+              title="Delete this import and related data?"
+              onClose={() => {
+                setDeleteModalOpen(false)
+                setDeleteCounts(null)
+                setDeleteError(null)
+              }}
+              primaryAction={{
+                content: 'Delete import',
+                destructive: true,
+                loading: deleteLoading,
+                onAction: async () => {
+                  if (!templateId) return
+                  setDeleteLoading(true)
+                  try {
+                    const resp = await fetch('/api/importer/delete', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ templateIds: [templateId] }),
+                    })
+                    const jr = await resp.json()
+                    if (!resp.ok || jr?.ok === false) throw new Error(jr?.error || 'Delete failed')
+                    // Navigate to imports list with toast param
+                    try {
+                      const qs = new URLSearchParams(location.search)
+                      qs.set('deleted', '1')
+                      window.location.assign(`/app/imports?${qs.toString()}`)
+                    } catch {
+                      window.location.assign('/app/imports?deleted=1')
+                    }
+                  } catch (e) {
+                    setDeleteError((e as Error)?.message || 'Delete failed')
+                  } finally {
+                    setDeleteLoading(false)
+                    setDeleteModalOpen(false)
+                    setDeleteCounts(null)
+                  }
+                },
+              }}
+              secondaryActions={[{ content: 'Cancel', onAction: () => setDeleteModalOpen(false) }]}
+            >
+              <Modal.Section>
+                {deleteError ? (
+                  <Banner tone="critical" title="Delete failed">
+                    <p>{deleteError}</p>
+                  </Banner>
+                ) : null}
+                <Text as="p">
+                  This will permanently remove the template, logs, staged items, sources, and runs associated with this
+                  import. This cannot be undone.
+                </Text>
+                {deleteCounts ? (
+                  <BlockStack gap="050">
+                    <Text as="p" tone="subdued">{`Templates: ${deleteCounts.templates ?? 1}`}</Text>
+                    <Text as="p" tone="subdued">{`Logs: ${deleteCounts.logs ?? 0}`}</Text>
+                    <Text as="p" tone="subdued">{`Staged items: ${deleteCounts.staging ?? 0}`}</Text>
+                    <Text as="p" tone="subdued">{`Sources: ${deleteCounts.sources ?? 0}`}</Text>
+                    <Text as="p" tone="subdued">{`Runs: ${deleteCounts.runs ?? 0}`}</Text>
+                    <Text as="p" tone="subdued">{`Diffs: ${deleteCounts.diffs ?? 0}`}</Text>
+                  </BlockStack>
                 ) : null}
               </Modal.Section>
             </Modal>

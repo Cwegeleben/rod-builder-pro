@@ -11,9 +11,7 @@ export async function applyImportRunToShop(params: {
 }) {
   const { runId, shopDomain, approvedOnly, deleteOverride } = params
   // Ensure the run exists
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db: any = prisma as any
-  const run = await db.importRun.findUnique({ where: { id: runId } })
+  const run = await prisma.importRun.findUnique({ where: { id: runId } })
   if (!run) throw new Error(`ImportRun not found: ${runId}`)
 
   const token = await getShopAccessToken(shopDomain)

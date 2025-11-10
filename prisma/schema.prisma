@@ -227,6 +227,8 @@ model ImportDiff {
 model PartStaging {
   id          String   @id @default(cuid())
   supplierId  String
+  // Template-scoped staging to isolate multiple imports under same supplier
+  templateId  String?
   externalId  String
   title       String
   partType    String
@@ -246,7 +248,7 @@ model PartStaging {
   publishStatus    String?   // created | updated | skipped | error
   publishResult    Json?
 
-  @@unique([supplierId, externalId])
+  @@unique([supplierId, templateId, externalId], name: "part_staging_supplier_template_ext_unique")
 }
 // <!-- END RBP GENERATED: importer-v2-schema -->
 
@@ -297,6 +299,8 @@ model RunItemMapping {
 model ProductSource {
   id           String   @id @default(cuid())
   supplierId   String
+  // Template-scoped product sources (seeds) to avoid cross-template bleed
+  templateId   String?
   url          String
   externalId   String?
   source       String   // 'manual' | 'discovered' | 'forced'
@@ -304,7 +308,7 @@ model ProductSource {
   firstSeenAt  DateTime @default(now())
   lastSeenAt   DateTime @default(now())
 
-  @@unique([supplierId, url], name: "product_source_supplier_url_unique")
+  @@unique([supplierId, templateId, url], name: "product_source_supplier_template_url_unique")
 }
 // <!-- END RBP GENERATED: importer-seeds-v1 -->
 

@@ -232,6 +232,42 @@
       "type": "shell",
       "command": "pnpm exec playwright test tests/e2e/importer.schedule-vs-settings.spec.ts",
       "group": "test"
+    },
+    {
+      "label": "Deploy Shopify (prod)",
+      "type": "shell",
+      "command": "npm run -s deploy:shopify:prod",
+      "group": "build"
+    },
+    {
+      "label": "Deploy Shopify (staging)",
+      "type": "shell",
+      "command": "npm run -s deploy:shopify:staging",
+      "group": "build"
+    },
+    {
+      "label": "Deploy Fly (prod)",
+      "type": "shell",
+      "command": "npm run -s deploy:fly:prod",
+      "group": "build"
+    },
+    {
+      "label": "Deploy Fly (staging)",
+      "type": "shell",
+      "command": "npm run -s deploy:fly:staging",
+      "group": "build"
+    },
+    {
+      "label": "Release (prod)",
+      "type": "shell",
+      "command": "npm run -s release:prod",
+      "group": "build"
+    },
+    {
+      "label": "Release (staging)",
+      "type": "shell",
+      "command": "npm run -s release:staging",
+      "group": "build"
     }
   ]
 }

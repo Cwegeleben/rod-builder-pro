@@ -43,7 +43,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   ).publish
   const progressBlob = (
     summary as unknown as {
-      publishProgress?: { processed?: number; target?: number; startedAt?: string; updatedAt?: string }
+      publishProgress?: { processed?: number; target?: number; startedAt?: string; updatedAt?: string; phase?: string }
     }
   ).publishProgress
   const completed = Boolean(publishSummary?.totals)
@@ -68,6 +68,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (ratePerMs > 0 && remaining > 0) etaMs = Math.round(remaining / ratePerMs)
   }
 
+  // Derive phase label if provided or infer from progress
+  let phase = progressBlob?.phase || null
+  if (!phase) {
+    if (completed) phase = 'finalizing'
+    else if (progress < 20) phase = 'initializing'
+    else if (progress < 70) phase = 'writing'
+    else phase = 'verifying'
+  }
+
   return json(
     {
       ok: true,
@@ -78,6 +87,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       processed,
       totals,
       etaMs,
+      phase,
       // diagnostics
       _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes },
     },

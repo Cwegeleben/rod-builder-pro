@@ -15,6 +15,8 @@ export type RunOptions = {
   notes?: string
   // Supplier identifier (matches ImportTarget.siteId); used for staging/seeds/diffs
   supplierId?: string
+  // Template partition for isolation (optional; null/undefined implies legacy global supplier scope)
+  templateId?: string
   // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
   templateKey?: string
   // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
@@ -36,12 +38,17 @@ const DEFAULT_OPTIONS: RunOptions = {
   useSeriesParser: false,
 }
 
+// Centralized where builder for clarity
+const partStagingWhere = (supplierId: string, templateId?: string | null) =>
+  templateId != null ? { supplierId, templateId } : { supplierId }
+
 export function parseRunOptions(formData: FormData): RunOptions {
   const includeSeeds = formData.get('includeSeeds') === 'on'
   const skipSuccessful = formData.get('skipSuccessful') === 'on'
   const notes = String(formData.get('notes') || '')
   // <!-- BEGIN RBP GENERATED: importer-templates-integration-v2-1 -->
   const templateKey = String(formData.get('templateKey') || '').trim() || undefined
+  const templateId = String(formData.get('templateId') || '').trim() || undefined
   // <!-- END RBP GENERATED: importer-templates-integration-v2-1 -->
   // hq-importer-new-import-v2
   const variantTemplateId = String(formData.get('variantTemplateId') || '').trim() || undefined
@@ -59,6 +66,7 @@ export function parseRunOptions(formData: FormData): RunOptions {
     skipSuccessful,
     notes,
     templateKey,
+    templateId,
     variantTemplateId,
     scraperId,
     useSeriesParser,
@@ -105,8 +113,7 @@ export async function startImportFromOptions(
       if (typeof data.etaSeconds === 'number') progress.etaSeconds = data.etaSeconds
       if (data.details) progress.details = data.details
       if (Object.keys(progress).length) patch.progress = progress as unknown as object
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (prisma as any).importRun.update({ where: { id }, data: patch })
+      await prisma.importRun.update({ where: { id }, data: patch })
     } catch {
       // ignore pre-migration or transient errors
     }
@@ -135,6 +142,7 @@ export async function startImportFromOptions(
   // Force Prepare Review launcher to discovery mode (never short-circuit as price_avail)
   if (options.mode !== 'discover') options.mode = 'discover'
   const supplierId = options.supplierId || 'batson'
+  const templateId = options.templateId || null
   // Helper to stage from series parser (Batson attribute grid)
   async function stageFromSeriesParser(seedUrls: string[]) {
     const { renderHeadlessHtml } = await import('../../server/headless/renderHeadlessHtml')
@@ -228,6 +236,7 @@ export async function startImportFromOptions(
         const priceMsrp = toNumberOrNull((r.raw as { msrp?: unknown }).msrp)
         const availability = r.raw.availability ?? null
         await upsertStaging(supplierId, {
+          templateId: templateId || undefined,
           externalId,
           title,
           partType,
@@ -242,7 +251,7 @@ export async function startImportFromOptions(
         // Proactively seed a search URL to reach detail pages for image extraction
         try {
           const searchUrl = `${base}/ecom/purchaselistsearch?keywords=${encodeURIComponent(externalId)}`
-          await upsertProductSource(supplierId, searchUrl, 'discovered', 'seeded-from-series')
+          await upsertProductSource(supplierId, searchUrl, 'discovered', 'seeded-from-series', templateId || undefined)
         } catch {
           /* ignore */
         }
@@ -251,13 +260,13 @@ export async function startImportFromOptions(
   }
   // Record manual URLs as sources
   for (const url of options.manualUrls) {
-    await upsertProductSource(supplierId, url, 'manual', options.notes)
+    await upsertProductSource(supplierId, url, 'manual', options.notes, templateId || undefined)
   }
   // Compose seeds
   // When using the series parser, restrict crawl seeds to only the manual URLs for this run
   const saved =
     options.includeSeeds && !options.useSeriesParser
-      ? (await fetchActiveSources(supplierId)).map((s: { url: string }) => s.url)
+      ? (await fetchActiveSources(supplierId, templateId || undefined)).map((s: { url: string }) => s.url)
       : []
   // Sanitize and de-duplicate seeds; only allow absolute http(s) URLs to avoid SyntaxError from URL/fetch
   const isValidHttpUrl = (s: string): boolean => {
@@ -280,6 +289,7 @@ export async function startImportFromOptions(
     await stageFromSeriesParser(seeds)
     const crawlRes = await crawlBatson(seeds, {
       templateKey: options.templateKey,
+      templateId: templateId || undefined,
       politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
       supplierId,
       // Do not include previously saved seeds for series-targeted runs to avoid cross-series noise
@@ -312,6 +322,7 @@ export async function startImportFromOptions(
     await throwIfCancelled(runId)
     const crawlRes = await crawlBatson(seeds, {
       templateKey: options.templateKey,
+      templateId: templateId || undefined,
       // Conservative defaults for Fly Machines with headless Chromium
       politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
       supplierId,
@@ -343,16 +354,30 @@ export async function startImportFromOptions(
   // Generate diffs
   if (runId) {
     try {
-      const stagingCount = await prisma.partStaging.count({ where: { supplierId } })
+      const stagingCount = await prisma.partStaging.count({ where: partStagingWhere(supplierId, templateId) })
       const seedCount = seeds.length
       console.log('[prepare-review-wirefix] before-diff', { supplierId, seedCount, stagingCount, runId })
+      // Diagnostic log for staging scope prior to diff
+      try {
+        const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'
+        await prisma.importLog.create({
+          data: {
+            templateId: tplForLog,
+            runId,
+            type: 'prepare:diagnostic:stagingScope',
+            payload: { supplierId, templateId, seedCount, stagingCount },
+          },
+        })
+      } catch {
+        /* ignore logging errors */
+      }
     } catch {
       /* noop */
     }
     await prisma.importDiff.deleteMany({ where: { importRunId: runId } })
     await setProgress(runId, { status: 'diffing', phase: 'diff', percent: 80 })
     await throwIfCancelled(runId)
-    await createDiffRowsForRun(supplierId, runId, { options, admin })
+    await createDiffRowsForRun(supplierId, runId, { options, admin, templateId: templateId || undefined })
     if (options.skipSuccessful) {
       // Also mark previously successful externalIds as skipped (history ledger based on approvals)
       await markSkipSuccessfulForRun(supplierId, runId)
@@ -364,17 +389,26 @@ export async function startImportFromOptions(
       // Mark run as staged after diffs are materialized so Review can immediately show rows
       data: { status: 'staged', summary: { counts, options } as unknown as object },
     })
+    // Post-diff summary diagnostics
+    try {
+      const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'
+      await prisma.importLog.create({
+        data: { templateId: tplForLog, runId, type: 'prepare:diagnostic:diffSummary', payload: { counts } },
+      })
+    } catch {
+      /* ignore */
+    }
     await setProgress(runId, { status: 'staged', phase: 'ready', percent: 100, details: { counts } })
     // Post-run consistency log: expectedItems (preflight) vs staged and diffs
     try {
       const run = await prisma.importRun.findUnique({ where: { id: runId } })
       const pre = ((run?.summary as unknown as { preflight?: { expectedItems?: number } }) || {}).preflight || {}
       const expectedItems = typeof pre.expectedItems === 'number' ? pre.expectedItems : undefined
-      const stagedCount = await prisma.partStaging.count({ where: { supplierId } })
+      const stagedCount = await prisma.partStaging.count({ where: partStagingWhere(supplierId, templateId) })
       const diffCount = await prisma.importDiff.count({ where: { importRunId: runId } })
       await prisma.importLog.create({
         data: {
-          templateId: options.notes?.replace(/^prepare:/, '') || 'n/a',
+          templateId: options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a',
           runId,
           type: 'prepare:consistency',
           payload: { expectedItems, stagedCount, diffCount },
@@ -392,18 +426,32 @@ export async function startImportFromOptions(
     return runId
   } else {
     // Create a new run and then update with options merged
-    const newRunId = await createRunFromStaging(supplierId)
+    const newRunId = await createRunFromStaging(supplierId, templateId || undefined)
     try {
-      const stagingCount = await prisma.partStaging.count({ where: { supplierId } })
+      const stagingCount = await prisma.partStaging.count({ where: partStagingWhere(supplierId, templateId) })
       const seedCount = seeds.length
       console.log('[prepare-review-wirefix] before-diff', { supplierId, seedCount, stagingCount, runId: newRunId })
+      // Diagnostic log for staging scope prior to diff (new run)
+      try {
+        const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'
+        await prisma.importLog.create({
+          data: {
+            templateId: tplForLog,
+            runId: newRunId,
+            type: 'prepare:diagnostic:stagingScope',
+            payload: { supplierId, templateId, seedCount, stagingCount },
+          },
+        })
+      } catch {
+        /* ignore */
+      }
     } catch {
       /* noop */
     }
     await prisma.importDiff.deleteMany({ where: { importRunId: newRunId } })
     await setProgress(newRunId, { status: 'diffing', phase: 'diff', percent: 80 })
     await throwIfCancelled(newRunId)
-    await createDiffRowsForRun(supplierId, newRunId, { options, admin })
+    await createDiffRowsForRun(supplierId, newRunId, { options, admin, templateId: templateId || undefined })
     if (options.skipSuccessful) {
       await markSkipSuccessfulForRun(supplierId, newRunId)
     }
@@ -413,17 +461,26 @@ export async function startImportFromOptions(
       // Mark run as staged after diffs are materialized
       data: { status: 'staged', summary: { counts, options } as unknown as object },
     })
+    // Post-diff summary diagnostics (new run)
+    try {
+      const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'
+      await prisma.importLog.create({
+        data: { templateId: tplForLog, runId: newRunId, type: 'prepare:diagnostic:diffSummary', payload: { counts } },
+      })
+    } catch {
+      /* ignore */
+    }
     await setProgress(newRunId, { status: 'staged', phase: 'ready', percent: 100, details: { counts } })
     // Post-run consistency log for new run
     try {
       const run = await prisma.importRun.findUnique({ where: { id: newRunId } })
       const pre = ((run?.summary as unknown as { preflight?: { expectedItems?: number } }) || {}).preflight || {}
       const expectedItems = typeof pre.expectedItems === 'number' ? pre.expectedItems : undefined
-      const stagedCount = await prisma.partStaging.count({ where: { supplierId } })
+      const stagedCount = await prisma.partStaging.count({ where: partStagingWhere(supplierId, templateId) })
       const diffCount = await prisma.importDiff.count({ where: { importRunId: newRunId } })
       await prisma.importLog.create({
         data: {
-          templateId: options.notes?.replace(/^prepare:/, '') || 'n/a',
+          templateId: options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a',
           runId: newRunId,
           type: 'prepare:consistency',
           payload: { expectedItems, stagedCount, diffCount },
@@ -443,20 +500,21 @@ export async function startImportFromOptions(
 }
 // <!-- END RBP GENERATED: scrape-template-wiring-v2 -->
 
-async function createRunFromStaging(supplierId: string): Promise<string> {
+async function createRunFromStaging(supplierId: string, templateId?: string): Promise<string> {
   // Mirror packages/importer/src/pipelines/diff.ts but return id and keep summary counts
-  const counts = await generateCounts(supplierId)
+  const counts = await generateCounts(supplierId, templateId)
   const run = await prisma.importRun.create({
     data: { supplierId, status: 'started', summary: { counts } as unknown as object },
   })
-  await createDiffRowsForRun(supplierId, run.id)
+  await createDiffRowsForRun(supplierId, run.id, { templateId })
   return run.id
 }
 
 // Exported helper to compute diffs for an existing run id (used by launcher fallback to keep logs/run cohesive)
 export async function diffStagingIntoExistingRun(supplierId: string, runId: string, opts?: { options?: RunOptions }) {
+  const templateId = opts?.options?.templateId
   await prisma.importDiff.deleteMany({ where: { importRunId: runId } })
-  await createDiffRowsForRun(supplierId, runId, { options: opts?.options })
+  await createDiffRowsForRun(supplierId, runId, { options: opts?.options, templateId })
   const counts = await countDiffsForRun(runId)
   await writeOptionsToRun(runId, opts?.options || DEFAULT_OPTIONS)
   await prisma.importRun.update({
@@ -469,8 +527,20 @@ export async function diffStagingIntoExistingRun(supplierId: string, runId: stri
   return counts
 }
 
-async function generateCounts(supplierId: string): Promise<Record<string, number>> {
-  const staging = await prisma.partStaging.findMany({ where: { supplierId } })
+async function generateCounts(supplierId: string, templateId?: string): Promise<Record<string, number>> {
+  let staging: Array<{
+    externalId: string
+    hashContent?: unknown
+    title?: string
+    partType?: string
+    description?: string | null
+    images?: unknown
+    rawSpecs?: unknown
+    normSpecs?: unknown
+    priceMsrp?: unknown
+    priceWh?: unknown
+  }> = []
+  staging = (await prisma.partStaging.findMany({ where: partStagingWhere(supplierId, templateId) })) as typeof staging
   const partsTableExists = await prisma.$queryRawUnsafe<{ name: string }[]>(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='Part'`,
   )
@@ -485,7 +555,8 @@ async function generateCounts(supplierId: string): Promise<Record<string, number
     else if (s.hashContent !== (before.hashContent || '')) counts['change'] = (counts['change'] || 0) + 1
   }
   for (const ex of existing) {
-    if (!staging.find(s => s.externalId === ex.externalId)) counts['delete'] = (counts['delete'] || 0) + 1
+    if (!staging.find((s: { externalId: string }) => s.externalId === ex.externalId))
+      counts['delete'] = (counts['delete'] || 0) + 1
   }
   return counts
 }
@@ -532,9 +603,23 @@ async function fetchShopifyHash(admin: AdminClient, handle: string): Promise<str
 async function createDiffRowsForRun(
   supplierId: string,
   runId: string,
-  ctx?: { options?: RunOptions; admin?: AdminClient },
+  ctx?: { options?: RunOptions; admin?: AdminClient; templateId?: string },
 ) {
-  const staging = await prisma.partStaging.findMany({ where: { supplierId } })
+  let staging: Array<{
+    externalId: string
+    hashContent?: unknown
+    title?: string
+    partType?: string
+    description?: string | null
+    images?: unknown
+    rawSpecs?: unknown
+    normSpecs?: unknown
+    priceMsrp?: unknown
+    priceWh?: unknown
+  }> = []
+  staging = (await prisma.partStaging.findMany({
+    where: partStagingWhere(supplierId, ctx?.templateId),
+  })) as typeof staging
   const partsTableExists = await prisma.$queryRawUnsafe<{ name: string }[]>(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='Part'`,
   )
@@ -611,7 +696,7 @@ async function createDiffRowsForRun(
   for (const ex of existing) {
     const exId = String((ex as Record<string, unknown>)['externalId'] || '')
     if (!exId) continue
-    if (!staging.find(s => s.externalId === exId)) {
+    if (!staging.find((s: { externalId: string }) => s.externalId === exId)) {
       const exObj = ex as Record<string, unknown>
       const beforeJson: Prisma.JsonObject = {
         title: (exObj['title'] as string) ?? null,

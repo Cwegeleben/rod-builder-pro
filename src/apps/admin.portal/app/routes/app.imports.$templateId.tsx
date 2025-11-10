@@ -214,14 +214,38 @@ export default function ImportSettings() {
           onClick={async () => {
             const id = String(templateId || '').trim()
             if (!id) return
-            const ok = window.confirm(
-              'Delete this import and related data (staged parts, sources, runs)? This cannot be undone.',
-            )
-            if (!ok) return
             try {
+              // 1) Dry-run to compute impact
               const fd = new FormData()
               fd.set('templateId', id)
-              await fetch('/api/importer/delete', { method: 'POST', body: fd })
+              const preview = await fetch('/api/importer/delete?dry=1', { method: 'POST', body: fd })
+              if (!preview.ok) throw new Error('Preview failed')
+              const pj = (await preview.json()) as {
+                counts?: {
+                  templates?: number
+                  logs?: number
+                  staging?: number
+                  sources?: number
+                  runs?: number
+                  diffs?: number
+                }
+              }
+              const c = pj.counts || {}
+              const msg = [
+                'Delete this import and related data? This cannot be undone.',
+                '',
+                `Templates: ${c.templates ?? 1}`,
+                `Logs: ${c.logs ?? 0}`,
+                `Staged items: ${c.staging ?? 0}`,
+                `Sources: ${c.sources ?? 0}`,
+                `Runs: ${c.runs ?? 0}`,
+                `Diffs: ${c.diffs ?? 0}`,
+              ].join('\n')
+              const ok = window.confirm(msg)
+              if (!ok) return
+              // 2) Commit delete
+              const commit = await fetch('/api/importer/delete', { method: 'POST', body: fd })
+              if (!commit.ok) throw new Error('Delete failed')
               // Navigate back to imports list
               window.location.assign('/app/imports?deleted=1')
             } catch {

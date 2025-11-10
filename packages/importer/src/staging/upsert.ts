@@ -5,6 +5,7 @@ import { prisma } from '../../../../app/db.server'
 export async function upsertStaging(
   supplierId: string,
   rec: {
+    templateId?: string
     externalId: string
     title: string
     partType: string
@@ -49,8 +50,16 @@ export async function upsertStaging(
     .digest('hex')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const client: any = prisma
+  // Use named composite unique (supplierId, templateId, externalId)
+  const whereKey: Record<string, unknown> = {
+    part_staging_supplier_template_ext_unique: {
+      supplierId,
+      templateId: rec.templateId ?? null,
+      externalId: rec.externalId,
+    },
+  }
   await client.partStaging.upsert({
-    where: { supplierId_externalId: { supplierId, externalId: rec.externalId } },
+    where: whereKey as never,
     update: {
       title: rec.title,
       partType: rec.partType,
@@ -65,6 +74,7 @@ export async function upsertStaging(
     },
     create: {
       supplierId,
+      templateId: rec.templateId || null,
       externalId: rec.externalId,
       title: rec.title,
       partType: rec.partType,

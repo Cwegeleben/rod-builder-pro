@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Badge, BlockStack, Box, Button, InlineStack, Modal, Text } from '@shopify/polaris'
 
 export type RunLog = { id: string; type: string; at: string; payload?: unknown }
@@ -43,6 +43,16 @@ function payloadSnippet(payload: unknown): string | null {
 
 export default function RunLogList({ logs = [] }: { logs?: RunLog[] }) {
   const [active, setActive] = useState<RunLog | null>(null)
+  const [filter, setFilter] = useState<string>('ALL')
+  const types = useMemo(() => {
+    const set = new Set<string>()
+    for (const l of logs) set.add(l.type)
+    return Array.from(set).sort()
+  }, [logs])
+  const filtered = useMemo(() => {
+    if (filter === 'ALL') return logs
+    return logs.filter(l => l.type === filter)
+  }, [filter, logs])
   if (!logs.length) {
     return (
       <Text as="p" tone="subdued">
@@ -52,8 +62,21 @@ export default function RunLogList({ logs = [] }: { logs?: RunLog[] }) {
   }
   return (
     <>
+      <InlineStack gap="200" wrap>
+        <Button size="slim" variant={filter === 'ALL' ? 'primary' : undefined} onClick={() => setFilter('ALL')}>
+          {`All (${logs.length})`}
+        </Button>
+        {types.map(t => {
+          const count = logs.filter(l => l.type === t).length
+          return (
+            <Button key={t} size="slim" variant={filter === t ? 'primary' : undefined} onClick={() => setFilter(t)}>
+              {`${t} (${count})`}
+            </Button>
+          )
+        })}
+      </InlineStack>
       <BlockStack gap="200">
-        {logs.map(l => (
+        {filtered.map(l => (
           <Box key={l.id} padding="200" borderWidth="025" borderColor="border" borderRadius="100">
             <InlineStack align="space-between">
               <InlineStack gap="200" align="start">

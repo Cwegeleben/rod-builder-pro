@@ -78,12 +78,33 @@ if (process.env.NODE_ENV === 'production' && !global.__schemaFixDone) {
       }
       // PartStaging
       if (!has('PartStaging')) {
+        // Create with latest schema (includes templateId nullable & composite unique index)
         await prisma.$executeRawUnsafe(
-          "CREATE TABLE IF NOT EXISTS PartStaging (id TEXT PRIMARY KEY NOT NULL, supplierId TEXT NOT NULL, externalId TEXT NOT NULL, title TEXT NOT NULL, partType TEXT NOT NULL, description TEXT, images TEXT, rawSpecs TEXT, normSpecs TEXT, priceMsrp REAL, priceWh REAL, hashContent TEXT NOT NULL DEFAULT '', fetchedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, shopifyProductId TEXT, shopifyVariantIds TEXT, publishedAt DATETIME, publishStatus TEXT, publishResult TEXT)",
+          "CREATE TABLE IF NOT EXISTS PartStaging (id TEXT PRIMARY KEY NOT NULL, supplierId TEXT NOT NULL, templateId TEXT, externalId TEXT NOT NULL, title TEXT NOT NULL, partType TEXT NOT NULL, description TEXT, images TEXT, rawSpecs TEXT, normSpecs TEXT, priceMsrp REAL, priceWh REAL, hashContent TEXT NOT NULL DEFAULT '', fetchedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, shopifyProductId TEXT, shopifyVariantIds TEXT, publishedAt DATETIME, publishStatus TEXT, publishResult TEXT)",
         )
-        await prisma.$executeRawUnsafe(
-          'CREATE UNIQUE INDEX IF NOT EXISTS PartStaging_supplier_external_unique ON PartStaging(supplierId, externalId)',
-        )
+      }
+      // Upgrade PartStaging legacy schema if needed (templateId + new unique index)
+      try {
+        const cols: Array<{ name: string }> = await prisma.$queryRawUnsafe("PRAGMA table_info('PartStaging')")
+        const colNames = new Set(cols.map(c => c.name))
+        if (!colNames.has('templateId')) {
+          await prisma.$executeRawUnsafe('ALTER TABLE PartStaging ADD COLUMN templateId TEXT')
+        }
+        // Drop old index if present
+        const idxs: Array<{ name: string }> = await prisma.$queryRawUnsafe("PRAGMA index_list('PartStaging')")
+        const hasOld = idxs.find(i => i.name === 'PartStaging_supplier_external_unique')
+        if (hasOld) {
+          await prisma.$executeRawUnsafe('DROP INDEX IF EXISTS PartStaging_supplier_external_unique')
+        }
+        // Ensure new composite unique index exists
+        const hasNew = idxs.find(i => i.name === 'part_staging_supplier_template_ext_unique')
+        if (!hasNew) {
+          await prisma.$executeRawUnsafe(
+            'CREATE UNIQUE INDEX IF NOT EXISTS part_staging_supplier_template_ext_unique ON PartStaging(supplierId, templateId, externalId)',
+          )
+        }
+      } catch (e) {
+        console.warn('[startup] PartStaging upgrade check failed (non-fatal):', e)
       }
       // ProductSource (seeds)
       if (!has('ProductSource')) {

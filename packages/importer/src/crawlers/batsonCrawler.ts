@@ -59,7 +59,13 @@ type Politeness = {
 }
 export async function crawlBatson(
   seedUrls: string[],
-  options?: { templateKey?: string; politeness?: Politeness; supplierId?: string; ignoreSavedSources?: boolean },
+  options?: {
+    templateKey?: string
+    templateId?: string
+    politeness?: Politeness
+    supplierId?: string
+    ignoreSavedSources?: boolean
+  },
 ) {
   const SUPPLIER = options?.supplierId || 'batson'
   const seen = new Set<string>()
@@ -69,7 +75,7 @@ export async function crawlBatson(
     /* keep default */
   }
   // Compose initial seeds: saved from DB + env forced + caller-provided
-  const savedRows = options?.ignoreSavedSources ? [] : await fetchActiveSources(SUPPLIER)
+  const savedRows = options?.ignoreSavedSources ? [] : await fetchActiveSources(SUPPLIER, options?.templateId)
   const saved = (savedRows as Array<{ url: string }>).map((s: { url: string }) => s.url)
   const forcedEnv = (process.env.BATSON_FORCE_URLS || '')
     .split(',')
@@ -81,7 +87,7 @@ export async function crawlBatson(
   const initial = Array.from(new Set([...(saved || []), ...seeds]))
   if (forcedEnv.length) log.info(`batson: forcing ${forcedEnv.length} URLs from BATSON_FORCE_URLS`)
   // Record seeds in DB as 'forced' (env or manual); discovery writes will use 'discovered'
-  for (const u of initial) await upsertProductSource(SUPPLIER, u, 'forced')
+  for (const u of initial) await upsertProductSource(SUPPLIER, u, 'forced', undefined, options?.templateId)
   const jitter: [number, number] = options?.politeness?.jitterMs || [300, 800]
   const maxConc = options?.politeness?.maxConcurrency || 1
   const rpm = options?.politeness?.rpm || 30
@@ -135,7 +141,9 @@ export async function crawlBatson(
         const sameDomain = productHrefs.map(h => new URL(h, ORIGIN).toString()).filter(isOnDomain)
         const unique = Array.from(new Set(sameDomain))
         if (unique.length) {
-          await Promise.all(unique.map(u => upsertProductSource(SUPPLIER, u, 'discovered')))
+          await Promise.all(
+            unique.map(u => upsertProductSource(SUPPLIER, u, 'discovered', undefined, options?.templateId)),
+          )
           await enqueueLinks({ urls: unique })
         }
       }
@@ -171,7 +179,9 @@ export async function crawlBatson(
             .map(h => new URL(h, ORIGIN).toString())
             .filter(isOnDomain)
           if (urls.length) {
-            await Promise.all(urls.map(u => upsertProductSource(SUPPLIER, u, 'discovered')))
+            await Promise.all(
+              urls.map(u => upsertProductSource(SUPPLIER, u, 'discovered', undefined, options?.templateId)),
+            )
             await enqueueLinks({ urls })
           }
         } catch {
@@ -209,12 +219,16 @@ export async function crawlBatson(
 
       const uniqueProducts = Array.from(new Set(productAnchors))
       if (uniqueProducts.length) {
-        await Promise.all(uniqueProducts.map(u => upsertProductSource(SUPPLIER, u, 'discovered')))
+        await Promise.all(
+          uniqueProducts.map(u => upsertProductSource(SUPPLIER, u, 'discovered', undefined, options?.templateId)),
+        )
         await enqueueLinks({ urls: uniqueProducts })
       }
       const uniquePages = Array.from(new Set(pageAnchors))
       if (uniquePages.length) {
-        await Promise.all(uniquePages.map(u => upsertProductSource(SUPPLIER, u, 'discovered')))
+        await Promise.all(
+          uniquePages.map(u => upsertProductSource(SUPPLIER, u, 'discovered', undefined, options?.templateId)),
+        )
         await enqueueLinks({ urls: uniquePages })
       }
 
@@ -239,8 +253,8 @@ export async function crawlBatson(
                 rawSpecs: row.rawSpecs,
                 normSpecs: row.normSpecs,
               }
-              await upsertStaging(SUPPLIER, toStage)
-              await linkExternalIdForSource(SUPPLIER, currentUrl, row.externalId)
+              await upsertStaging(SUPPLIER, { ...toStage, templateId: options?.templateId })
+              await linkExternalIdForSource(SUPPLIER, currentUrl, row.externalId, options?.templateId)
               log.info(`staged (series-row) ${row.externalId}`)
               stagedFromSeries++
             }
@@ -282,8 +296,8 @@ export async function crawlBatson(
               images: rec.images,
               rawSpecs: rec.rawSpecs,
             }
-            await upsertStaging(SUPPLIER, toStage)
-            await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId)
+            await upsertStaging(SUPPLIER, { ...toStage, templateId: options?.templateId })
+            await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId, options?.templateId)
             log.info(`staged ${rec.externalId}`)
           }
         } catch {
@@ -305,8 +319,8 @@ export async function crawlBatson(
                 images: rec.images,
                 rawSpecs: rec.rawSpecs,
               }
-              await upsertStaging(SUPPLIER, toStage)
-              await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId)
+              await upsertStaging(SUPPLIER, { ...toStage, templateId: options?.templateId })
+              await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId, options?.templateId)
               log.info(`staged ${rec.externalId}`)
             }
           }

@@ -329,9 +329,9 @@ export default function GlobalLogList({
     }
     const set = new Set<string>()
     for (const [rid, row] of latest.entries()) {
-      if (row.type.startsWith('prepare:') && row.type !== 'prepare:done' && row.type !== 'prepare:error') {
-        set.add(rid)
-      }
+      const isPrepareActive = row.type.startsWith('prepare:') && !['prepare:done', 'prepare:error'].includes(row.type)
+      const isPublishActive = row.type.startsWith('publish:') && !['publish:done', 'publish:error'].includes(row.type)
+      if (isPrepareActive || isPublishActive) set.add(rid)
     }
     return set
   }, [logItems])
@@ -509,13 +509,18 @@ export default function GlobalLogList({
         {/* Active runs strip */}
         {(() => {
           const latestByRun = new Map<string, LogRow>()
+          const byRunAll = new Map<string, LogRow[]>()
           for (const l of rows) {
             const prev = latestByRun.get(l.runId)
             if (!prev || prev.at < l.at) latestByRun.set(l.runId, l)
+            if (!byRunAll.has(l.runId)) byRunAll.set(l.runId, [])
+            byRunAll.get(l.runId)!.push(l)
           }
-          const actives = [...latestByRun.values()].filter(
-            x => x.type.startsWith('prepare:') && x.type !== 'prepare:done' && x.type !== 'prepare:error',
-          )
+          const actives = [...latestByRun.values()].filter(x => {
+            const isPrepareActive = x.type.startsWith('prepare:') && !['prepare:done', 'prepare:error'].includes(x.type)
+            const isPublishActive = x.type.startsWith('publish:') && !['publish:done', 'publish:error'].includes(x.type)
+            return isPrepareActive || isPublishActive
+          })
           if (!actives.length) return null
           return (
             <Box padding="150" borderWidth="025" borderColor="border" borderRadius="050">
@@ -523,17 +528,37 @@ export default function GlobalLogList({
                 <Text as="h3" variant="headingSm">
                   Active runs
                 </Text>
-                {actives.slice(0, 6).map(a => (
-                  <InlineStack key={a.runId} gap="150" align="center">
-                    <Badge>{templateNames[a.templateId] || a.templateId}</Badge>
-                    <Text as="span" tone="subdued" variant="bodySm">
-                      {a.runId}
-                    </Text>
-                    <Text as="span" tone="subdued" variant="bodySm">
-                      {rel(a.at)}
-                    </Text>
-                  </InlineStack>
-                ))}
+                {actives.slice(0, 6).map(a => {
+                  // Determine publish progress percent if present for this run
+                  const list = byRunAll.get(a.runId) || []
+                  const prog = list.find(x => x.type === 'publish:progress')
+                  let pct: number | null = null
+                  try {
+                    const p = (prog?.payload as unknown as { pct?: number; processed?: number; target?: number }) || {}
+                    if (typeof p.pct === 'number') pct = Math.max(0, Math.min(100, Math.round(p.pct)))
+                    else if (typeof p.processed === 'number' && typeof p.target === 'number' && p.target > 0)
+                      pct = Math.max(0, Math.min(100, Math.round((p.processed / p.target) * 100)))
+                  } catch {
+                    pct = null
+                  }
+                  const isPublishing = a.type.startsWith('publish:')
+                  return (
+                    <InlineStack key={a.runId} gap="150" align="center">
+                      <Badge>{templateNames[a.templateId] || a.templateId}</Badge>
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        {a.runId}
+                      </Text>
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        {rel(a.at)}
+                      </Text>
+                      {isPublishing ? (
+                        <Badge tone="attention">{pct != null ? `publishing ${pct}%` : 'publishing'}</Badge>
+                      ) : (
+                        <Badge tone="attention">preparing</Badge>
+                      )}
+                    </InlineStack>
+                  )
+                })}
                 {actives.length > 6 ? (
                   <Text as="span" tone="subdued" variant="bodySm">
                     +{actives.length - 6} more

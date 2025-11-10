@@ -63,8 +63,8 @@ export async function startNextQueuedForTemplate(templateId: string): Promise<vo
     try {
       // Mark as preparing and set template pointer
       await prisma.importRun.update({ where: { id: runId }, data: { status: 'preparing' } })
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: runId } })
+      // Update template pointer (typed)
+      await prisma.importTemplate.update({ where: { id: templateId }, data: { preparingRunId: runId } })
       await prisma.importLog.create({
         data: { templateId, runId, type: 'prepare:start', payload: summary.preflight || {} },
       })
@@ -73,8 +73,7 @@ export async function startNextQueuedForTemplate(templateId: string): Promise<vo
         runPrepareJob({ templateId, options, runId })
           .then(async () => {
             // Clear pointer and log done
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
+            await prisma.importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
             await prisma.importLog.create({ data: { templateId, runId, type: 'prepare:done', payload: {} } })
             // Recurse to start another if present
             await startNextQueuedForTemplate(templateId)
@@ -85,8 +84,7 @@ export async function startNextQueuedForTemplate(templateId: string): Promise<vo
             } catch {
               /* ignore */
             }
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
+            await prisma.importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
             await prisma.importLog.create({
               data: {
                 templateId,

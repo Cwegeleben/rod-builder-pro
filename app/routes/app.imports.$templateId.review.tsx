@@ -158,7 +158,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       /* ignore */
     }
 
-    // 2) Find the most recent suitable run for this supplier
+    // 2) Prefer the most recent run for THIS template (via ImportLog), then fall back to supplier
+    try {
+      // Look for the latest prepare log for this template to resolve a runId
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const latestTplLog = await (prisma as any).importLog.findFirst({
+        where: { templateId, type: { in: ['prepare:done', 'prepare:start', 'prepare:report'] } },
+        orderBy: { at: 'desc' },
+        select: { runId: true },
+      })
+      if (latestTplLog?.runId) {
+        return redirect(`/app/imports/runs/${latestTplLog.runId}/review${passthroughSearch}`)
+      }
+    } catch {
+      /* ignore */
+    }
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const latest = await (prisma as any).importRun.findFirst({
@@ -182,6 +196,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           status: 'started',
           summary: { options, mode: 'review' },
         })
+        // Link this synthetic run to the template via a log so future launches pick it up deterministically
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (prisma as any).importLog.create({
+            data: { templateId, runId: preRun.id, type: 'review:synthetic', payload: { reason: 'staging-existed' } },
+          })
+        } catch {
+          /* ignore */
+        }
         try {
           const { diffStagingIntoExistingRun } = await import('../services/importer/runOptions.server')
           await diffStagingIntoExistingRun(supplierId, preRun.id, { options })

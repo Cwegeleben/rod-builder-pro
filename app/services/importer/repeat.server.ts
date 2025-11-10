@@ -11,9 +11,7 @@ export async function buildCombinedUrlSet(runIds: string[], supplierId = 'batson
   if (!runIds.length) return { urls: [] as string[], flaggedFailures: [] as string[] }
 
   // Collect externalIds referenced in add/change diffs for the selected runs
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db: any = prisma as any
-  const diffs = await db.importDiff.findMany({
+  const diffs = await prisma.importDiff.findMany({
     where: { importRunId: { in: runIds }, diffType: { in: ['add', 'change'] } },
     select: { externalId: true, resolution: true },
   })
@@ -27,7 +25,7 @@ export async function buildCombinedUrlSet(runIds: string[], supplierId = 'batson
   if (okExt.size === 0) return { urls: [], flaggedFailures: [] }
 
   // Map externalIds -> ProductSource urls
-  const sources = await db.productSource.findMany({
+  const sources = await prisma.productSource.findMany({
     where: { supplierId, externalId: { in: Array.from(okExt) } },
     select: { url: true, externalId: true },
   })
@@ -53,14 +51,11 @@ export async function buildCombinedUrlSet(runIds: string[], supplierId = 'batson
 export async function saveRepeatSet(supplierId: string, urls: string[], cron: string) {
   const groupId = `sched-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
   const now = new Date()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db: any = prisma as any
-
   // Upsert ProductSource rows tagged as scheduled group
   for (const raw of urls) {
     const n = normalizeUrl(raw)
     if (!n) continue
-    await db.productSource.upsert({
+    await prisma.productSource.upsert({
       where: { product_source_supplier_url_unique: { supplierId, url: n } },
       update: { lastSeenAt: now, source: `scheduled:${groupId}` },
       create: { supplierId, url: n, source: `scheduled:${groupId}`, firstSeenAt: now, lastSeenAt: now },
@@ -68,11 +63,11 @@ export async function saveRepeatSet(supplierId: string, urls: string[], cron: st
   }
 
   // Upsert-like for ImportSchedule (no composite unique in schema; emulate upsert)
-  const existing = await db.importSchedule.findFirst({ where: { supplierId, profile: 'price_avail' } })
+  const existing = await prisma.importSchedule.findFirst({ where: { supplierId, profile: 'price_avail' } })
   if (existing) {
-    await db.importSchedule.update({ where: { id: existing.id }, data: { enabled: true, cron, nextDueAt: null } })
+    await prisma.importSchedule.update({ where: { id: existing.id }, data: { enabled: true, cron, nextDueAt: null } })
   } else {
-    await db.importSchedule.create({ data: { supplierId, enabled: true, cron, profile: 'price_avail' } })
+    await prisma.importSchedule.create({ data: { supplierId, enabled: true, cron, profile: 'price_avail' } })
   }
 
   return { ok: true as const, groupId }

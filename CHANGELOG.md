@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Importer Reliability (v2.3+)
+
+- Isolation & hashing baseline: template partitioning, composite unique index on PartStaging (`supplierId, templateId, externalId`), seed hashing, publish guard + diagnostics, prepare diagnostics, and cast cleanup.
+- Approvals: Approve Adds (with `?all`) and Approve All multi-type endpoints; totals + ImportLog telemetry; smoke-mode banner with disabled toasts.
+- Review UX: Sticky summary bar, skeleton on hydration, selection enablement, disabled-reason tooltip for Publish, aria-live announcements, metrics badge (C/U/S/F), conflict hint panel with jump-to-tab.
+- Recrawl + Publish: Orchestrator prepare → wait → approve adds → optional publish; returns goal + publish totals; guards (prepare/publish in-progress), rate limit, lifecycle logs.
+- Publish update existing: Adjusted updated totals excluding hash-unchanged backfill cases; detailed buckets; added unit tests.
+- Verify: "Verify on Shopify" link wired to admin product search by tag from publish response.
+- Data model audit: Aligned raw DB bootstrap to Prisma (added templateId column and composite unique index) with upgrade path.
+- Hash correctness: Ensured `rbp.hash` is written on create/update and dropped if empty via sanitization; unit test added.
+
+### Tests & Tooling
+
+- Unit: Added suites for recrawl guard codes, delete dry-run/guards, publish totals adjustment, and `rbp.hash` presence/sanitization.
+- E2E: Kept imports isolation/queueing specs passing; new UI coverage for toasts and sticky summary bar deferred to next iteration.
+
 ### Fixed / Operations
 
 - Resolved failed Prisma migration `20251006062503_reset_with_template_version` by marking it rolled back in production and replacing its contents with a documented no-op placeholder to preserve ordering.

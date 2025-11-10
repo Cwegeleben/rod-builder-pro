@@ -70,7 +70,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     } catch {
       sessionShop = undefined
     }
-    const { totals, totalsDetailed, productIds, shopDomain } = await publishRunToShopify({
+    const { totals, totalsDetailed, productIds, shopDomain, diag } = await publishRunToShopify({
       runId,
       dryRun,
       shopDomain: sessionShop,
@@ -78,13 +78,46 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     // Store summary under run.summary.publish
     const summary = (run.summary as unknown as Record<string, unknown>) || {}
-    summary.publish = { totals, totalsDetailed, at: new Date().toISOString(), shop: shopDomain || sessionShop || null }
+    summary.publish = {
+      totals,
+      totalsDetailed,
+      at: new Date().toISOString(),
+      shop: shopDomain || sessionShop || null,
+      diag: diag || undefined,
+    }
+    // If this was a dry run or a no-op (no shop domain), keep the run in review
+    const noShop = Boolean(
+      diag &&
+        typeof diag === 'object' &&
+        'reason' in diag &&
+        (diag as Record<string, unknown>).reason === 'no-shop-domain',
+    )
+    const nextStatus: 'published' | 'review' = dryRun || noShop ? 'review' : 'published'
     await prisma.importRun.update({
       where: { id: runId },
-      data: { status: 'published', summary: summary as unknown as Prisma.InputJsonValue },
+      data: { status: nextStatus, summary: summary as unknown as Prisma.InputJsonValue },
     })
 
     const filter = { tag: `importRun:${runId}` }
+    // If real publish requested but no shop domain configured, return a 400 to surface a helpful message client-side
+    if (!dryRun && noShop) {
+      return json(
+        {
+          ok: false,
+          error: 'No shop domain configured. Open the app from Shopify Admin or set SHOP/SHOP_CUSTOM_DOMAIN secret.',
+          runId,
+          totals,
+          totalsDetailed,
+          productIds,
+          filter,
+          _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes, diag },
+        },
+        {
+          status: 400,
+          headers: { 'Cache-Control': 'no-store', 'X-Publish-Bypass': String(bypass), 'X-Smokes': String(smokes) },
+        },
+      )
+    }
     return json(
       {
         ok: true,
@@ -93,9 +126,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
         totalsDetailed,
         productIds,
         filter,
-        _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes },
+        _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes, diag },
       },
-      { headers: { 'Cache-Control': 'no-store', 'X-Publish-Bypass': String(bypass), 'X-Smokes': String(smokes) } },
+      {
+        headers: {
+          'Cache-Control': 'no-store',
+          'X-Publish-Bypass': String(bypass),
+          'X-Smokes': String(smokes),
+          'X-Publish-Dry-Run': String(!!dryRun),
+        },
+      },
     )
   } catch (err: unknown) {
     const message =

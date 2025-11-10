@@ -142,6 +142,40 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
     })()
   }, [])
 
+  // Show toast on redirect after delete
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(location.search || '')
+      if (sp.get('deleted') === '1') {
+        setToast('Import deleted')
+        // remove the param from URL without navigation
+        const next = new URL(window.location.href)
+        next.searchParams.delete('deleted')
+        window.history.replaceState({}, '', next.toString())
+      }
+      // Publish outcome toast: use query params pubC, pubU, pubS, pubF
+      const c = sp.get('pubC')
+      const u = sp.get('pubU')
+      const s = sp.get('pubS')
+      const f = sp.get('pubF')
+      if (c || u || s || f) {
+        const nc = Number(c || 0) || 0
+        const nu = Number(u || 0) || 0
+        const ns = Number(s || 0) || 0
+        const nf = Number(f || 0) || 0
+        setToast(`Published — C:${nc} U:${nu} S:${ns} F:${nf}`)
+        const next = new URL(window.location.href)
+        next.searchParams.delete('pubC')
+        next.searchParams.delete('pubU')
+        next.searchParams.delete('pubS')
+        next.searchParams.delete('pubF')
+        window.history.replaceState({}, '', next.toString())
+      }
+    } catch {
+      /* noop */
+    }
+  }, [location.search])
+
   // Poll progress for preparing rows
   useEffect(() => {
     const ids = rows.filter(r => r.preparing?.runId).map(r => ({ tpl: r.templateId, run: r.preparing!.runId }))
@@ -240,12 +274,40 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
 
   async function bulkDelete(ids: string[]) {
     if (!ids.length) return
-    if (
-      !confirm(
-        `Delete ${ids.length} selected imports? This will remove their settings, logs, and staged items for their suppliers.`,
-      )
-    )
+    // Dry-run preview first
+    try {
+      const preview = await fetch('/api/importer/delete?dry=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateIds: ids }),
+      })
+      if (!preview.ok) throw new Error('Preview failed')
+      const pj = (await preview.json()) as {
+        counts?: {
+          templates?: number
+          logs?: number
+          staging?: number
+          sources?: number
+          runs?: number
+          diffs?: number
+        }
+      }
+      const c = pj.counts || {}
+      const msg = [
+        `Delete ${ids.length} selected imports? This cannot be undone.`,
+        '',
+        `Templates: ${c.templates ?? ids.length}`,
+        `Logs: ${c.logs ?? 0}`,
+        `Staged items: ${c.staging ?? 0}`,
+        `Sources: ${c.sources ?? 0}`,
+        `Runs: ${c.runs ?? 0}`,
+        `Diffs: ${c.diffs ?? 0}`,
+      ].join('\n')
+      if (!confirm(msg)) return
+    } catch (e) {
+      setError((e as Error)?.message || 'Delete preview failed')
       return
+    }
     setBusy('bulk')
     try {
       const resp = await fetch('/api/importer/delete', {

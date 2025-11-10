@@ -92,6 +92,14 @@ export async function action({ request }: ActionFunctionArgs) {
   const rawSeeds: string[] = Array.isArray(settings['discoverSeedUrls'])
     ? (settings['discoverSeedUrls'] as unknown[]).filter((x): x is string => typeof x === 'string')
     : []
+  const savedSeedHash =
+    typeof (settings as Record<string, unknown>)['seedHash'] === 'string'
+      ? String((settings as Record<string, unknown>)['seedHash'])
+      : ''
+  const lastPrepareSeedHash =
+    typeof (settings as Record<string, unknown>)['lastPrepareSeedHash'] === 'string'
+      ? String((settings as Record<string, unknown>)['lastPrepareSeedHash'])
+      : ''
   // Normalize/validate seeds: absolute HTTPS urls only
   const seedUrls: string[] = rawSeeds
     .map(s => s.trim())
@@ -111,6 +119,42 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!targetId || seedUrls.length === 0) {
     return json({ error: 'Missing target or seeds' }, { status: 400 })
   }
+
+  // Compute deterministic seed hash if not present (backfill for legacy rows)
+  function normalizeSeedsForHash(urls: string[]): string[] {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const raw of urls) {
+      const s = String(raw || '').trim()
+      if (!s) continue
+      try {
+        const u = new URL(s)
+        if (!/^https?:$/.test(u.protocol)) continue
+        u.protocol = 'https:'
+        const k = u.toString()
+        if (!seen.has(k)) {
+          seen.add(k)
+          out.push(k)
+        }
+      } catch {
+        // skip invalid
+      }
+    }
+    return out.sort()
+  }
+  async function sha256Hex(input: string): Promise<string> {
+    try {
+      const { createHash } = await import('node:crypto')
+      const h = createHash('sha256')
+      h.update(input)
+      return h.digest('hex')
+    } catch {
+      // Fallback: simple JSON length fingerprint (non-cryptographic)
+      return String(input.length)
+    }
+  }
+  const seedHash = savedSeedHash || (await sha256Hex(JSON.stringify(normalizeSeedsForHash(seedUrls))))
+  const seedChanged = !!(lastPrepareSeedHash && lastPrepareSeedHash !== seedHash)
 
   // Enforce seed scope for selected targets (e.g., Batson-only)
   try {
@@ -143,8 +187,15 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // If this prepare would overwrite existing staged data for the supplier, prompt for confirmation
   try {
-    const stagedCount = await (await import('../db.server')).prisma.partStaging.count({ where: { supplierId } })
-    if (stagedCount > 0 && !confirmOverwrite) {
+    let stagedCount = 0
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      stagedCount = await (await import('../db.server')).prisma.partStaging.count({ where: { supplierId } } as any)
+    } catch {
+      stagedCount = 0
+    }
+    // When seeds changed since last prepare, auto-allow overwrite (we'll perform a best-effort wipe below)
+    if (stagedCount > 0 && !confirmOverwrite && !seedChanged) {
       return json(
         {
           ok: false,
@@ -189,9 +240,11 @@ export async function action({ request }: ActionFunctionArgs) {
     notes: `prepare:${templateId}`,
     supplierId: supplierId || 'batson',
     templateKey: templateKeyForTarget(targetId),
+    templateId,
     variantTemplateId: undefined,
     scraperId: undefined,
     useSeriesParser: useSeriesParserForTarget(targetId),
+    seedHash,
   }
   const options = Object.fromEntries(Object.entries(optsRaw).filter(([, v]) => v !== undefined)) as typeof optsRaw
 
@@ -270,7 +323,7 @@ export async function action({ request }: ActionFunctionArgs) {
           templateId,
           runId: run.id,
           type: 'prepare:report',
-          payload: { candidates, etaSeconds, expectedItems, sample },
+          payload: { candidates, etaSeconds, expectedItems, sample, seedHash, seedChanged, lastPrepareSeedHash },
         },
       })
     } catch {
@@ -283,10 +336,35 @@ export async function action({ request }: ActionFunctionArgs) {
   import('../services/importer/orchestrator.server').then(async ({ runPrepareJob, startNextQueuedForTemplate }) => {
     setTimeout(() => {
       ;(async () => {
-        if (confirmOverwrite && overwriteExisting) {
+        // Best-effort auto-wipe when explicitly requested OR when seeds changed
+        if ((confirmOverwrite && overwriteExisting) || seedChanged) {
           // Optional wipe of existing staged rows to ensure a clean slate (best-effort)
           try {
-            await prisma.partStaging.deleteMany({ where: { supplierId } })
+            let before = 0
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              before = await prisma.partStaging.count({ where: { supplierId } } as any)
+            } catch {
+              before = 0
+            }
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              await prisma.partStaging.deleteMany({ where: { supplierId } } as any)
+            } catch {
+              /* ignore */
+            }
+            try {
+              await prisma.importLog.create({
+                data: {
+                  templateId,
+                  runId: run.id,
+                  type: seedChanged ? 'prepare:autowipe:seedChanged' : 'prepare:autowipe:forced',
+                  payload: { deleted: before, reason: seedChanged ? 'seedChanged' : 'forced' },
+                },
+              })
+            } catch {
+              /* ignore */
+            }
           } catch {
             /* ignore */
           }
@@ -298,6 +376,44 @@ export async function action({ request }: ActionFunctionArgs) {
           try {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (prisma as any).importTemplate.update({ where: { id: templateId }, data: { preparingRunId: null } })
+          } catch {
+            /* ignore */
+          }
+          // Persist lastPrepareSeedHash back to template settings for future comparisons
+          try {
+            const row = await prisma.importTemplate.findUnique({ where: { id: templateId } })
+            const cfg0 = (row?.importConfig as Record<string, unknown> | null) || {}
+            const s0 = (cfg0['settings'] as Record<string, unknown> | null) || {}
+            const next = { ...cfg0, settings: { ...s0, lastPrepareSeedHash: seedHash } }
+            await prisma.importTemplate.update({ where: { id: templateId }, data: { importConfig: next } })
+            try {
+              await prisma.importLog.create({
+                data: { templateId, runId: run.id, type: 'prepare:seedHash.saved', payload: { seedHash } },
+              })
+            } catch {
+              /* ignore */
+            }
+          } catch {
+            /* ignore */
+          }
+          // Best-effort consistency report
+          try {
+            let stagedCount = 0
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              stagedCount = await prisma.partStaging.count({ where: { supplierId } } as any)
+            } catch {
+              stagedCount = 0
+            }
+            const diffCount = await prisma.importDiff.count({ where: { importRunId: run.id } })
+            await prisma.importLog.create({
+              data: {
+                templateId,
+                runId: run.id,
+                type: 'prepare:consistency',
+                payload: { stagedCount, diffCount, candidates, seedHash },
+              },
+            })
           } catch {
             /* ignore */
           }

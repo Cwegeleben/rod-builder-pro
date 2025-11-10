@@ -1,6 +1,7 @@
 // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
 import type { ActionFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
+import { createHash } from 'node:crypto'
 import { requireHqShopOr404 } from '../lib/access.server'
 import { getTargetById } from '../server/importer/sites/targets'
 
@@ -54,6 +55,35 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const targetId = typeof body.target === 'string' ? body.target : ''
   const discoverSeedUrls = coerceUrls(body.discoverSeedUrls)
 
+  // Stable seed hashing: normalize to https, trim, unique, sort, then SHA-256
+  function normalizeSeedsForHash(urls: string[]): string[] {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const raw of urls) {
+      const s = String(raw || '').trim()
+      if (!s) continue
+      try {
+        const u = new URL(s)
+        if (!/^https?:$/.test(u.protocol)) continue
+        u.protocol = 'https:'
+        const k = u.toString()
+        if (!seen.has(k)) {
+          seen.add(k)
+          out.push(k)
+        }
+      } catch {
+        // skip invalid
+      }
+    }
+    return out.sort()
+  }
+  function hashSeeds(urls: string[]): string {
+    const norm = normalizeSeedsForHash(urls)
+    const h = createHash('sha256')
+    h.update(JSON.stringify(norm))
+    return h.digest('hex')
+  }
+
   if (!nameRaw) return json({ error: 'Name is required' }, { status: 400 })
   const target = getTargetById(targetId)
   if (!target) return json({ error: 'Unknown target' }, { status: 400 })
@@ -65,12 +95,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
     // Load existing config (preserve any other keys, but only update settings)
     const tpl = await prisma.importTemplate.findUnique({ where: { id } })
     const existingCfg = (tpl?.importConfig as Record<string, unknown> | null) || {}
+    const prevSettings = (existingCfg['settings'] as Record<string, unknown> | null) || undefined
+    const prevSeedHash = typeof prevSettings?.['seedHash'] === 'string' ? (prevSettings!['seedHash'] as string) : ''
+    const seedHash = hashSeeds(discoverSeedUrls)
     const nextCfg = {
       ...existingCfg,
       settings: {
         name: nameRaw,
         target: target.id,
         discoverSeedUrls,
+        seedHash,
       },
     }
 
@@ -89,9 +123,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
           templateId: id,
           runId: id,
           type: 'settings:saved',
-          payload: { name: nameRaw, target: target.id, seeds: discoverSeedUrls.length },
+          payload: { name: nameRaw, target: target.id, seeds: discoverSeedUrls.length, seedHash },
         },
       })
+      if (prevSeedHash && prevSeedHash !== seedHash) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (prisma as any).importLog.create({
+          data: {
+            templateId: id,
+            runId: id,
+            type: 'settings:seedChanged',
+            payload: { from: prevSeedHash, to: seedHash, count: discoverSeedUrls.length },
+          },
+        })
+      }
     } catch {
       /* ignore */
     }

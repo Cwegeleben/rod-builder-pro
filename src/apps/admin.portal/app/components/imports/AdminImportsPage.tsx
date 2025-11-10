@@ -201,15 +201,43 @@ export default function AdminImportsPage({ initialSearch }: AdminImportsPageProp
 
   const onDeleteSelected = async () => {
     if (selectedResources.length === 0) return
-    const ok = window.confirm(
-      `Delete ${selectedResources.length} selected imports? This will remove their settings, logs, and any staged items for their supplier.`,
-    )
-    if (!ok) return
-    // Optimistic update with rollback
-    setBackupRows(rows)
-    setRows(prev => prev.filter(r => !selectedResources.includes(r.id)))
-    clearSelection()
+    // 1) Preview via dry-run to compute impact
     try {
+      const preview = await fetch(`/api/importer/delete?dry=1`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateIds: selectedResources }),
+      })
+      if (!preview.ok) throw new Error('Preview failed')
+      const pj = (await preview.json()) as {
+        counts?: {
+          templates?: number
+          logs?: number
+          staging?: number
+          sources?: number
+          runs?: number
+          diffs?: number
+        }
+      }
+      const c = pj.counts || {}
+      const msg = [
+        `Delete ${selectedResources.length} selected imports? This cannot be undone.`,
+        '',
+        `Templates: ${c.templates ?? selectedResources.length}`,
+        `Logs: ${c.logs ?? 0}`,
+        `Staged items: ${c.staging ?? 0}`,
+        `Sources: ${c.sources ?? 0}`,
+        `Runs: ${c.runs ?? 0}`,
+        `Diffs: ${c.diffs ?? 0}`,
+      ].join('\n')
+      const ok = window.confirm(msg)
+      if (!ok) return
+    } catch (e) {
+      setToast({ content: (e as Error)?.message || 'Delete preview failed', error: true })
+      return
+    }
+    try {
+      // 2) Commit deletion
       const resp = await fetch('/api/importer/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -219,11 +247,11 @@ export default function AdminImportsPage({ initialSearch }: AdminImportsPageProp
         const jr = (await resp.json().catch(() => ({}))) as { error?: string }
         throw new Error(String(jr?.error || 'Delete failed'))
       }
+      // Update UI now that commit succeeded
+      setRows(prev => prev.filter(r => !selectedResources.includes(r.id)))
+      clearSelection()
       setToast({ content: 'Deleted selected imports' })
     } catch (e) {
-      // Rollback on error
-      if (backupRows) setRows(backupRows)
-      setBackupRows(null)
       setToast({ content: (e as Error)?.message || 'Delete failed', error: true })
     }
   }

@@ -3,6 +3,7 @@
 import type { ActionFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
+import { prisma as prismaDirect } from '../db.server'
 
 // Delete one or more ImportTemplate rows and related artifacts.
 // Input (JSON or form): { templateIds: string[] } or repeated templateId fields
@@ -30,13 +31,15 @@ export async function action({ request }: ActionFunctionArgs) {
     return { templateIds: arr }
   }
 
-  const body = (await read()) as { templateIds?: unknown }
+  const url = new URL(request.url)
+  const body = (await read()) as { templateIds?: unknown; dryRun?: unknown }
   const templateIds = Array.isArray(body.templateIds)
     ? (body.templateIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
     : []
   if (templateIds.length === 0) return json({ error: 'Missing templateIds' }, { status: 400 })
+  const dryRun = url.searchParams.get('dry') === '1' || url.searchParams.get('dryRun') === '1' || Boolean(body?.dryRun)
 
-  const { prisma } = await import('../db.server')
+  const prisma = prismaDirect
   const { getTargetById } = await import('../server/importer/sites/targets')
 
   // Collect supplierIds to clean up by reading importConfig
@@ -61,28 +64,84 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   }
 
-  // Delete templates (ImportLog cascades)
-  await (prisma as any).importTemplate.deleteMany({ where: { id: { in: templateIds } } })
+  // Compute counts for diagnostics and potential dry-run preview
+  const ids = Array.from(supplierIds)
+  const [logsCount, stagingCount, sourcesCount, runRows] = await Promise.all([
+    (prisma as any).importLog.count({ where: { templateId: { in: templateIds } } }),
+    (prisma as any).partStaging.count({ where: ids.length ? { supplierId: { in: ids } } : undefined }),
+    (prisma as any).productSource.count({ where: ids.length ? { supplierId: { in: ids } } : undefined }),
+    (prisma as any).importRun.findMany({
+      where: ids.length ? { supplierId: { in: ids } } : undefined,
+      select: { id: true },
+    }),
+  ])
+  const runIds = (runRows as Array<{ id: string }>).map(r => r.id)
+  const [diffsCount, runsCount] = await Promise.all([
+    runIds.length ? (prisma as any).importDiff.count({ where: { importRunId: { in: runIds } } }) : Promise.resolve(0),
+    runIds.length ? (prisma as any).importRun.count({ where: { id: { in: runIds } } }) : Promise.resolve(0),
+  ])
 
-  // Best-effort cleanup for supplier-related artifacts
-  if (supplierIds.size > 0) {
-    const ids = Array.from(supplierIds)
-    // PartStaging and ProductSource by supplierId
+  const counts = {
+    templates: templateIds.length,
+    logs: logsCount as number,
+    staging: stagingCount as number,
+    sources: sourcesCount as number,
+    runs: runsCount as number,
+    diffs: diffsCount as number,
+    suppliers: ids,
+  }
+
+  if (dryRun) {
+    return json({ ok: true, dryRun: true, counts })
+  }
+
+  // Concurrency guard: block delete when a prepare or publish is active.
+  // Active prepare: preparingRunId set.
+  // Active publish: any ImportLog publish:progress within last 5 minutes referencing runId for these templates.
+  const activePrepare = await (prisma as any).importTemplate.findMany({
+    where: { id: { in: templateIds }, preparingRunId: { not: null } },
+    select: { id: true },
+  })
+  let activePublishTemplateIds: string[] = []
+  try {
+    const recent = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+    const publishRows = await (prisma as any).importLog.findMany({
+      where: {
+        templateId: { in: templateIds },
+        type: 'publish:progress',
+        at: { gte: recent },
+      },
+      select: { templateId: true },
+    })
+    activePublishTemplateIds = Array.from(new Set(publishRows.map((r: { templateId: string }) => r.templateId)))
+  } catch {
+    activePublishTemplateIds = []
+  }
+  const blocked = [...activePrepare.map((r: { id: string }) => r.id), ...activePublishTemplateIds]
+  if (blocked.length) {
+    const code = activePrepare.length ? 'blocked_prepare' : 'blocked_publish'
+    const hint =
+      code === 'blocked_prepare'
+        ? 'Wait for current prepare to finish before deleting this import.'
+        : 'Wait for the current publish to complete before deleting this import.'
+    return json(
+      { error: 'Delete blocked: active prepare or publish in progress', code, templates: blocked, hint },
+      { status: 409 },
+    )
+  }
+
+  // Execute deletions (template-scoped first; related artifacts already scoped by supplier)
+  await (prisma as any).importTemplate.deleteMany({ where: { id: { in: templateIds } } })
+  if (ids.length) {
     await (prisma as any).partStaging.deleteMany({ where: { supplierId: { in: ids } } })
     await (prisma as any).productSource.deleteMany({ where: { supplierId: { in: ids } } })
-    // ImportRun and ImportDiff by supplierId
-    const runs = (await (prisma as any).importRun.findMany({
-      where: { supplierId: { in: ids } },
-      select: { id: true },
-    })) as Array<{ id: string }>
-    if (runs.length > 0) {
-      const runIds = runs.map(r => r.id)
+    if (runIds.length) {
       await (prisma as any).importDiff.deleteMany({ where: { importRunId: { in: runIds } } })
       await (prisma as any).importRun.deleteMany({ where: { id: { in: runIds } } })
     }
   }
 
-  return json({ ok: true, deleted: templateIds.length, suppliers: Array.from(supplierIds) })
+  return json({ ok: true, deleted: templateIds.length, counts })
 }
 
 export default function DeleteImporterApi() {

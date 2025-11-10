@@ -92,7 +92,16 @@ export default function ReviewIndexTable({
 
   return (
     <Card>
-      <div style={{ padding: '8px 12px' }}>
+      <div
+        style={{
+          padding: '8px 12px',
+          position: 'sticky',
+          top: 56,
+          zIndex: 11,
+          background: 'var(--p-color-bg)',
+          borderBottom: '1px solid var(--p-color-border)',
+        }}
+      >
         <InlineStack align="space-between" blockAlign="center" gap="400">
           <Text as="span" tone="subdued">
             {rows.length} items {bulkActive ? <Badge tone="attention">{`${selectedIds.length} selected`}</Badge> : null}

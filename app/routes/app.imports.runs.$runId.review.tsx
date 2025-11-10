@@ -16,6 +16,7 @@ import {
   InlineStack,
   ProgressBar,
   Badge,
+  Tooltip,
 } from '@shopify/polaris'
 import { prisma } from '../db.server'
 import { isHqShop } from '../lib/access.server'
@@ -99,6 +100,17 @@ export default function ReviewRunRoute() {
   const [dryRun, setDryRun] = useState(false)
   const [publishProgress, setPublishProgress] = useState<number>(0)
   const [publishEtaMs, setPublishEtaMs] = useState<number | null>(null)
+  const [publishPhase, setPublishPhase] = useState<string | null>(null)
+  const [publishFilterTag, setPublishFilterTag] = useState<string | null>(null)
+  // Sticky summary bar metrics
+  const summaryCounts = useMemo(() => {
+    const created = publishTotals?.created ?? 0
+    const updated = publishTotals?.updated ?? 0
+    const skipped = publishTotals?.skipped ?? 0
+    const failed = publishTotals?.failed ?? 0
+    const selected = selectedIds.length
+    return { created, updated, skipped, failed, selected }
+  }, [publishTotals, selectedIds])
   type DebugLog = { id: string; type: string; at: string; payload: unknown }
   const debugFetcher = useFetcher<{ run?: unknown; logs?: DebugLog[] }>()
   const [showDebug, setShowDebug] = useState(false)
@@ -171,6 +183,16 @@ export default function ReviewRunRoute() {
     totalPages?: number
   }
 
+  // Helper: extract images array from a row (present in either attributes.images or core.images when available)
+  function getRowImages(row: UIRow | undefined): unknown[] {
+    if (!row) return []
+    const attrImages = (row.attributes as { images?: unknown })?.images
+    if (Array.isArray(attrImages)) return attrImages
+    const coreImages = (row.core as unknown as { images?: unknown })?.images
+    if (Array.isArray(coreImages)) return coreImages
+    return []
+  }
+
   const tabs = [
     { id: 'unlinked', content: `New (${data?.totals?.unlinked || 0})` },
     { id: 'linked', content: `Modified (${data?.totals?.linked || 0})` },
@@ -192,13 +214,37 @@ export default function ReviewRunRoute() {
 
   async function bulkAction(kind: 'approve' | 'reject') {
     if (!selectedIds.length) return
+    // Smart approve-all heuristic: when approving and every selected new diff has images, include note
+    const includeImagesNote =
+      kind === 'approve' && selectedIds.length > 3 && data.rows?.length
+        ? (() => {
+            try {
+              const byId = new Map((data.rows || []).map(r => [r.core.id, r]))
+              let withImages = 0
+              for (const id of selectedIds) {
+                const row = byId.get(id)
+                const imgs = getRowImages(row)
+                if (imgs.length > 0) withImages += 1
+              }
+              return withImages === selectedIds.length
+            } catch {
+              return false
+            }
+          })()
+        : false
     const resp = await fetch(`/api/importer/runs/${run.id}/${kind}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: selectedIds }),
     })
     if (resp.ok) {
-      setToast(kind === 'approve' ? 'Approved' : 'Rejected')
+      if (kind === 'approve') {
+        setToast(
+          includeImagesNote ? `Approved ${selectedIds.length} (all with images)` : `Approved ${selectedIds.length}`,
+        )
+      } else {
+        setToast(`Rejected ${selectedIds.length}`)
+      }
       fetcher.load(listUrl)
       setSelectedIds([])
     }
@@ -212,7 +258,21 @@ export default function ReviewRunRoute() {
       body: JSON.stringify({ ids: [id] }),
     })
     if (resp.ok) {
-      setToast(kind === 'approve' ? 'Approved' : 'Rejected')
+      if (kind === 'approve') {
+        try {
+          const row = (data.rows || []).find(r => r.core.id === id)
+          const imgs = getRowImages(row)
+          if (imgs.length > 0) {
+            setToast('Approved (images present)')
+          } else {
+            setToast('Approved')
+          }
+        } catch {
+          setToast('Approved')
+        }
+      } else {
+        setToast('Rejected')
+      }
       fetcher.load(listUrl)
       // keep current selection as-is
     }
@@ -257,14 +317,47 @@ export default function ReviewRunRoute() {
   return (
     <Page title={title} subtitle={subtitle} backAction={{ content: 'Back to Imports', url: '/app/imports' }}>
       <BlockStack gap="400">
-        {/* BEGIN RBP ADDED: Transparency badges */}
-        {publishShop || verifyStats ? (
-          <InlineStack gap="200">
+        {/* aria-live region for announce of publish progress & totals */}
+        <div
+          aria-live="polite"
+          style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}
+        >
+          {publishing
+            ? `Publishing progress ${publishProgress}%` +
+              (publishTotals
+                ? ` Created ${publishTotals.created} Updated ${publishTotals.updated} Skipped ${publishTotals.skipped} Failed ${publishTotals.failed}`
+                : '')
+            : publishTotals
+              ? `Publish complete: Created ${publishTotals.created} Updated ${publishTotals.updated} Skipped ${publishTotals.skipped} Failed ${publishTotals.failed}`
+              : ''}
+        </div>
+        {smokeMode ? (
+          <Banner tone="warning" title="Read-only smoke mode">
+            Actions like Approve/Reject and Publish are disabled in smoke mode. Use a normal session to make changes.
+          </Banner>
+        ) : null}
+        {/* BEGIN RBP ADDED: Transparency + metrics badges */}
+        {publishShop || verifyStats || publishTotals ? (
+          <InlineStack gap="200" blockAlign="center" wrap>
             {publishShop ? <Badge tone="info">{`Published: ${publishShop}`}</Badge> : null}
             {verifyStats ? (
               <Badge tone={verifyStats.found > 0 ? 'success' : 'warning'}>
                 {`Verified ${verifyStats.found}/${verifyStats.found + verifyStats.notFound}`}
               </Badge>
+            ) : null}
+            {publishTotals ? (
+              <Badge tone="info">{`Metrics C:${publishTotals.created} U:${publishTotals.updated} S:${publishTotals.skipped} F:${publishTotals.failed}`}</Badge>
+            ) : null}
+            {publishShop && publishFilterTag ? (
+              <Button
+                size="slim"
+                url={`https://${publishShop.replace(/^https?:\/\//, '')}/admin/products?query=${encodeURIComponent(
+                  'tag:' + publishFilterTag,
+                )}`}
+                target="_blank"
+              >
+                Verify on Shopify
+              </Button>
             ) : null}
           </InlineStack>
         ) : null}
@@ -294,7 +387,24 @@ export default function ReviewRunRoute() {
             ) : null}
           </Banner>
         ) : hasConflicts ? (
-          <Banner tone="critical" title="Resolve conflicts before publishing to Shopify."></Banner>
+          <Banner tone="critical" title="Resolve conflicts before publishing to Shopify.">
+            <BlockStack gap="150">
+              <Text as="p" variant="bodySm" tone="subdued">
+                Publishing is disabled while conflicts exist. Approve or reject conflicting items on the Conflicts tab.
+              </Text>
+              <InlineStack gap="150">
+                <Button
+                  size="slim"
+                  onClick={() => {
+                    const idx = tabs.findIndex(t => t.id === 'conflicts')
+                    if (idx >= 0) setTab(idx)
+                  }}
+                >
+                  View Conflicts
+                </Button>
+              </InlineStack>
+            </BlockStack>
+          </Banner>
         ) : null}
         {showDebug ? (
           <div style={{ padding: 4 }}>
@@ -324,9 +434,21 @@ export default function ReviewRunRoute() {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                     })
-                    const j = (await r.json()) as { ok?: boolean; updated?: number; error?: string }
+                    const j = (await r.json()) as {
+                      ok?: boolean
+                      updated?: number
+                      error?: string
+                      totals?: { totalAdds?: number; unresolvedAdds?: number }
+                      all?: boolean
+                    }
                     if (!r.ok || !j?.ok) throw new Error(j?.error || 'Approve new items failed')
-                    setToast(`Approved ${j.updated || 0} new item(s)`)
+                    const totalAdds = j.totals?.totalAdds ?? undefined
+                    const unresolved = j.totals?.unresolvedAdds ?? undefined
+                    const parts: string[] = [`Approved ${j.updated || 0}`]
+                    if (typeof totalAdds === 'number') parts.push(`of ${totalAdds}`)
+                    if (j.all) parts.push('(all mode)')
+                    if (typeof unresolved === 'number' && !j.all) parts.push(`(${unresolved} were unresolved)`)
+                    setToast(parts.join(' '))
                     // Refresh list and totals
                     fetcher.load(listUrl)
                   } catch (e) {
@@ -341,115 +463,142 @@ export default function ReviewRunRoute() {
             ) : null}
           </InlineStack>
           {!smokeMode ? (
-            <Button
-              variant="primary"
-              tone="success"
-              disabled={hasConflicts || approvedCount === 0}
-              onClick={async () => {
-                setPublishEtaMs(null)
-                setPublishTotals(null)
-                if (dryRun) {
-                  // One-shot dry run: show totals, no polling
-                  setPublishing(true)
-                  try {
-                    const resp = await fetch(`/api/importer/runs/${run.id}/publish/shopify`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ dryRun: true }),
-                    })
-                    if (!resp.ok) throw new Error('Dry run failed')
-                    const jr = (await resp.json()) as {
-                      ok: boolean
-                      runId: string
-                      totals: { created: number; updated: number; skipped: number; failed: number }
-                    }
-                    if (jr?.ok) {
-                      setPublishTotals(jr.totals)
-                      setPublishProgress(95)
-                      setToast(
-                        `Dry run — Created ${jr.totals.created}, Updated ${jr.totals.updated}, Skipped ${jr.totals.skipped}, Failed ${jr.totals.failed}`,
-                      )
-                    } else {
-                      setToast('Dry run failed')
-                    }
-                  } catch (e) {
-                    setToast((e as Error)?.message || 'Dry run failed')
-                  } finally {
-                    setPublishing(false)
-                  }
-                  return
-                }
-                // Real publish with polling
-                setPublishing(true)
-                setPolling(true)
-                setPublishProgress(0)
-                // Start polling status immediately
-                const poll = async () => {
-                  try {
-                    const r = await fetch(`/api/importer/runs/${run.id}/publish/status`, {
-                      headers: { 'Cache-Control': 'no-store' },
-                    })
-                    if (r.ok) {
-                      const s = (await r.json()) as {
-                        ok: boolean
-                        progress: number
-                        state: string
-                        totals?: { created: number; updated: number; skipped: number; failed: number }
-                        etaMs?: number | null
-                      }
-                      if (s?.ok) {
-                        setPublishProgress(s.progress || 0)
-                        if (s.totals) setPublishTotals(s.totals)
-                        setPublishEtaMs(typeof s.etaMs === 'number' ? s.etaMs : null)
-                        if (s.state === 'published') {
-                          const t = s.totals || { created: 0, updated: 0, skipped: 0, failed: 0 }
-                          setToast(
-                            `Published to Shopify — Created ${t.created}, Updated ${t.updated}, Skipped ${t.skipped}, Failed ${t.failed}`,
-                          )
-                          setPolling(false)
-                          setPublishing(false)
-                          return
-                        }
-                      }
-                    }
-                  } catch {
-                    /* ignore transient errors */
-                  }
-                  if (polling) setTimeout(poll, 800)
-                }
-                setTimeout(poll, 0)
-                try {
-                  const resp = await fetch(`/api/importer/runs/${run.id}/publish/shopify`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ dryRun: false }),
-                  })
-                  if (!resp.ok) throw new Error('Publish failed')
-                  const jr = (await resp.json()) as {
-                    ok: boolean
-                    runId: string
-                    totals: { created: number; updated: number; skipped: number; failed: number }
-                    filter: { tag: string }
-                  }
-                  if (jr?.ok) {
-                    setPublishTotals(jr.totals)
-                    setPublishProgress(p => (p < 90 ? 90 : p))
-                  } else {
-                    setToast('Publish failed')
-                    setPolling(false)
-                  }
-                } catch (e) {
-                  setToast((e as Error)?.message || 'Publish failed')
-                  setPolling(false)
-                } finally {
-                  setPublishing(false)
-                }
-              }}
+            <Tooltip
+              content={
+                hasConflicts
+                  ? 'Resolve conflicts before publishing.'
+                  : approvedCount === 0
+                    ? 'Approve at least one item to enable publish.'
+                    : 'Publish to Shopify'
+              }
             >
-              Publish to Shopify
-            </Button>
+              <span>
+                <Button
+                  variant="primary"
+                  tone="success"
+                  disabled={hasConflicts || approvedCount === 0}
+                  aria-disabled={hasConflicts || approvedCount === 0}
+                  aria-describedby={hasConflicts || approvedCount === 0 ? 'publish-disabled-reason' : undefined}
+                  onClick={async () => {
+                    setPublishEtaMs(null)
+                    setPublishTotals(null)
+                    if (dryRun) {
+                      // One-shot dry run: show totals, no polling
+                      setPublishing(true)
+                      try {
+                        const resp = await fetch(`/api/importer/runs/${run.id}/publish/shopify`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ dryRun: true }),
+                        })
+                        if (!resp.ok) throw new Error('Dry run failed')
+                        const jr = (await resp.json()) as {
+                          ok: boolean
+                          runId: string
+                          totals: { created: number; updated: number; skipped: number; failed: number }
+                          filter?: { tag: string }
+                        }
+                        if (jr?.ok) {
+                          setPublishTotals(jr.totals)
+                          setPublishProgress(95)
+                          if (jr?.filter?.tag) setPublishFilterTag(jr.filter.tag)
+                          setToast(
+                            `Dry run — Created ${jr.totals.created}, Updated ${jr.totals.updated}, Skipped ${jr.totals.skipped}, Failed ${jr.totals.failed}`,
+                          )
+                        } else {
+                          setToast('Dry run failed')
+                        }
+                      } catch (e) {
+                        setToast((e as Error)?.message || 'Dry run failed')
+                      } finally {
+                        setPublishing(false)
+                      }
+                      return
+                    }
+                    // Real publish with polling
+                    setPublishing(true)
+                    setPolling(true)
+                    setPublishProgress(0)
+                    // Start polling status immediately
+                    const poll = async () => {
+                      try {
+                        const r = await fetch(`/api/importer/runs/${run.id}/publish/status`, {
+                          headers: { 'Cache-Control': 'no-store' },
+                        })
+                        if (r.ok) {
+                          const s = (await r.json()) as {
+                            ok: boolean
+                            progress: number
+                            state: string
+                            totals?: { created: number; updated: number; skipped: number; failed: number }
+                            etaMs?: number | null
+                            phase?: string | null
+                          }
+                          if (s?.ok) {
+                            setPublishProgress(s.progress || 0)
+                            if (s.totals) setPublishTotals(s.totals)
+                            setPublishEtaMs(typeof s.etaMs === 'number' ? s.etaMs : null)
+                            setPublishPhase(s.phase || null)
+                            if (s.state === 'published') {
+                              const t = s.totals || { created: 0, updated: 0, skipped: 0, failed: 0 }
+                              setToast(
+                                `Published to Shopify — Created ${t.created}, Updated ${t.updated}, Skipped ${t.skipped}, Failed ${t.failed}`,
+                              )
+                              setPolling(false)
+                              setPublishing(false)
+                              return
+                            }
+                          }
+                        }
+                      } catch {
+                        /* ignore transient errors */
+                      }
+                      if (polling) setTimeout(poll, 800)
+                    }
+                    setTimeout(poll, 0)
+                    try {
+                      const resp = await fetch(`/api/importer/runs/${run.id}/publish/shopify`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ dryRun: false }),
+                      })
+                      if (!resp.ok) throw new Error('Publish failed')
+                      const jr = (await resp.json()) as {
+                        ok: boolean
+                        runId: string
+                        totals: { created: number; updated: number; skipped: number; failed: number }
+                        filter: { tag: string }
+                      }
+                      if (jr?.ok) {
+                        setPublishTotals(jr.totals)
+                        setPublishProgress(p => (p < 90 ? 90 : p))
+                        if (jr?.filter?.tag) setPublishFilterTag(jr.filter.tag)
+                      } else {
+                        setToast('Publish failed')
+                        setPolling(false)
+                      }
+                    } catch (e) {
+                      setToast((e as Error)?.message || 'Publish failed')
+                      setPolling(false)
+                    } finally {
+                      setPublishing(false)
+                    }
+                  }}
+                >
+                  Publish to Shopify
+                </Button>
+              </span>
+            </Tooltip>
           ) : null}
         </InlineStack>
+        {/* Disabled reason tooltip anchor */}
+        {(hasConflicts || approvedCount === 0) && !smokeMode ? (
+          <Text id="publish-disabled-reason" as="span" tone="subdued" variant="bodySm">
+            {hasConflicts
+              ? 'Publish disabled: resolve conflicts first.'
+              : 'Publish disabled: approve at least one item.'}
+          </Text>
+        ) : null}
         {/* Diagnostic bypass dry-run publish: visible when diag=1 & token present in URL */}
         {(() => {
           const diag = params.get('diag') === '1'
@@ -526,6 +675,11 @@ export default function ReviewRunRoute() {
           <Modal.Section>
             <BlockStack gap="200">
               <Text as="p">This may take a minute. You can safely leave this page.</Text>
+              {publishPhase ? (
+                <Text as="p" tone="subdued">
+                  Phase: {publishPhase}
+                </Text>
+              ) : null}
               <ProgressBar progress={publishProgress || 10} size="small" />
               {publishEtaMs != null ? <Text as="p">ETA: ~{Math.max(0, Math.ceil(publishEtaMs / 1000))}s</Text> : null}
               {publishTotals ? (
@@ -560,10 +714,40 @@ export default function ReviewRunRoute() {
               usp.set('page', '1')
               setParams(usp)
             }}
-            onApproveSelected={smokeMode ? () => {} : () => bulkAction('approve')}
-            onRejectSelected={smokeMode ? () => {} : () => bulkAction('reject')}
-            onApproveRow={smokeMode ? () => {} : (id: string) => singleAction(id, 'approve')}
-            onRejectRow={smokeMode ? () => {} : (id: string) => singleAction(id, 'reject')}
+            onApproveSelected={
+              smokeMode
+                ? () => setToast('Disabled in smoke mode')
+                : () => {
+                    const count = selectedIds.length
+                    bulkAction('approve')
+                    if (count > 0) setToast(`Approved ${count} item${count === 1 ? '' : 's'}`)
+                  }
+            }
+            onRejectSelected={
+              smokeMode
+                ? () => setToast('Disabled in smoke mode')
+                : () => {
+                    const count = selectedIds.length
+                    bulkAction('reject')
+                    if (count > 0) setToast(`Rejected ${count} item${count === 1 ? '' : 's'}`)
+                  }
+            }
+            onApproveRow={
+              smokeMode
+                ? () => setToast('Disabled in smoke mode')
+                : (id: string) => {
+                    singleAction(id, 'approve')
+                    setToast('Approved 1 item')
+                  }
+            }
+            onRejectRow={
+              smokeMode
+                ? () => setToast('Disabled in smoke mode')
+                : (id: string) => {
+                    singleAction(id, 'reject')
+                    setToast('Rejected 1 item')
+                  }
+            }
             detailsBase={
               smokeMode
                 ? (_runId: string, rowId: string) => {
@@ -576,6 +760,38 @@ export default function ReviewRunRoute() {
             }
           />
         ) : null}
+        {!hydrated ? (
+          <div style={{ padding: '8px 12px' }}>
+            <Text as="span" tone="subdued">
+              Loading review…
+            </Text>
+            <ProgressBar progress={15} size="small" />
+          </div>
+        ) : null}
+        {/* Sticky summary bar */}
+        <div
+          data-review-summary
+          style={{
+            position: 'sticky',
+            bottom: 0,
+            background: 'var(--p-color-bg)',
+            borderTop: '1px solid var(--p-color-border-subdued)',
+            padding: '6px 12px',
+            zIndex: 10,
+          }}
+        >
+          <InlineStack align="space-between" blockAlign="center">
+            <Text as="span" tone="subdued" variant="bodySm">
+              Selected: {summaryCounts.selected} • Created: {summaryCounts.created} • Updated: {summaryCounts.updated} •
+              Skipped: {summaryCounts.skipped} • Failed: {summaryCounts.failed}
+            </Text>
+            {publishing ? (
+              <Badge tone="attention">Publishing…</Badge>
+            ) : publishTotals ? (
+              <Badge tone="success">Publish done</Badge>
+            ) : null}
+          </InlineStack>
+        </div>
       </BlockStack>
     </Page>
   )
