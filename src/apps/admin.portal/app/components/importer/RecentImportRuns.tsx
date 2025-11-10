@@ -149,7 +149,12 @@ export default function RecentImportRuns() {
 
   return (
     <Card>
-      <IndexTable resourceName={{ singular: 'run', plural: 'runs' }} itemCount={runs.length} headings={headings}>
+      <IndexTable
+        resourceName={{ singular: 'run', plural: 'runs' }}
+        condensed={false}
+        itemCount={runs.length}
+        headings={headings}
+      >
         {runs.map((r, index) => {
           const isOpen = !!expanded[r.id]
           const dbg = debugCache[r.id]

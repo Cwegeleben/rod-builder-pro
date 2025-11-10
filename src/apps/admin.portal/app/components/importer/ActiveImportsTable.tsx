@@ -197,7 +197,12 @@ export default function ActiveImportsTable() {
 
   return (
     <Card>
-      <IndexTable resourceName={{ singular: 'run', plural: 'runs' }} itemCount={rows.length} headings={headings}>
+      <IndexTable
+        resourceName={{ singular: 'run', plural: 'runs' }}
+        condensed={false}
+        itemCount={rows.length}
+        headings={headings}
+      >
         {rows.map((r, index) => (
           <IndexTable.Row id={r.runId} key={r.runId} position={index}>
             <IndexTable.Cell>

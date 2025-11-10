@@ -385,6 +385,7 @@ export default function AdminImportsPage({ initialSearch }: AdminImportsPageProp
                 <div style={{ maxHeight: 520, overflow: 'auto' }}>
                   <IndexTable
                     resourceName={{ singular: 'import', plural: 'imports' }}
+                    condensed={false}
                     itemCount={total}
                     selectedItemsCount={allResourcesSelected ? 'All' : selectedResources.length}
                     onSelectionChange={handleSelectionChange}

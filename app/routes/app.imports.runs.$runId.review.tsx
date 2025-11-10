@@ -81,6 +81,7 @@ export default function ReviewRunRoute() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [toast, setToast] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
+  const [approveAddsLoading, setApproveAddsLoading] = useState(false)
   const [polling, setPolling] = useState(false)
   const [publishTotals, setPublishTotals] = useState<{
     created: number
@@ -88,6 +89,7 @@ export default function ReviewRunRoute() {
     skipped: number
     failed: number
   } | null>(null)
+  const [dryRun, setDryRun] = useState(false)
   const [publishProgress, setPublishProgress] = useState<number>(0)
   const [publishEtaMs, setPublishEtaMs] = useState<number | null>(null)
   type DebugLog = { id: string; type: string; at: string; payload: unknown }
@@ -163,8 +165,8 @@ export default function ReviewRunRoute() {
   }
 
   const tabs = [
-    { id: 'unlinked', content: `Unlinked (${data?.totals?.unlinked || 0})` },
-    { id: 'linked', content: `Linked (${data?.totals?.linked || 0})` },
+    { id: 'unlinked', content: `New (${data?.totals?.unlinked || 0})` },
+    { id: 'linked', content: `Modified (${data?.totals?.linked || 0})` },
     { id: 'conflicts', content: `Conflicts (${data?.totals?.conflicts || 0})` },
     { id: 'all', content: `All (${data?.totals?.all || 0})` },
   ] as const
@@ -298,17 +300,82 @@ export default function ReviewRunRoute() {
           </div>
         ) : null}
         <InlineStack align="space-between">
-          <Tabs tabs={tabs as unknown as { id: string; content: string }[]} selected={selectedTab} onSelect={setTab} />
+          <InlineStack gap="200" blockAlign="center">
+            <Tabs
+              tabs={tabs as unknown as { id: string; content: string }[]}
+              selected={selectedTab}
+              onSelect={setTab}
+            />
+            {!smokeMode && (data?.totals?.unlinked || 0) > 0 ? (
+              <Button
+                disabled={approveAddsLoading}
+                loading={approveAddsLoading}
+                onClick={async () => {
+                  try {
+                    setApproveAddsLoading(true)
+                    const r = await fetch(`/api/importer/runs/${run.id}/approve/adds`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                    })
+                    const j = (await r.json()) as { ok?: boolean; updated?: number; error?: string }
+                    if (!r.ok || !j?.ok) throw new Error(j?.error || 'Approve new items failed')
+                    setToast(`Approved ${j.updated || 0} new item(s)`)
+                    // Refresh list and totals
+                    fetcher.load(listUrl)
+                  } catch (e) {
+                    setToast((e as Error)?.message || 'Approve new items failed')
+                  } finally {
+                    setApproveAddsLoading(false)
+                  }
+                }}
+              >
+                Approve All New
+              </Button>
+            ) : null}
+          </InlineStack>
           {!smokeMode ? (
             <Button
               variant="primary"
               tone="success"
               disabled={hasConflicts || approvedCount === 0}
               onClick={async () => {
+                setPublishEtaMs(null)
+                setPublishTotals(null)
+                if (dryRun) {
+                  // One-shot dry run: show totals, no polling
+                  setPublishing(true)
+                  try {
+                    const resp = await fetch(`/api/importer/runs/${run.id}/publish/shopify`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ dryRun: true }),
+                    })
+                    if (!resp.ok) throw new Error('Dry run failed')
+                    const jr = (await resp.json()) as {
+                      ok: boolean
+                      runId: string
+                      totals: { created: number; updated: number; skipped: number; failed: number }
+                    }
+                    if (jr?.ok) {
+                      setPublishTotals(jr.totals)
+                      setPublishProgress(95)
+                      setToast(
+                        `Dry run — Created ${jr.totals.created}, Updated ${jr.totals.updated}, Skipped ${jr.totals.skipped}, Failed ${jr.totals.failed}`,
+                      )
+                    } else {
+                      setToast('Dry run failed')
+                    }
+                  } catch (e) {
+                    setToast((e as Error)?.message || 'Dry run failed')
+                  } finally {
+                    setPublishing(false)
+                  }
+                  return
+                }
+                // Real publish with polling
                 setPublishing(true)
                 setPolling(true)
                 setPublishProgress(0)
-                setPublishTotals(null)
                 // Start polling status immediately
                 const poll = async () => {
                   try {
@@ -328,8 +395,7 @@ export default function ReviewRunRoute() {
                         if (s.totals) setPublishTotals(s.totals)
                         setPublishEtaMs(typeof s.etaMs === 'number' ? s.etaMs : null)
                         if (s.state === 'published') {
-                          // Stay on Review: show success and keep list available for re-publish
-                          const t = s.totals || publishTotals || { created: 0, updated: 0, skipped: 0, failed: 0 }
+                          const t = s.totals || { created: 0, updated: 0, skipped: 0, failed: 0 }
                           setToast(
                             `Published to Shopify — Created ${t.created}, Updated ${t.updated}, Skipped ${t.skipped}, Failed ${t.failed}`,
                           )
@@ -377,6 +443,24 @@ export default function ReviewRunRoute() {
             </Button>
           ) : null}
         </InlineStack>
+        {!smokeMode ? (
+          <InlineStack gap="200" blockAlign="center">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={dryRun}
+                onChange={e => setDryRun(e.currentTarget.checked)}
+                aria-label="Dry run"
+              />
+              <Text as="span" tone="subdued" variant="bodySm">
+                Dry run first
+              </Text>
+            </label>
+            {publishTotals ? (
+              <Badge tone="info">{`Totals — C:${publishTotals.created} U:${publishTotals.updated} S:${publishTotals.skipped} F:${publishTotals.failed}`}</Badge>
+            ) : null}
+          </InlineStack>
+        ) : null}
         <ReviewFilters searchParams={params} onChange={setParams} />
         <Modal
           open={publishing}

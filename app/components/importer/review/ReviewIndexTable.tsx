@@ -1,5 +1,5 @@
 // <!-- BEGIN RBP GENERATED: importer-review-inline-v1 -->
-import { IndexTable, Card, InlineStack, Button, Text, Pagination } from '@shopify/polaris'
+import { IndexTable, Card, InlineStack, Button, Text, Pagination, Badge } from '@shopify/polaris'
 import { useMemo } from 'react'
 import RowExpandPanel from './RowExpandPanel'
 
@@ -82,14 +82,25 @@ export default function ReviewIndexTable({
   type H = { title: string }
   const typedHeadings = headings as unknown as [H, ...Array<H>]
 
+  function toggleSelectAll() {
+    if (allSelected) {
+      onSelectedIdsChange([])
+    } else {
+      onSelectedIdsChange(allIds)
+    }
+  }
+
   return (
     <Card>
       <div style={{ padding: '8px 12px' }}>
         <InlineStack align="space-between" blockAlign="center" gap="400">
           <Text as="span" tone="subdued">
-            {rows.length} items
+            {rows.length} items {bulkActive ? <Badge tone="attention">{`${selectedIds.length} selected`}</Badge> : null}
           </Text>
           <InlineStack gap="200">
+            <Button variant="secondary" onClick={toggleSelectAll} disabled={!rows.length}>
+              {allSelected ? 'Clear selection' : 'Select all'}
+            </Button>
             <Button disabled={!bulkActive} onClick={onApproveSelected}>
               Approve
             </Button>
@@ -101,25 +112,45 @@ export default function ReviewIndexTable({
       </div>
       <IndexTable
         resourceName={resourceName}
+        condensed={false}
         itemCount={rows.length}
         selectable
         selectedItemsCount={allSelected ? 'All' : selectedIds.length}
         onSelectionChange={(state: unknown) => {
-          // Normalize selection from Polaris: can be string[] | 'All' | {selectionType:'All'}
+          // Debug instrumentation to understand actual Polaris payloads in embedded admin
+          try {
+            if (typeof console !== 'undefined' && console.debug) {
+              console.debug('[ReviewIndexTable] selection change payload', state)
+            }
+          } catch {
+            /* noop */
+          }
+          // Possible shapes (Polaris 13):
+          // - string[] of ids (normal multi/single selection)
+          // - 'All' (all resources selected)
+          // - 'Page' (header checkbox selecting current page)
+          // - {selectionType: 'All' | 'Page' | 'Multi' | 'Single', selectedItems?: string[]} (internal form)
           if (Array.isArray(state)) {
-            onSelectedIdsChange(state as string[])
-            return
+            return onSelectedIdsChange(state as string[])
           }
-          if (state === 'All') {
-            onSelectedIdsChange(allIds)
-            return
+          if (state === 'All') return onSelectedIdsChange(allIds)
+          if (state && typeof state === 'object') {
+            const obj = state as { selectionType?: string; selectedItems?: unknown; selection?: unknown; ids?: unknown }
+            const possibleArray =
+              (Array.isArray(obj.selectedItems) && obj.selectedItems) ||
+              (Array.isArray(obj.selection) && (obj.selection as string[])) ||
+              (Array.isArray(obj.ids) && (obj.ids as string[]))
+            if (possibleArray) return onSelectedIdsChange(possibleArray)
+            if (obj.selectionType === 'All') return onSelectedIdsChange(allIds)
+            if (obj.selectionType === 'Page') return onSelectedIdsChange(allIds)
+            if (obj.selectionType === 'Single' || obj.selectionType === 'Multi') {
+              // If Polaris gave us a type but no explicit ids, fall back to clearing to avoid incorrect full-page selection.
+              return onSelectedIdsChange([])
+            }
           }
-          if (state && typeof state === 'object' && (state as { selectionType?: string }).selectionType === 'All') {
-            onSelectedIdsChange(allIds)
-            return
-          }
-          // Fallback: clear selection
-          onSelectedIdsChange([])
+          // Do NOT treat 'Page' string as select-all unless explicitly provided; it should come through object form for header actions.
+          if (state === 'Page') return onSelectedIdsChange(allIds)
+          return onSelectedIdsChange([])
         }}
         headings={typedHeadings}
       >

@@ -1,9 +1,9 @@
 {
-  "id": "XXiQ2i7mHS2ni3q",
-  "json": "{\"id\":\"XXiQ2i7mHS2ni3q\",\"url\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"loadedUrl\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"uniqueKey\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"state\":4}},\"handledAt\":\"2025-11-04T01:58:54.239Z\"}",
-  "method": "GET",
-  "orderNo": null,
-  "retryCount": 0,
-  "uniqueKey": "https://batsonenterprises.com/ecom/ordertrackingguest",
-  "url": "https://batsonenterprises.com/ecom/ordertrackingguest"
+	"id": "XXiQ2i7mHS2ni3q",
+	"json": "{\"id\":\"XXiQ2i7mHS2ni3q\",\"url\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"loadedUrl\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"uniqueKey\":\"https://batsonenterprises.com/ecom/ordertrackingguest\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"enqueueStrategy\":\"same-hostname\",\"state\":4}},\"handledAt\":\"2025-11-07T04:31:45.231Z\"}",
+	"method": "GET",
+	"orderNo": null,
+	"retryCount": 0,
+	"uniqueKey": "https://batsonenterprises.com/ecom/ordertrackingguest",
+	"url": "https://batsonenterprises.com/ecom/ordertrackingguest"
 }

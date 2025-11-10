@@ -504,6 +504,7 @@ export default function RunDetailPage() {
             </InlineStack>
             <IndexTable
               resourceName={{ singular: 'diff', plural: 'diffs' }}
+              condensed={false}
               itemCount={currentRows.length}
               headings={headings}
               selectable={false}

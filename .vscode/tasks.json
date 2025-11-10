@@ -220,6 +220,18 @@
       "label": "Typecheck and build (final)",
       "type": "shell",
       "command": "npm run -s typecheck && npm run -s build"
+    },
+    {
+      "label": "Typecheck and build (final)",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build",
+      "group": "build"
+    },
+    {
+      "label": "Run e2e: schedule vs settings",
+      "type": "shell",
+      "command": "pnpm exec playwright test tests/e2e/importer.schedule-vs-settings.spec.ts",
+      "group": "test"
     }
   ]
 }

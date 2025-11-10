@@ -191,7 +191,12 @@ export default function RecentRunsTable() {
 
   return (
     <Card>
-      <IndexTable resourceName={{ singular: 'run', plural: 'runs' }} itemCount={runs.length} headings={headings}>
+      <IndexTable
+        resourceName={{ singular: 'run', plural: 'runs' }}
+        condensed={false}
+        itemCount={runs.length}
+        headings={headings}
+      >
         {runs.map((r, index) => (
           <IndexTable.Row
             id={r.runId}

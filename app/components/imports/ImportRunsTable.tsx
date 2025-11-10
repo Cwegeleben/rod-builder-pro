@@ -40,6 +40,7 @@ export function ImportRunsTable({
   return (
     <IndexTable
       resourceName={{ singular: 'run', plural: 'runs' }}
+      condensed={false}
       itemCount={rows.length}
       headings={cols as unknown as [{ title: string }, ...{ title: string }[]]}
       selectable

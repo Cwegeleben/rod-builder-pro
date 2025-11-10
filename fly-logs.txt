@@ -1,0 +1,100 @@
+[2m2025-11-07T19:57:49Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Error: P3008
+[2m2025-11-07T19:57:49Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]The migration `20251029120000_importer_v2_3_schema` is already recorded as applied in the database.
+[2m2025-11-07T19:57:49Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][33m WARN[0m Reaped child process with pid: 717 and signal: SIGTERM, core dumped? false
+[2m2025-11-07T19:57:50Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Prisma schema loaded from prisma/schema.prisma
+[2m2025-11-07T19:57:50Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Datasource "db": SQLite database "dev.sqlite" at "file:/data/dev.sqlite"
+[2m2025-11-07T19:57:50Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Error: P3008
+[2m2025-11-07T19:57:50Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]The migration `20251022120000_add_template_cost` is already recorded as applied in the database.
+[2m2025-11-07T19:57:51Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][33m WARN[0m Reaped child process with pid: 746 and signal: SIGTERM, core dumped? false
+[2m2025-11-07T19:57:52Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Prisma schema loaded from prisma/schema.prisma
+[2m2025-11-07T19:57:52Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Datasource "db": SQLite database "dev.sqlite" at "file:/data/dev.sqlite"
+[2m2025-11-07T19:57:52Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Migration 20251022130000_templates_status marked as rolled back.
+[2m2025-11-07T19:57:53Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Prisma schema loaded from prisma/schema.prisma
+[2m2025-11-07T19:57:53Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Datasource "db": SQLite database "dev.sqlite" at "file:/data/dev.sqlite"
+[2m2025-11-07T19:57:53Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Error: P3008
+[2m2025-11-07T19:57:53Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]The migration `20251022130000_templates_status` is already recorded as applied in the database.
+[2m2025-11-07T19:57:53Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][33m WARN[0m Reaped child process with pid: 815 and signal: SIGTERM, core dumped? false
+[2m2025-11-07T19:57:55Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Prisma schema loaded from prisma/schema.prisma
+[2m2025-11-07T19:57:55Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Datasource "db": SQLite database "dev.sqlite" at "file:/data/dev.sqlite"
+[2m2025-11-07T19:57:55Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Error: P3008
+[2m2025-11-07T19:57:55Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]The migration `20251102123000_add_importtemplate_preparing_runid` is already recorded as applied in the database.
+[2m2025-11-07T19:57:55Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][33m WARN[0m Reaped child process with pid: 844 and signal: SIGTERM, core dumped? false
+[2m2025-11-07T19:57:56Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Prisma schema loaded from prisma/schema.prisma
+[2m2025-11-07T19:57:56Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Datasource "db": SQLite database "dev.sqlite" at "file:/data/dev.sqlite"
+[2m2025-11-07T19:57:56Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Error: P3008
+[2m2025-11-07T19:57:56Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]The migration `20251102214000_add_spectemplate_status` is already recorded as applied in the database.
+[2m2025-11-07T19:57:56Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][33m WARN[0m Reaped child process with pid: 873 and signal: SIGTERM, core dumped? false
+[2m2025-11-07T19:57:57Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Prisma schema loaded from prisma/schema.prisma
+[2m2025-11-07T19:57:57Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Datasource "db": SQLite database "dev.sqlite" at "file:/data/dev.sqlite"
+[2m2025-11-07T19:57:57Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Error: P3008
+[2m2025-11-07T19:57:57Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]The migration `20251103113000_add_importrun_progress` is already recorded as applied in the database.
+[2m2025-11-07T19:57:57Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][startup] running prisma migrate deploy
+[2m2025-11-07T19:57:57Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][33m WARN[0m Reaped child process with pid: 902 and signal: SIGTERM, core dumped? false
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Prisma schema loaded from prisma/schema.prisma
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]Datasource "db": SQLite database "dev.sqlite" at "file:/data/dev.sqlite"
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]17 migrations found in prisma/migrations
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]No pending migrations to apply.
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]┌─────────────────────────────────────────────────────────┐
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]│  Update available 6.4.0 -> 6.19.0                       │
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]│  Run the following to update                            │
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]│    npm i --save-dev prisma@latest                       │
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]│    npm i @prisma/client@latest                          │
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]└─────────────────────────────────────────────────────────┘
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][startup] ensuring critical schema columns exist (best-effort)
+[2m2025-11-07T19:57:59Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][startup] launching remix-serve --host 0.0.0.0 --port 3000
+[2m2025-11-07T19:58:05Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][shopify-api/INFO] version 11.8.1, environment Remix
+[2m2025-11-07T19:58:05Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][remix-serve] http://localhost:3000 (http://0.0.0.0:3000)
+[2m2025-11-07T19:58:05Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 20.114 ms
+[2m2025-11-07T19:58:05Z[0m health[d896035c719e28] [32msjc[0m [[34minfo[0m]Health check on port 3000 is now passing.
+[2m2025-11-07T19:58:20Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 29.361 ms
+[2m2025-11-07T19:58:35Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 12.984 ms
+[2m2025-11-07T19:58:50Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 6.316 ms
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][shopify-app/INFO] Authenticating admin request | {shop: rbp-hq-dev.myshopify.com}
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][shopify-app/INFO] Authenticating admin request | {shop: rbp-hq-dev.myshopify.com}
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /app/imports?embedded=1&hmac=8da707fea2451b077c7183ad2422010e07e6ca10c9e2ff63713f0aa901a295aa&host=YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvcmJwLWhxLWRldg&id_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczpcL1wvcmJwLWhxLWRldi5teXNob3BpZnkuY29tXC9hZG1pbiIsImRlc3QiOiJodHRwczpcL1wvcmJwLWhxLWRldi5teXNob3BpZnkuY29tIiwiYXVkIjoiMDZkYzM2YjFhYWYxZTkwYmI0ZDAwOGU2MmY4ZDFiZDciLCJzdWIiOiIxMjA5MjIxNzc4MzkiLCJleHAiOjE3NjI1NDU2MDIsIm5iZiI6MTc2MjU0NTU0MiwiaWF0IjoxNzYyNTQ1NTQyLCJqdGkiOiIzYzM4YTUxOC05MGYzLTQzNzktYTU4Yi03Y2I5YzlmYzM4NmMiLCJzaWQiOiI2ZTEyMGVjZS02MjBiLTQyMDktOGE2MS1hOGQ0MmQyMzFhNjYiLCJzaWciOiI5NmI1OGNhZDhhZjBlOGY5NzNlNGNjYTc2ZTk2ZmRlNjYxNGE3ZjcxNWJmM2NkNzFkOWYwMmExM2MyNDYyNjdlIn0.iF8cE9jhYct8p54V9aeCfzm21eLOC_YMztHDNh75Rgo&locale=en&session=ec93fe6555ae43bd18d321082933f693216844c5692073c9dd4af56c07ba7bdd&shop=rbp-hq-dev.myshopify.com&timestamp=1762545542 200 - - 85.082 ms
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][shopify-app/INFO] Authenticating admin request | {shop: null}
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][shopify-app/INFO] Authenticating admin request | {shop: rbp-hq-dev.myshopify.com}
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][shopify-app/INFO] Authenticating admin request | {shop: null}
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][shopify-app/INFO] Authenticating admin request | {shop: rbp-hq-dev.myshopify.com}
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /api/importer/logs/stream 404 - - 37.690 ms
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /__manifest?p=%2Fapp%2Fimports%2Fnew&version=7c62fe6e 200 - - 11.832 ms
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /__manifest?p=%2Fapp%2Fimports%2Fnew&version=7c62fe6e 200 - - 8.245 ms
+[2m2025-11-07T19:59:02Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /__manifest?p=%2Fapp&p=%2Fapp%2Fimports&p=%2Fapp%2Fimports%2Fcmho2r6gr0002q0i5w2nl5rfw&p=%2Fapp%2Fimports%2Fcmho2r6gr0002q0i5w2nl5rfw%2Fschedule&p=%2Fapp%2Fimports%2Fnew&p=%2Fapp%2Fimports%2Fruns%2Fcmho2r6gr0002q0i5w2nl5rfw%2Freview&p=%2Fapp%2Fimports%2Fruns%2Fcmho2s0he000lq0i5a3wuyoxo%2Freview&p=%2Fapp%2Fproducts&version=7c62fe6e 200 - - 42.933 ms
+[2m2025-11-07T19:59:03Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /__manifest?p=%2Fapp&p=%2Fapp%2Fimports&p=%2Fapp%2Fimports%2Fcmho2r6gr0002q0i5w2nl5rfw&p=%2Fapp%2Fimports%2Fcmho2r6gr0002q0i5w2nl5rfw%2Fschedule&p=%2Fapp%2Fimports%2Fruns%2Fcmho2r6gr0002q0i5w2nl5rfw%2Freview&p=%2Fapp%2Fimports%2Fruns%2Fcmho2s0he000lq0i5a3wuyoxo%2Freview&p=%2Fapp%2Fproducts&version=7c62fe6e 200 - - 10.009 ms
+[2m2025-11-07T19:59:03Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /api/importer/templates?kind=import-templates 200 - - 196.390 ms
+[2m2025-11-07T19:59:03Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /api/importer/templates?embedded=1&hmac=8da707fea2451b077c7183ad2422010e07e6ca10c9e2ff63713f0aa901a295aa&host=YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvcmJwLWhxLWRldg&id_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczpcL1wvcmJwLWhxLWRldi5teXNob3BpZnkuY29tXC9hZG1pbiIsImRlc3QiOiJodHRwczpcL1wvcmJwLWhxLWRldi5teXNob3BpZnkuY29tIiwiYXVkIjoiMDZkYzM2YjFhYWYxZTkwYmI0ZDAwOGU2MmY4ZDFiZDciLCJzdWIiOiIxMjA5MjIxNzc4MzkiLCJleHAiOjE3NjI1NDU2MDIsIm5iZiI6MTc2MjU0NTU0MiwiaWF0IjoxNzYyNTQ1NTQyLCJqdGkiOiIzYzM4YTUxOC05MGYzLTQzNzktYTU4Yi03Y2I5YzlmYzM4NmMiLCJzaWQiOiI2ZTEyMGVjZS02MjBiLTQyMDktOGE2MS1hOGQ0MmQyMzFhNjYiLCJzaWciOiI5NmI1OGNhZDhhZjBlOGY5NzNlNGNjYTc2ZTk2ZmRlNjYxNGE3ZjcxNWJmM2NkNzFkOWYwMmExM2MyNDYyNjdlIn0.iF8cE9jhYct8p54V9aeCfzm21eLOC_YMztHDNh75Rgo&locale=en&session=ec93fe6555ae43bd18d321082933f693216844c5692073c9dd4af56c07ba7bdd&shop=rbp-hq-dev.myshopify.com&timestamp=1762545542&kind=import-templates 200 - - 185.826 ms
+[2m2025-11-07T19:59:03Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /api/importer/templates?kind=import-templates 200 - - 161.428 ms
+[2m2025-11-07T19:59:03Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /api/importer/templates?embedded=1&hmac=8da707fea2451b077c7183ad2422010e07e6ca10c9e2ff63713f0aa901a295aa&host=YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvcmJwLWhxLWRldg&id_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczpcL1wvcmJwLWhxLWRldi5teXNob3BpZnkuY29tXC9hZG1pbiIsImRlc3QiOiJodHRwczpcL1wvcmJwLWhxLWRldi5teXNob3BpZnkuY29tIiwiYXVkIjoiMDZkYzM2YjFhYWYxZTkwYmI0ZDAwOGU2MmY4ZDFiZDciLCJzdWIiOiIxMjA5MjIxNzc4MzkiLCJleHAiOjE3NjI1NDU2MDIsIm5iZiI6MTc2MjU0NTU0MiwiaWF0IjoxNzYyNTQ1NTQyLCJqdGkiOiIzYzM4YTUxOC05MGYzLTQzNzktYTU4Yi03Y2I5YzlmYzM4NmMiLCJzaWQiOiI2ZTEyMGVjZS02MjBiLTQyMDktOGE2MS1hOGQ0MmQyMzFhNjYiLCJzaWciOiI5NmI1OGNhZDhhZjBlOGY5NzNlNGNjYTc2ZTk2ZmRlNjYxNGE3ZjcxNWJmM2NkNzFkOWYwMmExM2MyNDYyNjdlIn0.iF8cE9jhYct8p54V9aeCfzm21eLOC_YMztHDNh75Rgo&locale=en&session=ec93fe6555ae43bd18d321082933f693216844c5692073c9dd4af56c07ba7bdd&shop=rbp-hq-dev.myshopify.com&timestamp=1762545542&kind=import-templates 200 - - 163.623 ms
+[2m2025-11-07T19:59:05Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 5.163 ms
+[2m2025-11-07T19:59:08Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][shopify-app/INFO] Authenticating admin request | {shop: rbp-hq-dev.myshopify.com}
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /app/imports/cmho2r6gr0002q0i5w2nl5rfw/schedule?embedded=1&hmac=8da707fea2451b077c7183ad2422010e07e6ca10c9e2ff63713f0aa901a295aa&host=YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvcmJwLWhxLWRldg&id_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczpcL1wvcmJwLWhxLWRldi5teXNob3BpZnkuY29tXC9hZG1pbiIsImRlc3QiOiJodHRwczpcL1wvcmJwLWhxLWRldi5teXNob3BpZnkuY29tIiwiYXVkIjoiMDZkYzM2YjFhYWYxZTkwYmI0ZDAwOGU2MmY4ZDFiZDciLCJzdWIiOiIxMjA5MjIxNzc4MzkiLCJleHAiOjE3NjI1NDU2MDIsIm5iZiI6MTc2MjU0NTU0MiwiaWF0IjoxNzYyNTQ1NTQyLCJqdGkiOiIzYzM4YTUxOC05MGYzLTQzNzktYTU4Yi03Y2I5YzlmYzM4NmMiLCJzaWQiOiI2ZTEyMGVjZS02MjBiLTQyMDktOGE2MS1hOGQ0MmQyMzFhNjYiLCJzaWciOiI5NmI1OGNhZDhhZjBlOGY5NzNlNGNjYTc2ZTk2ZmRlNjYxNGE3ZjcxNWJmM2NkNzFkOWYwMmExM2MyNDYyNjdlIn0.iF8cE9jhYct8p54V9aeCfzm21eLOC_YMztHDNh75Rgo&locale=en&session=ec93fe6555ae43bd18d321082933f693216844c5692073c9dd4af56c07ba7bdd&shop=rbp-hq-dev.myshopify.com&timestamp=1762545542&_data=routes%2Fapp.imports.%24templateId 200 - - 40.174 ms
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /app/imports/cmho2r6gr0002q0i5w2nl5rfw/schedule?embedded=1&hmac=8da707fea2451b077c7183ad2422010e07e6ca10c9e2ff63713f0aa901a295aa&host=YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvcmJwLWhxLWRldg&id_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczpcL1wvcmJwLWhxLWRldi5teXNob3BpZnkuY29tXC9hZG1pbiIsImRlc3QiOiJodHRwczpcL1wvcmJwLWhxLWRldi5teXNob3BpZnkuY29tIiwiYXVkIjoiMDZkYzM2YjFhYWYxZTkwYmI0ZDAwOGU2MmY4ZDFiZDciLCJzdWIiOiIxMjA5MjIxNzc4MzkiLCJleHAiOjE3NjI1NDU2MDIsIm5iZiI6MTc2MjU0NTU0MiwiaWF0IjoxNzYyNTQ1NTQyLCJqdGkiOiIzYzM4YTUxOC05MGYzLTQzNzktYTU4Yi03Y2I5YzlmYzM4NmMiLCJzaWQiOiI2ZTEyMGVjZS02MjBiLTQyMDktOGE2MS1hOGQ0MmQyMzFhNjYiLCJzaWciOiI5NmI1OGNhZDhhZjBlOGY5NzNlNGNjYTc2ZTk2ZmRlNjYxNGE3ZjcxNWJmM2NkNzFkOWYwMmExM2MyNDYyNjdlIn0.iF8cE9jhYct8p54V9aeCfzm21eLOC_YMztHDNh75Rgo&locale=en&session=ec93fe6555ae43bd18d321082933f693216844c5692073c9dd4af56c07ba7bdd&shop=rbp-hq-dev.myshopify.com&timestamp=1762545542&_data=routes%2Fapp.imports.%24templateId.schedule 200 - - 28.022 ms
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /__manifest?p=%2Fapi%2Fimporter%2Fmetafields%2Freport&version=7c62fe6e 200 - - 2.585 ms
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /__manifest?p=%2Fapi%2Fimporter%2Fmetafields%2Freport&version=7c62fe6e 200 - - 2.961 ms
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][shopify-app/INFO] Authenticating admin request | {shop: null}
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][shopify-app/INFO] Authenticating admin request | {shop: null}
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][metafields/list] broad REST failed {
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]  status: 404,
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]  statusText: 'Not Found',
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]  body: '{"errors":"Not Found"}'
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]}
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /api/importer/metafields/report?target=batson-rod-blanks&_data=routes%2Fapi.importer.metafields.report 200 - - 303.619 ms
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m][metafields/list] broad REST failed {
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]  status: 404,
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]  statusText: 'Not Found',
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]  body: '{"errors":"Not Found"}'
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]}
+[2m2025-11-07T19:59:09Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /api/importer/metafields/report?target=batson-rod-blanks&_data=routes%2Fapi.importer.metafields.report 200 - - 375.109 ms
+[2m2025-11-07T19:59:20Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 3.539 ms
+[2m2025-11-07T19:59:35Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 8.141 ms
+[2m2025-11-07T19:59:50Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 5.543 ms
+[2m2025-11-07T20:00:05Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 3.699 ms
+[2m2025-11-07T20:00:20Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 5.321 ms
+[2m2025-11-07T20:00:35Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 6.152 ms
+[2m2025-11-07T20:00:50Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 3.947 ms
+[2m2025-11-07T20:01:05Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 5.706 ms
+[2m2025-11-07T20:01:20Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 3.535 ms
+[2m2025-11-07T20:01:35Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 3.431 ms
+[2m2025-11-07T20:01:50Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 3.391 ms
+[2m2025-11-07T20:02:05Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 4.439 ms
+[2m2025-11-07T20:02:20Z[0m app[d896035c719e28] [32msjc[0m [[34minfo[0m]GET /resources/health 200 - - 3.278 ms
