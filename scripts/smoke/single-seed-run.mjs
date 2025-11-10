@@ -64,6 +64,7 @@ async function main() {
   // Poll for diffs/staging counts until we see >0 diffs or timeout
   const until = Date.now() + TIMEOUT_SEC * 1000
   let reported = { staged: -1, diffs: -1 }
+  let sawDiffs = false
   while (Date.now() < until) {
     try {
       const exp = await getJson(`/resources/smoke/importer/run-expected?runId=${encodeURIComponent(runId)}`)
@@ -75,13 +76,22 @@ async function main() {
         console.log(`[single-seed] staged=${staged} diffs=${diffs}${counts}`)
         reported = { staged, diffs }
       }
-      if (diffs > 0) break
+      if (diffs > 0) {
+        sawDiffs = true
+        break
+      }
       await new Promise(r => setTimeout(r, POLL_MS))
     } catch (e) {
       console.warn(`[single-seed] poll error: ${(e && e.message) || e}`)
+      if (sawDiffs) {
+        // We've already confirmed diffs once; proceed to approval/publish even if polling now errors.
+        break
+      }
       await new Promise(r => setTimeout(r, Math.max(1000, POLL_MS)))
     }
   }
+
+  // If we never saw diffs, still attempt approval/publish to surface clearer errors.
 
   // Approve some adds to allow publish
   const approveRes = await getJson(`/resources/smoke/importer/approve-adds?runId=${encodeURIComponent(runId)}&limit=${APPROVE_LIMIT}`)
