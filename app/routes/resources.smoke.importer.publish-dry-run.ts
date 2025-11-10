@@ -22,7 +22,4 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export const handle = { private: true }
-
-export default function SmokePublishDryRun() {
-  return null
-}
+// No default export: keep this as a JSON-only resource route

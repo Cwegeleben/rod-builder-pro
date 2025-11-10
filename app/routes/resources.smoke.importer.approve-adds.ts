@@ -1,11 +1,11 @@
 import type { ActionFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
-// smoke guards are imported dynamically in action to keep types simple
-import { prisma } from '../../app/db.server'
+// smoke guards and prisma are imported with correct relative paths
+import { prisma } from '../db.server'
 
 export async function action(args: ActionFunctionArgs) {
   // Minimal guard using internal helpers directly to avoid any-casts
-  const { requireSmokesEnabled, requireSmokeAuth } = await import('../../app/lib/smokes.server')
+  const { requireSmokesEnabled, requireSmokeAuth } = await import('../lib/smokes.server')
   requireSmokesEnabled()
   requireSmokeAuth(args.request)
   const url = new URL(args.request.url)
@@ -28,7 +28,4 @@ export async function action(args: ActionFunctionArgs) {
   })
   return json({ ok: true, approved: r.count })
 }
-
-export default function SmokeApproveAdds() {
-  return null
-}
+// No default export: keep this as a JSON-only resource route
