@@ -60,17 +60,22 @@ async function main() {
   const until = Date.now() + TIMEOUT_SEC * 1000
   let reported = { staged: -1, diffs: -1 }
   while (Date.now() < until) {
-    const exp = await getJson(`/resources/smoke/importer/run-expected?runId=${encodeURIComponent(runId)}`)
-    const stats = await getJson(`/resources/smoke/importer/run-stats?runId=${encodeURIComponent(runId)}`)
-    const staged = Number(exp?.stagedCount || 0)
-    const diffs = Number(exp?.diffCount || 0)
-    if (staged !== reported.staged || diffs !== reported.diffs) {
-      const counts = stats?.counts ? ` counts=${JSON.stringify(stats.counts)}` : ''
-      console.log(`[single-seed] staged=${staged} diffs=${diffs}${counts}`)
-      reported = { staged, diffs }
+    try {
+      const exp = await getJson(`/resources/smoke/importer/run-expected?runId=${encodeURIComponent(runId)}`)
+      const stats = await getJson(`/resources/smoke/importer/run-stats?runId=${encodeURIComponent(runId)}`)
+      const staged = Number(exp?.stagedCount || 0)
+      const diffs = Number(exp?.diffCount || 0)
+      if (staged !== reported.staged || diffs !== reported.diffs) {
+        const counts = stats?.counts ? ` counts=${JSON.stringify(stats.counts)}` : ''
+        console.log(`[single-seed] staged=${staged} diffs=${diffs}${counts}`)
+        reported = { staged, diffs }
+      }
+      if (diffs > 0) break
+      await new Promise(r => setTimeout(r, POLL_MS))
+    } catch (e) {
+      console.warn(`[single-seed] poll error: ${(e && e.message) || e}`)
+      await new Promise(r => setTimeout(r, Math.max(1000, POLL_MS)))
     }
-    if (diffs > 0) break
-    await new Promise(r => setTimeout(r, POLL_MS))
   }
 
   // Approve some adds to allow publish
