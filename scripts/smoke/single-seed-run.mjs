@@ -40,8 +40,13 @@ function seedsParam() {
 
 async function getJson(path) {
   const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(TOKEN)}`
-  const r = await fetch(url)
+  const r = await fetch(url, { headers: { Accept: 'application/json' } })
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+  const ctype = (r.headers.get('content-type') || '').toLowerCase()
+  if (!ctype.includes('application/json')) {
+    const text = await r.text()
+    throw new Error(`non-json response (${ctype || 'unknown'}): ${text.slice(0, 120)}...`)
+  }
   return r.json()
 }
 
