@@ -2,18 +2,48 @@
 import type { ActionFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
+import { smokesEnabled, extractSmokeToken } from '../lib/smokes.server'
 import { authenticate } from '../shopify.server'
 import { prisma } from '../db.server'
 import type { Prisma } from '@prisma/client'
 import { publishRunToShopify } from '../services/importer/publishShopify.server'
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  await requireHqShopOr404(request)
+  // Optional diagnostic bypass for dry-run only (no Shopify writes) when diag=1 & token matches.
+  let bypass = false
+  let tokenOk = false
+  let diagFlag = false
+  let smokes = false
+  try {
+    const url = new URL(request.url)
+    diagFlag = url.searchParams.get('diag') === '1'
+    smokes = smokesEnabled()
+    if (diagFlag && smokes) {
+      const tok = extractSmokeToken(request)
+      const expected = process.env.SMOKE_TOKEN || 'smoke-ok'
+      tokenOk = Boolean(tok && tok === expected)
+      if (tokenOk) bypass = true
+    }
+  } catch {
+    /* ignore */
+  }
+  if (!bypass) await requireHqShopOr404(request)
   const runId = String(params.runId || '')
   if (!runId) return json({ ok: false, error: 'Missing run id' }, { status: 400 })
 
   const body = await request.json().catch(() => ({}))
   const dryRun = Boolean(body?.dryRun)
+  // Enforce: bypass allowed ONLY if dryRun=true. If bypass attempt without dryRun, reject.
+  if (bypass && !dryRun) {
+    return json(
+      {
+        ok: false,
+        error: 'Bypass only permitted for dryRun',
+        _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes },
+      },
+      { status: 403 },
+    )
+  }
 
   const run = await prisma.importRun.findUnique({ where: { id: runId } })
   if (!run) return json({ ok: false, error: 'Run not found' }, { status: 404 })
@@ -23,8 +53,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     prisma.importDiff.count({ where: { importRunId: runId, diffType: 'conflict' } }),
     prisma.importDiff.count({ where: { importRunId: runId, resolution: 'approve' } }),
   ])
-  if (conflicts > 0) return json({ ok: false, error: 'Resolve conflicts before publishing' }, { status: 400 })
-  if (approved === 0) return json({ ok: false, error: 'No approved items to publish' }, { status: 400 })
+  if (!bypass) {
+    if (conflicts > 0) return json({ ok: false, error: 'Resolve conflicts before publishing' }, { status: 400 })
+    if (approved === 0) return json({ ok: false, error: 'No approved items to publish' }, { status: 400 })
+  }
 
   // Mark as publishing so status endpoint can reflect running state
   await prisma.importRun.update({ where: { id: runId }, data: { status: 'publishing' } })
@@ -54,8 +86,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     const filter = { tag: `importRun:${runId}` }
     return json(
-      { ok: true, runId, totals, totalsDetailed, productIds, filter },
-      { headers: { 'Cache-Control': 'no-store' } },
+      {
+        ok: true,
+        runId,
+        totals,
+        totalsDetailed,
+        productIds,
+        filter,
+        _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes },
+      },
+      { headers: { 'Cache-Control': 'no-store', 'X-Publish-Bypass': String(bypass), 'X-Smokes': String(smokes) } },
     )
   } catch (err: unknown) {
     const message =
@@ -91,7 +131,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     } catch {
       /* ignore */
     }
-    return json({ ok: false, error: message }, { status: 500 })
+    return json(
+      { ok: false, error: message, _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes } },
+      { status: 500 },
+    )
   }
 }
 

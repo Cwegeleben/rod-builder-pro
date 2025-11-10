@@ -2,10 +2,29 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
+import { smokesEnabled, extractSmokeToken } from '../lib/smokes.server'
 import { prisma } from '../db.server'
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requireHqShopOr404(request)
+  // Allow optional diagnostic bypass when explicitly enabled and token provided
+  let bypass = false
+  let tokenOk = false
+  let diagFlag = false
+  let smokes = false
+  try {
+    const url = new URL(request.url)
+    diagFlag = url.searchParams.get('diag') === '1'
+    smokes = smokesEnabled()
+    if (diagFlag && smokes) {
+      const tok = extractSmokeToken(request)
+      const expected = process.env.SMOKE_TOKEN || 'smoke-ok'
+      tokenOk = Boolean(tok && tok === expected)
+      if (tokenOk) bypass = true
+    }
+  } catch {
+    /* ignore */
+  }
+  if (!bypass) await requireHqShopOr404(request)
   const runId = String(params.runId || '')
   if (!runId) return json({ ok: false, error: 'Missing run id' }, { status: 400 })
 
@@ -59,12 +78,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       processed,
       totals,
       etaMs,
+      // diagnostics
+      _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes },
     },
-    { headers: { 'Cache-Control': 'no-store' } },
+    { headers: { 'Cache-Control': 'no-store', 'X-Publish-Bypass': String(bypass), 'X-Smokes': String(smokes) } },
   )
 }
 
-export default function PublishRunStatusApi() {
-  return null
-}
+// Resource route (no default export) so JSON is returned directly
 // <!-- END RBP GENERATED: importer-publish-status-v1 -->

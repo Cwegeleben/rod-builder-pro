@@ -2,6 +2,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
+import { smokesEnabled, extractSmokeToken } from '../lib/smokes.server'
 import { prisma } from '../db.server'
 import { getTargetById } from '../server/importer/sites/targets'
 
@@ -80,7 +81,24 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireHqShopOr404(request)
+  let bypass = false
+  let tokenOk = false
+  let diagFlag = false
+  let smokes = false
+  try {
+    const url = new URL(request.url)
+    diagFlag = url.searchParams.get('diag') === '1'
+    smokes = smokesEnabled()
+    if (diagFlag && smokes) {
+      const tok = extractSmokeToken(request)
+      const expected = process.env.SMOKE_TOKEN || 'smoke-ok'
+      tokenOk = Boolean(tok && tok === expected)
+      if (tokenOk) bypass = true
+    }
+  } catch {
+    /* ignore */
+  }
+  if (!bypass) await requireHqShopOr404(request)
   try {
     const url = new URL(request.url)
     const take = Math.min(100, Math.max(1, Number(url.searchParams.get('take') || 30)))
@@ -89,9 +107,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       take,
       select: { id: true, supplierId: true, startedAt: true, finishedAt: true, status: true, summary: true },
     })
-    return json({ ok: true, runs })
+    return json(
+      { ok: true, runs, _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes } },
+      { headers: { 'Cache-Control': 'no-store', 'X-Runs-Bypass': String(bypass), 'X-Smokes': String(smokes) } },
+    )
   } catch {
-    return json({ ok: false, runs: [] })
+    return json({ ok: false, runs: [], _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes } })
   }
 }
 // <!-- END RBP GENERATED: importer-publish-stage-v1 -->

@@ -3,6 +3,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
+import { smokesEnabled, extractSmokeToken } from '../lib/smokes.server'
 import Shopify from 'shopify-api-node'
 import { getShopAccessToken } from '../services/shopifyAdmin.server'
 import { authenticate } from '../shopify.server'
@@ -13,7 +14,25 @@ type PrismaLikeError = {
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requireHqShopOr404(request)
+  // Optional diagnostic bypass (read-only) guarded by smoke token
+  let bypass = false
+  let tokenOk = false
+  let diagFlag = false
+  let smokes = false
+  try {
+    const url = new URL(request.url)
+    diagFlag = url.searchParams.get('diag') === '1'
+    smokes = smokesEnabled()
+    if (diagFlag && smokes) {
+      const tok = extractSmokeToken(request)
+      const expected = process.env.SMOKE_TOKEN || 'smoke-ok'
+      tokenOk = Boolean(tok && tok === expected)
+      if (tokenOk) bypass = true
+    }
+  } catch {
+    /* ignore */
+  }
+  if (!bypass) await requireHqShopOr404(request)
   const runId = String(params.runId || '')
   if (!runId) return json({ error: 'Missing run id' }, { status: 400 })
   const { prisma } = await import('../db.server')
@@ -241,6 +260,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       headerSkip,
       headerSamples,
       source: 'prisma',
+      _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes },
     })
   } catch (err) {
     // Prisma path failed; include step hint if available
@@ -396,6 +416,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         headerSkip,
         headerSamples,
         source: 'raw',
+        _diag: { bypass, tokenOk, diagFlag, smokesEnabled: smokes },
       })
     } catch (rawErr) {
       const e = rawErr as PrismaLikeError
@@ -409,7 +430,5 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 }
 
-export default function ImporterRunDebugApi() {
-  return null
-}
+// Resource route (no default export) so JSON is returned directly
 // <!-- END RBP GENERATED: importer-review-debug-api-v1 -->

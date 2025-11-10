@@ -67,14 +67,21 @@ export async function publishRunToShopify({
       where: { id: runId },
       data: { summary: next as unknown as import('@prisma/client').Prisma.InputJsonValue },
     })
-    // Log publish:start
+    // Log publish:start with diagnostic counts
+    const counts = approved.reduce(
+      (acc, d) => {
+        acc[d.diffType as 'add' | 'change' | 'delete'] = (acc[d.diffType as 'add' | 'change' | 'delete'] || 0) + 1
+        return acc
+      },
+      { add: 0, change: 0, delete: 0 } as Record<'add' | 'change' | 'delete', number>,
+    )
     if (templateId) {
       await prisma.importLog.create({
         data: {
           templateId,
           runId,
           type: 'publish:start',
-          payload: { dryRun: !!dryRun, target },
+          payload: { dryRun: !!dryRun, target, counts },
         },
       })
     }
@@ -111,6 +118,21 @@ export async function publishRunToShopify({
           summary: nextSummary as unknown as import('@prisma/client').Prisma.InputJsonValue,
         },
       })
+      // Emit publish:progress log for visibility
+      if (templateId) {
+        try {
+          await prisma.importLog.create({
+            data: {
+              templateId,
+              runId,
+              type: 'publish:progress',
+              payload: { processed, target, pct: target > 0 ? Math.round((processed / target) * 100) : 0 },
+            },
+          })
+        } catch {
+          /* ignore */
+        }
+      }
     } catch {
       // ignore progress write errors
     }
@@ -128,8 +150,19 @@ export async function publishRunToShopify({
   await writeProgress()
 
   const totals: PublishTotals = { created, updated, skipped: 0, failed: 0 }
-  // In dryRun, we do not call Shopify nor back-write; return computed totals only
-  if (dryRun) return { totals, productIds }
+  // In dryRun, we do not call Shopify nor back-write; log done and return computed totals only
+  if (dryRun) {
+    try {
+      if (templateId) {
+        await prisma.importLog.create({
+          data: { templateId, runId, type: 'publish:done', payload: { totals, dryRun: true } },
+        })
+      }
+    } catch {
+      /* ignore */
+    }
+    return { totals, productIds }
+  }
 
   // Real publish phase 1: create-only upsert for 'add' diffs
   // Determine shop domain: prefer explicit env override, else first offline session shop
@@ -185,6 +218,24 @@ export async function publishRunToShopify({
     updated: updatedCount,
     skipped: skippedCount,
     failed,
+  }
+  // Warn if no results despite target>0
+  if (target > 0 && createdCount + updatedCount === 0) {
+    try {
+      if (templateId) {
+        const sampleIds = approved.slice(0, 5).map(d => d.id)
+        await prisma.importLog.create({
+          data: {
+            templateId,
+            runId,
+            type: 'publish:warn',
+            payload: { reason: 'no-results', target, sampleApprovedIds: sampleIds },
+          },
+        })
+      }
+    } catch {
+      /* ignore */
+    }
   }
   // Detailed totals: break out unchanged categories by skipReason
   let unchangedActive = 0
