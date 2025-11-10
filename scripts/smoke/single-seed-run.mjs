@@ -50,6 +50,22 @@ async function getJson(path) {
   return r.json()
 }
 
+async function postJson(path, body) {
+  const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(TOKEN)}`
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+  const ctype = (r.headers.get('content-type') || '').toLowerCase()
+  if (!ctype.includes('application/json')) {
+    const text = await r.text()
+    throw new Error(`non-json response (${ctype || 'unknown'}): ${text.slice(0, 120)}...`)
+  }
+  return r.json()
+}
+
 async function main() {
   const q = TEMPLATE_ID
     ? `templateId=${encodeURIComponent(TEMPLATE_ID)}`
@@ -94,7 +110,7 @@ async function main() {
   // If we never saw diffs, still attempt approval/publish to surface clearer errors.
 
   // Approve some adds to allow publish
-  const approveRes = await getJson(`/resources/smoke/importer/approve-adds?runId=${encodeURIComponent(runId)}&limit=${APPROVE_LIMIT}`)
+  const approveRes = await postJson(`/resources/smoke/importer/approve-adds?runId=${encodeURIComponent(runId)}&limit=${APPROVE_LIMIT}`)
   if (!approveRes?.ok) fail(`approve-adds failed: ${JSON.stringify(approveRes)}`)
   console.log(`[single-seed] approved adds: ${approveRes.approved || 0}`)
 
