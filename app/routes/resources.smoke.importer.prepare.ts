@@ -9,7 +9,9 @@ import { guardSmokeRoute } from '../lib/smokes.server'
 // Returns: { ok: true, runId, supplierId }
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
+    // Auth + enablement guard (throws Response on failure)
     guardSmokeRoute({ request } as LoaderFunctionArgs)
+    const startedAt = Date.now()
     const url = new URL(request.url)
     const templateId = url.searchParams.get('templateId') || ''
     const explicitTarget = url.searchParams.get('target') || ''
@@ -18,6 +20,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .map(s => s.trim())
       .filter(Boolean)
     const notes = url.searchParams.get('notes') || 'smoke:prepare'
+    console.warn('[smoke:prepare] init', {
+      templateId,
+      explicitTarget,
+      seedCount: explicitSeeds.length,
+      notes,
+    })
 
     const { prisma } = await import('../db.server')
     // Ensure minimal importer tables exist before any reads/writes to avoid 500s on first run
@@ -156,8 +164,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }, 0)
     })
 
+    const elapsedMs = Date.now() - startedAt
+    console.warn('[smoke:prepare] queued run', { runId: run.id, supplierId, elapsedMs })
     return json({ ok: true, runId: run.id, supplierId })
   } catch (e) {
+    // Preserve Response (e.g., 403/404 from guard) instead of masking as 500
+    if (e instanceof Response) return e
+    console.warn('[smoke:prepare] error', e)
     const msg = (e as Error)?.message || 'Unexpected error'
     return json({ ok: false, error: msg }, { status: 500 })
   }
