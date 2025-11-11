@@ -338,6 +338,11 @@ export default function ProductsIndex() {
             {canonical ? 'Canonical Products' : 'Products'}
           </Text>
           <InlineStack gap="200">
+            {canonical ? (
+              <Button url="/app/admin/publish/telemetry" variant="secondary">
+                Telemetry
+              </Button>
+            ) : null}
             {/* Sole importer entry: Import button links to new Imports hub */}
             {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
             {/* Direct link to Imports hub from Products; preserve current params */}
