@@ -1,5 +1,7 @@
 // hq-run-options-scrape-preview-v1
 import { prisma } from '../../db.server'
+// Canonical product_db writer (phase 1); gated by PRODUCT_DB_ENABLED
+import { upsertNormalizedProduct } from '../productDbWriter.server'
 import type { Prisma } from '@prisma/client'
 import { markSkipSuccessfulForRun } from '../../../packages/importer/src/pipelines/diffWithSkip'
 // <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 -->
@@ -352,6 +354,38 @@ export async function startImportFromOptions(
   if (runId) await setProgress(runId, { status: 'staging', phase: 'stage', percent: 60 })
   await throwIfCancelled(runId)
   // Generate diffs
+  // BEGIN product_db wiring (phase 1): write canonical Product + ProductVersion rows from current staging scope
+  if (process.env.PRODUCT_DB_ENABLED === '1') {
+    try {
+      const stagingRows = await prisma.partStaging.findMany({ where: partStagingWhere(supplierId, templateId) })
+      for (const r of stagingRows) {
+        try {
+          await upsertNormalizedProduct({
+            supplier: { id: supplierId },
+            sku: r.externalId,
+            title: r.title,
+            type: r.partType || null,
+            description: (r.description as string | null) || null,
+            images: (r.images as unknown as Prisma.InputJsonValue) || null,
+            rawSpecs: (r.rawSpecs as unknown as Prisma.InputJsonValue) || null,
+            normSpecs: (r.normSpecs as unknown as Prisma.InputJsonValue) || null,
+            priceMsrp: r.priceMsrp != null ? Number(r.priceMsrp as unknown as number | string) : null,
+            priceWholesale: r.priceWh != null ? Number(r.priceWh as unknown as number | string) : null,
+            availability: (r as { availability?: string }).availability || null,
+            sources: null,
+            fetchedAt: r.fetchedAt || new Date(),
+          })
+        } catch (e) {
+          // Non-fatal; log first 3 failures in console for diagnostics
+          const msg = (e as Error)?.message || String(e)
+          if (Math.random() < 0.02) console.warn('[product_db_writer] upsert failed (sampled)', msg)
+        }
+      }
+    } catch (e) {
+      console.warn('[product_db_writer] bulk upsert staging -> product_db failed (non-fatal)', (e as Error)?.message)
+    }
+  }
+  // END product_db wiring (phase 1)
   if (runId) {
     try {
       const stagingCount = await prisma.partStaging.count({ where: partStagingWhere(supplierId, templateId) })
@@ -451,6 +485,37 @@ export async function startImportFromOptions(
     await prisma.importDiff.deleteMany({ where: { importRunId: newRunId } })
     await setProgress(newRunId, { status: 'diffing', phase: 'diff', percent: 80 })
     await throwIfCancelled(newRunId)
+    // BEGIN product_db wiring (phase 1) for new run path
+    if (process.env.PRODUCT_DB_ENABLED === '1') {
+      try {
+        const stagingRows = await prisma.partStaging.findMany({ where: partStagingWhere(supplierId, templateId) })
+        for (const r of stagingRows) {
+          try {
+            await upsertNormalizedProduct({
+              supplier: { id: supplierId },
+              sku: r.externalId,
+              title: r.title,
+              type: r.partType || null,
+              description: (r.description as string | null) || null,
+              images: (r.images as unknown as Prisma.InputJsonValue) || null,
+              rawSpecs: (r.rawSpecs as unknown as Prisma.InputJsonValue) || null,
+              normSpecs: (r.normSpecs as unknown as Prisma.InputJsonValue) || null,
+              priceMsrp: r.priceMsrp != null ? Number(r.priceMsrp as unknown as number | string) : null,
+              priceWholesale: r.priceWh != null ? Number(r.priceWh as unknown as number | string) : null,
+              availability: (r as { availability?: string }).availability || null,
+              sources: null,
+              fetchedAt: r.fetchedAt || new Date(),
+            })
+          } catch (e) {
+            const msg = (e as Error)?.message || String(e)
+            if (Math.random() < 0.02) console.warn('[product_db_writer] upsert failed (sampled)', msg)
+          }
+        }
+      } catch (e) {
+        console.warn('[product_db_writer] bulk upsert staging -> product_db failed (non-fatal)', (e as Error)?.message)
+      }
+    }
+    // END product_db wiring (phase 1)
     await createDiffRowsForRun(supplierId, newRunId, { options, admin, templateId: templateId || undefined })
     if (options.skipSuccessful) {
       await markSkipSuccessfulForRun(supplierId, newRunId)

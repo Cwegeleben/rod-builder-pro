@@ -15,6 +15,7 @@ import {
 } from '@shopify/polaris'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { authenticate } from '../shopify.server'
+import { prisma } from '../db.server'
 import { isHqShop } from '../lib/access.server'
 // <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
 import { TEST_IDS } from '../../src/config/testIds'
@@ -28,6 +29,11 @@ type ProductRow = {
   productType?: string | null
   // Preformatted on server in a deterministic UTC format to avoid hydration mismatches
   updatedAt?: string | null
+  // Canonical product_db fields when flag enabled
+  canonical?: boolean
+  supplierId?: string
+  sku?: string
+  latestVersionId?: string | null
 }
 
 // HQ detection centralized
@@ -90,29 +96,46 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   `
 
-  const resp = await admin.graphql(GQL, {
-    variables: { first, after, query: finalQuery || undefined, sortKey, reverse },
-  })
-  const data = (await resp.json()) as {
-    data?: {
-      products?: {
-        edges: Array<{ cursor: string; node: ProductRow }>
-        pageInfo: { hasNextPage: boolean; hasPreviousPage: boolean }
-      }
+  let items: ProductRow[] = []
+  let nextCursor: string | null = null
+  const useCanonical = process.env.PRODUCT_DB_ENABLED === '1'
+  if (useCanonical) {
+    // product_db path: local SQLite canonical products
+    // Basic filtering: q matches sku OR title (case-insensitive substring)
+    const whereTitleSku: string | undefined = q ? `%${q.toLowerCase()}%` : undefined
+    // Fetch products (limit first) ordered by updatedAt desc unless overridden
+    // Prisma can handle filtering; simpler manual filter post-fetch for substring
+    type CanonicalProduct = {
+      id: string
+      supplierId: string
+      sku: string
+      title: string
+      type: string | null
+      status: 'DRAFT' | 'READY' | 'PUBLISHED'
+      updatedAt: Date
+      latestVersionId: string | null
     }
-  }
-  const edges = data?.data?.products?.edges ?? []
-  const items: ProductRow[] = edges.map(e => ({
-    id: e.node.id,
-    title: e.node.title,
-    status: e.node.status,
-    vendor: e.node.vendor,
-    productType: e.node.productType,
-    // Format on server using UTC and a fixed template (YYYY-MM-DD HH:mm:ss UTC)
-    updatedAt: e.node.updatedAt
-      ? (() => {
+    // Access product table via prisma.$queryRawUnsafe (runtime guard path in db.server.ts may have skipped generation)
+    const rows = (await prisma.$queryRawUnsafe<CanonicalProduct[]>(
+      `SELECT id, supplierId, sku, title, type, status, updatedAt, latestVersionId FROM Product ORDER BY updatedAt DESC LIMIT ?`,
+      first,
+    )) as CanonicalProduct[]
+    items = rows
+      .filter((p: CanonicalProduct) => {
+        if (!whereTitleSku) return true
+        const t = p.title?.toLowerCase() || ''
+        const sku = p.sku?.toLowerCase() || ''
+        return t.includes(q.toLowerCase()) || sku.includes(q.toLowerCase())
+      })
+      .map((p: CanonicalProduct) => ({
+        id: p.id,
+        title: p.title,
+        status: p.status === 'PUBLISHED' ? 'ACTIVE' : p.status === 'READY' ? 'DRAFT' : 'DRAFT',
+        vendor: null,
+        productType: p.type || null,
+        updatedAt: (() => {
           try {
-            const d = new Date(e.node.updatedAt)
+            const d = new Date(p.updatedAt)
             const pad = (n: number) => String(n).padStart(2, '0')
             const YYYY = d.getUTCFullYear()
             const MM = pad(d.getUTCMonth() + 1)
@@ -122,12 +145,54 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             const ss = pad(d.getUTCSeconds())
             return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss} UTC`
           } catch {
-            return e.node.updatedAt
+            return null
           }
-        })()
-      : null,
-  }))
-  const nextCursor: string | null = edges.length > 0 ? edges[edges.length - 1].cursor : null
+        })(),
+        canonical: true,
+        supplierId: p.supplierId,
+        sku: p.sku,
+        latestVersionId: p.latestVersionId,
+      }))
+  } else {
+    // Legacy Shopify path
+    const resp = await admin.graphql(GQL, {
+      variables: { first, after, query: finalQuery || undefined, sortKey, reverse },
+    })
+    const data = (await resp.json()) as {
+      data?: {
+        products?: {
+          edges: Array<{ cursor: string; node: ProductRow }>
+          pageInfo: { hasNextPage: boolean; hasPreviousPage: boolean }
+        }
+      }
+    }
+    const edges = data?.data?.products?.edges ?? []
+    items = edges.map(e => ({
+      id: e.node.id,
+      title: e.node.title,
+      status: e.node.status,
+      vendor: e.node.vendor,
+      productType: e.node.productType,
+      updatedAt: e.node.updatedAt
+        ? (() => {
+            try {
+              const d = new Date(e.node.updatedAt)
+              const pad = (n: number) => String(n).padStart(2, '0')
+              const YYYY = d.getUTCFullYear()
+              const MM = pad(d.getUTCMonth() + 1)
+              const DD = pad(d.getUTCDate())
+              const hh = pad(d.getUTCHours())
+              const mm = pad(d.getUTCMinutes())
+              const ss = pad(d.getUTCSeconds())
+              return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss} UTC`
+            } catch {
+              return e.node.updatedAt
+            }
+          })()
+        : null,
+    }))
+    nextCursor = edges.length > 0 ? edges[edges.length - 1].cursor : null
+  }
 
   const hq = await isHqShop(request)
   return json({
@@ -145,25 +210,40 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     skipped,
     failed,
     adminTagQuery,
+    canonical: useCanonical,
   })
 }
 
 export default function ProductsIndex() {
-  const { items, q, status, sort, nextCursor, hq, banner, created, updated, skipped, failed, adminTagQuery } =
-    useLoaderData<typeof loader>() as {
-      items: ProductRow[]
-      q: string
-      status: string[]
-      sort: string
-      nextCursor: string | null
-      hq: boolean
-      banner?: string
-      created?: number
-      updated?: number
-      skipped?: number
-      failed?: number
-      adminTagQuery?: string
-    }
+  const {
+    items,
+    q,
+    status,
+    sort,
+    nextCursor,
+    hq,
+    banner,
+    created,
+    updated,
+    skipped,
+    failed,
+    adminTagQuery,
+    canonical,
+  } = useLoaderData<typeof loader>() as {
+    items: ProductRow[]
+    q: string
+    status: string[]
+    sort: string
+    nextCursor: string | null
+    hq: boolean
+    banner?: string
+    created?: number
+    updated?: number
+    skipped?: number
+    failed?: number
+    adminTagQuery?: string
+    canonical?: boolean
+  }
   const [params, setParams] = useSearchParams()
   const location = useLocation()
   const [mode, setMode] = useState<IndexFiltersMode>(IndexFiltersMode.Default)
@@ -255,7 +335,7 @@ export default function ProductsIndex() {
         {/* <!-- END RBP GENERATED: importer-publish-shopify-v1 --> */}
         <InlineStack align="space-between">
           <Text as="h2" variant="headingLg">
-            Products
+            {canonical ? 'Canonical Products' : 'Products'}
           </Text>
           <InlineStack gap="200">
             {/* Sole importer entry: Import button links to new Imports hub */}
@@ -349,6 +429,11 @@ export default function ProductsIndex() {
           onSort={onSortChange}
         />
 
+        {canonical ? (
+          <Text as="p" tone="subdued">
+            Showing canonical product_db rows ({items.length}).
+          </Text>
+        ) : null}
         {empty ? (
           <Card>
             <div className="p-m space-y-m">

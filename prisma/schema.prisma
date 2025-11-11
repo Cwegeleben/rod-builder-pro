@@ -307,6 +307,9 @@ model ProductSource {
   notes        String?
   firstSeenAt  DateTime @default(now())
   lastSeenAt   DateTime @default(now())
+  // Link to canonical Product when known (after first successful normalization/upsert)
+  productId    String?
+  product      Product? @relation(fields: [productId], references: [id])
 
   @@unique([supplierId, templateId, url], name: "product_source_supplier_template_url_unique")
 }
@@ -365,6 +368,68 @@ model ImportTemplate {
   @@index([state])
   @@index([preparingRunId])
 }
+
+// BEGIN product_db canonical models (phase 1)
+/// Supplier: distinct source of products. Consolidates legacy supplierId uses.
+model Supplier {
+  id         String   @id @default(cuid())
+  slug       String   @unique
+  name       String
+  urlRoot    String?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  products   Product[]
+  sources    ProductSource[]
+}
+
+/// Product: stable identity keyed by (supplierId, sku)
+model Product {
+  id              String          @id @default(cuid())
+  supplierId      String
+  supplier        Supplier        @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  sku             String
+  title           String
+  type            String?
+  status          ProductStatus   @default(DRAFT) // DRAFT READY PUBLISHED
+  latestVersionId String?         @unique
+  latestVersion   ProductVersion? @relation(fields: [latestVersionId], references: [id])
+  publishHandle   String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  versions        ProductVersion[]
+
+  @@unique([supplierId, sku], name: "product_supplier_sku_unique")
+  @@index([supplierId])
+}
+
+enum ProductStatus {
+  DRAFT
+  READY
+  PUBLISHED
+}
+
+/// ProductVersion: immutable snapshot of normalized content
+model ProductVersion {
+  id            String   @id @default(cuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  contentHash   String
+  rawSpecs      Json?
+  normSpecs     Json?
+  description   String?
+  images        Json?
+  priceMsrp     Decimal?
+  priceWholesale Decimal?
+  availability  String?
+  sourceSnapshot Json?
+  fetchedAt     DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@unique([productId, contentHash], name: "product_version_hash_unique")
+  @@index([productId])
+}
+// END product_db canonical models (phase 1)
 
 model ImportLog {
   id          String   @id @default(cuid())
