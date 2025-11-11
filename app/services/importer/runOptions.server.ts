@@ -423,6 +423,29 @@ export async function startImportFromOptions(
       // Mark run as staged after diffs are materialized so Review can immediately show rows
       data: { status: 'staged', summary: { counts, options } as unknown as object },
     })
+    // Minimal ImportTelemetry: record counts and duration when run reaches 'staged'
+    try {
+      const run = await prisma.importRun.findUnique({ where: { id: runId } })
+      const startedAt = (run?.startedAt as Date | undefined) || new Date()
+      const durationMs = Date.now() - new Date(startedAt).getTime()
+      const newProducts = Number(counts.add || 0)
+      const newVersions = Number(counts.change || 0)
+      const skipped = Number(counts.skip || 0)
+      await prisma.$executeRawUnsafe(
+        'INSERT OR IGNORE INTO ImportTelemetry (id, runId, supplierId, newProducts, newVersions, skipped, failed, durationMs, startedAt, finishedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)',
+        `imp-${runId}`,
+        runId,
+        supplierId,
+        newProducts,
+        newVersions,
+        skipped,
+        0,
+        durationMs,
+        startedAt,
+      )
+    } catch {
+      /* best-effort */
+    }
     // Post-diff summary diagnostics
     try {
       const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'
@@ -526,6 +549,29 @@ export async function startImportFromOptions(
       // Mark run as staged after diffs are materialized
       data: { status: 'staged', summary: { counts, options } as unknown as object },
     })
+    // Minimal ImportTelemetry on new run path
+    try {
+      const run = await prisma.importRun.findUnique({ where: { id: newRunId } })
+      const startedAt = (run?.startedAt as Date | undefined) || new Date()
+      const durationMs = Date.now() - new Date(startedAt).getTime()
+      const newProducts = Number(counts.add || 0)
+      const newVersions = Number(counts.change || 0)
+      const skipped = Number(counts.skip || 0)
+      await prisma.$executeRawUnsafe(
+        'INSERT OR IGNORE INTO ImportTelemetry (id, runId, supplierId, newProducts, newVersions, skipped, failed, durationMs, startedAt, finishedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)',
+        `imp-${newRunId}`,
+        newRunId,
+        supplierId,
+        newProducts,
+        newVersions,
+        skipped,
+        0,
+        durationMs,
+        startedAt,
+      )
+    } catch {
+      /* best-effort */
+    }
     // Post-diff summary diagnostics (new run)
     try {
       const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'

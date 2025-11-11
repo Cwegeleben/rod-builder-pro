@@ -190,12 +190,13 @@ export async function publishCanonicalProduct({
     if (telemetryId) {
       const duration = Date.now() - started
       await prisma.$executeRawUnsafe(
-        'UPDATE PublishTelemetry SET attempted = ?, created = ?, updated = ?, failed = 0, skipped = ?, productIds = ?, finishedAt = CURRENT_TIMESTAMP, durationMs = ? WHERE id = ?',
+        'UPDATE PublishTelemetry SET attempted = ?, created = ?, updated = ?, failed = 0, skipped = ?, productIds = ?, diag = ?, finishedAt = CURRENT_TIMESTAMP, durationMs = ? WHERE id = ?',
         results.length,
         created,
         updated,
         results.length === 0 ? 1 : 0,
         JSON.stringify(results.map(r => r.externalId)),
+        JSON.stringify(results),
         duration,
         telemetryId,
       )
