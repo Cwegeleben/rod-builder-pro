@@ -299,6 +299,7 @@ model RunItemMapping {
 model ProductSource {
   id           String   @id @default(cuid())
   supplierId   String
+  supplier     Supplier @relation("SupplierSources", fields: [supplierId], references: [id])
   // Template-scoped product sources (seeds) to avoid cross-template bleed
   templateId   String?
   url          String
@@ -309,7 +310,7 @@ model ProductSource {
   lastSeenAt   DateTime @default(now())
   // Link to canonical Product when known (after first successful normalization/upsert)
   productId    String?
-  product      Product? @relation(fields: [productId], references: [id])
+  product      Product? @relation("ProductSources", fields: [productId], references: [id])
 
   @@unique([supplierId, templateId, url], name: "product_source_supplier_template_url_unique")
 }
@@ -380,7 +381,7 @@ model Supplier {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   products   Product[]
-  sources    ProductSource[]
+  sources    ProductSource[] @relation("SupplierSources")
 }
 
 /// Product: stable identity keyed by (supplierId, sku)
@@ -393,11 +394,14 @@ model Product {
   type            String?
   status          ProductStatus   @default(DRAFT) // DRAFT READY PUBLISHED
   latestVersionId String?         @unique
-  latestVersion   ProductVersion? @relation(fields: [latestVersionId], references: [id])
+  // Distinct relation for the latest (pointer) version to avoid ambiguity with versions history relation
+  latestVersion   ProductVersion? @relation("LatestProductVersion", fields: [latestVersionId], references: [id])
   publishHandle   String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
-  versions        ProductVersion[]
+  // Full version history (many) relation name distinct from latestVersion pointer
+  versions        ProductVersion[] @relation("ProductVersions")
+  sources         ProductSource[]  @relation("ProductSources")
 
   @@unique([supplierId, sku], name: "product_supplier_sku_unique")
   @@index([supplierId])
@@ -413,7 +417,10 @@ enum ProductStatus {
 model ProductVersion {
   id            String   @id @default(cuid())
   productId     String
-  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Belongs-to relation paired with Product.versions history.
+  product       Product  @relation("ProductVersions", fields: [productId], references: [id], onDelete: Cascade)
+  // Back reference for latestVersion pointer
+  productsLatest Product[] @relation("LatestProductVersion")
   contentHash   String
   rawSpecs      Json?
   normSpecs     Json?
@@ -443,3 +450,21 @@ model ImportLog {
   @@index([templateId, runId, type])
 }
 // <!-- END RBP GENERATED: importer-v2-3 -->
+
+// BEGIN publish telemetry (canonical products)
+model PublishTelemetry {
+  id          String   @id @default(cuid())
+  productIds  Json?
+  attempted   Int      @default(0)
+  created     Int      @default(0)
+  updated     Int      @default(0)
+  skipped     Int      @default(0)
+  failed      Int      @default(0)
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  durationMs  Int?
+  diag        Json?
+
+  @@index([startedAt])
+}
+// END publish telemetry (canonical products)

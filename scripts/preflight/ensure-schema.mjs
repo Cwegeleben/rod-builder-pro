@@ -60,6 +60,7 @@ export async function ensure() {
     await ensureImportRunProgressColumn()
     await ensureProductSourceTable()
     await ensurePartStagingPublishColumns()
+    await ensurePublishTelemetryTable()
     await ensureSqliteJsonTypes()
   } catch {
     // best-effort
@@ -93,6 +94,34 @@ async function ensureProductSourceTable() {
   try {
     await prisma.$executeRawUnsafe(
       `CREATE UNIQUE INDEX IF NOT EXISTS "product_source_supplier_url_unique" ON "ProductSource"("supplierId", "url")`
+    )
+  } catch {
+    // ignore
+  }
+}
+
+// Ensure PublishTelemetry table exists (SQLite only)
+async function ensurePublishTelemetryTable() {
+  const hasTable = await tableExists('PublishTelemetry')
+  if (hasTable) return
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE "PublishTelemetry" (
+      "id" TEXT PRIMARY KEY,
+      "productIds" TEXT,
+      "attempted" INTEGER NOT NULL DEFAULT 0,
+      "created" INTEGER NOT NULL DEFAULT 0,
+      "updated" INTEGER NOT NULL DEFAULT 0,
+      "skipped" INTEGER NOT NULL DEFAULT 0,
+      "failed" INTEGER NOT NULL DEFAULT 0,
+      "startedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "finishedAt" DATETIME,
+      "durationMs" INTEGER,
+      "diag" TEXT
+    )
+  `)
+  try {
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "PublishTelemetry_startedAt_idx" ON "PublishTelemetry"("startedAt")`
     )
   } catch {
     // ignore

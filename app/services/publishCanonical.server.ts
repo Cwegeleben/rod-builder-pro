@@ -29,6 +29,18 @@ export async function publishCanonicalProduct({
   dryRun?: boolean
   shopDomain?: string
 }): Promise<CanonicalPublishResult> {
+  const started = Date.now()
+  let telemetryId: string | null = null
+  try {
+    telemetryId = crypto.randomUUID()
+    await prisma.$executeRawUnsafe(
+      'INSERT INTO PublishTelemetry (id, attempted, startedAt) VALUES (?, ?, CURRENT_TIMESTAMP)',
+      telemetryId,
+      0,
+    )
+  } catch {
+    telemetryId = null
+  }
   // Read canonical product + latest version + supplier slug
   const rows = await prisma.$queryRawUnsafe<
     Array<{
@@ -107,10 +119,36 @@ export async function publishCanonicalProduct({
   })
 
   if (dryRun) {
-    // Heuristic dry-run: treat as created when no publish handle on Product yet; otherwise updated
-    // We do not hit Shopify in dry-run mode.
+    // Dry-run heuristic: treat as created if product not yet published
     const created = 1
     const updated = 0
+    try {
+      if (telemetryId) {
+        const duration = Date.now() - started
+        await prisma.$executeRawUnsafe(
+          'UPDATE PublishTelemetry SET attempted = ?, created = ?, updated = ?, failed = 0, skipped = 0, finishedAt = CURRENT_TIMESTAMP, durationMs = ? WHERE id = ?',
+          1,
+          created,
+          updated,
+          duration,
+          telemetryId,
+        )
+      }
+    } catch {
+      /* ignore */
+    }
+    console.log(
+      JSON.stringify({
+        telemetry: 'publish',
+        mode: 'dry-run',
+        productId,
+        created,
+        updated,
+        failed: 0,
+        durationMs: Date.now() - started,
+        telemetryId,
+      }),
+    )
     return { ok: true, created, updated, failed: 0 }
   }
 
@@ -144,5 +182,37 @@ export async function publishCanonicalProduct({
     // non-fatal
   }
 
+  try {
+    if (telemetryId) {
+      const duration = Date.now() - started
+      await prisma.$executeRawUnsafe(
+        'UPDATE PublishTelemetry SET attempted = ?, created = ?, updated = ?, failed = 0, skipped = ?, productIds = ?, finishedAt = CURRENT_TIMESTAMP, durationMs = ? WHERE id = ?',
+        results.length,
+        created,
+        updated,
+        results.length === 0 ? 1 : 0,
+        JSON.stringify(results.map(r => r.externalId)),
+        duration,
+        telemetryId,
+      )
+    }
+  } catch {
+    /* ignore */
+  }
+  console.log(
+    JSON.stringify({
+      telemetry: 'publish',
+      mode: 'real',
+      productId,
+      created,
+      updated,
+      failed: 0,
+      skipped: results.length === 0 ? 1 : 0,
+      handle,
+      shopDomain,
+      durationMs: Date.now() - started,
+      telemetryId,
+    }),
+  )
   return { ok: true, created, updated, failed: 0, shopDomain, handle }
 }
