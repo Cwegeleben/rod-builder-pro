@@ -33,6 +33,11 @@ export async function action({ request }: ActionFunctionArgs) {
   const confirmOverwrite = Boolean(body.confirmOverwrite) || /\bconfirm(=|:)?(1|true|yes)\b/i.test(JSON.stringify(body))
   const overwriteExisting = Boolean(body.overwriteExisting) || false
   const skipSuccessful = Boolean(body.skipSuccessful)
+  const autoConfirm = Boolean((body as Record<string, unknown>)['autoConfirm']) || false
+  const stagedCountHint =
+    typeof (body as Record<string, unknown>)['stagedCountHint'] === 'number'
+      ? Number((body as Record<string, unknown>)['stagedCountHint'])
+      : undefined
   if (!templateId) return json({ error: 'templateId required' }, { status: 400 })
 
   const { prisma } = await import('../db.server')
@@ -283,6 +288,21 @@ export async function action({ request }: ActionFunctionArgs) {
     status: 'preparing',
     summary: { preflight: { candidates, etaSeconds, expectedItems }, options },
   })
+  // Telemetry: if client indicated autoConfirm heuristic was used, log once with hint
+  if (autoConfirm) {
+    try {
+      await prisma.importLog.create({
+        data: {
+          templateId,
+          runId: run.id,
+          type: 'prepare:autoConfirm',
+          payload: { stagedCountHint },
+        },
+      })
+    } catch {
+      /* ignore telemetry logging errors */
+    }
+  }
   // Best-effort set initial progress (ignore if column missing)
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

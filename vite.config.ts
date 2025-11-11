@@ -52,7 +52,8 @@ export default defineConfig({
             v3_fetcherPersist: true,
             v3_relativeSplatPath: true,
             v3_throwAbortReason: true,
-            v3_lazyRouteDiscovery: true,
+            // Disable lazy route discovery to ensure data-only simple routes (e.g., /healthz) are always included
+            v3_lazyRouteDiscovery: false,
             v3_singleFetch: false,
             v3_routeConfig: true,
           },

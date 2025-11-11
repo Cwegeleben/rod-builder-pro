@@ -12,7 +12,7 @@ vi.mock('../db.server', () => {
   return {
     prisma: {
       importTemplate: {
-        findUnique: vi.fn(async ({ where }: { where: { id: string } }) => ({
+        findUnique: vi.fn(async () => ({
           preparingRunId,
         })),
       },

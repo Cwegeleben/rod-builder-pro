@@ -1,4 +1,4 @@
-/* Save & Crawl happy path e2e with mocked settings save + prepare */
+/* Auto-confirm overwrite heuristic e2e: stagedCount <= 3 should auto-confirm without modal */
 import { test, expect } from '@playwright/test'
 
 // Try both loopback hosts to work around browser-specific IPv4/IPv6 resolution quirks
@@ -10,13 +10,17 @@ const Q = '?hq=1'
 async function getAppScope(page: import('@playwright/test').Page): Promise<{
   locator: (sel: string) => import('@playwright/test').Locator
   getByLabel: (name: string | RegExp) => import('@playwright/test').Locator
-  url: () => string
+  getByRole: (
+    role: 'button' | 'link' | 'heading' | 'textbox' | 'dialog',
+    options?: { name?: string | RegExp },
+  ) => import('@playwright/test').Locator
 }> {
   if (HOSTS.some(h => page.url().startsWith(h))) {
     return {
       locator: (sel: string) => page.locator(sel),
       getByLabel: (name: string | RegExp) => page.getByLabel(name),
-      url: () => page.url(),
+      getByRole: (role: 'button' | 'link' | 'heading' | 'textbox' | 'dialog', options?: { name?: string | RegExp }) =>
+        page.getByRole(role, options),
     }
   }
   const deadline = Date.now() + 10_000
@@ -26,7 +30,8 @@ async function getAppScope(page: import('@playwright/test').Page): Promise<{
       return {
         locator: (sel: string) => frame.locator(sel),
         getByLabel: (name: string | RegExp) => frame.getByLabel(name),
-        url: () => frame.url(),
+        getByRole: (role: 'button' | 'link' | 'heading' | 'textbox' | 'dialog', options?: { name?: string | RegExp }) =>
+          frame.getByRole(role, options),
       }
     await page.waitForTimeout(200)
   }
@@ -64,7 +69,10 @@ async function gotoWithRetry(page: import('@playwright/test').Page, url: string,
   throw lastErr || new Error(`Navigation failed after ${attempts} attempts: ${url}`)
 }
 
-test('Save & Crawl redirects with started params and starts progress polling', async ({ page }) => {
+// This test simulates the settings page Save & Crawl path when server returns confirm_overwrite with a small stagedCount (<=3).
+// We intercept first prepare (confirm_overwrite) and second prepare (auto confirm) responses.
+
+test('Save & Crawl auto-confirms small overwrite (<=3 staged)', async ({ page }) => {
   await primeHqCookie(page)
 
   // Temporary: mobile emulations have intermittent connection issues with the dev server
@@ -72,13 +80,13 @@ test('Save & Crawl redirects with started params and starts progress polling', a
   if (projectName.includes('Mobile')) {
     test.skip(true, 'Skipping on mobile emulation due to intermittent connection to dev server')
   }
-  // Temporary: WebKit keeps the primary CTA disabled despite field input under Polaris in headless env
+  // Temporary: WebKit sometimes keeps the primary CTA disabled under headless Polaris
   if (projectName === 'webkit') {
     test.skip(true, 'Skipping on WebKit due to disabled Save & Crawl button under headless constraints')
   }
 
-  const templateId = 'tpl1'
-  const runId = 'run-save-1'
+  const templateId = 'tpl-auto'
+  const runId = 'run-auto-1'
 
   // Intercept settings save POST
   await page.route(`**/api/importer/targets/${templateId}/settings`, async route => {
@@ -86,62 +94,64 @@ test('Save & Crawl redirects with started params and starts progress polling', a
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) })
   })
 
-  // Intercept prepare POST
+  let firstPrepare = true
   await page.route('**/api/importer/prepare', async route => {
     if (route.request().method() !== 'POST') return route.fallback()
+    if (firstPrepare) {
+      firstPrepare = false
+      // Respond with confirm_overwrite guard (stagedCount=2)
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, code: 'confirm_overwrite', stagedCount: 2 }),
+      })
+      return
+    }
+    // Second call: auto-confirm accepted start
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ runId, candidates: 7, etaSeconds: 60, expectedItems: 14 }),
+      body: JSON.stringify({ runId, candidates: 1, etaSeconds: 30, expectedItems: 2 }),
     })
   })
 
-  // Intercept imports list and status once redirected (optional sanity)
+  // Intercept imports list after navigation
   await page.route('**/api/importer/templates**', async route => {
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ templates: [{ id: templateId, name: 'Batson Rod Blanks', state: 'READY' }] }),
+      body: JSON.stringify({ templates: [{ id: templateId, name: 'Auto Confirm Import', state: 'READY' }] }),
     })
   })
-  await page.route(`**/api/importer/runs/${runId}/status**`, async route => {
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'preparing' }) })
-  })
 
-  // No need to hook location.assign; we'll assert on final URL after navigation
-
-  // Navigate to settings
+  // Navigate directly to settings page
   const res = await gotoWithRetry(page, `${PRIMARY}/app/imports/${templateId}${Q}`)
   expect(res?.ok()).toBeTruthy()
 
   const app = await getAppScope(page)
 
-  // Fill seeds (Batson domain to satisfy seed scope guard)
-  const seed = 'https://batsonenterprises.com/collections/blanks'
-  // Prefer accessible label to locate the multiline TextField; fallback to label[for] when necessary
-  let seedsField = app.getByLabel('Series URLs').first()
-  if (!(await seedsField.count())) {
+  // Provide seeds (Batson domain to satisfy seed scope guard)
+  let seedField = app.getByLabel('Series URLs').first()
+  if (!(await seedField.count())) {
     const label = app.locator('label:has-text("Series URLs")').first()
     const inputId = await label.getAttribute('for')
     if (!inputId) test.skip(true, 'Series URLs field not found in this environment')
-    seedsField = app.locator(`#${inputId}`)
+    seedField = app.locator(`#${inputId}`)
   }
-  await seedsField.fill(seed)
-  // Trigger validation
-  await seedsField.press('Tab')
+  await seedField.fill('https://batsonenterprises.com/collections/blanks')
+  await seedField.press('Tab') // trigger validation/enablement
 
-  // Click Save and Crawl (ensure it's enabled)
-  const saveAndCrawl = app.locator('role=button[name="Save and Crawl"]').first()
-  await expect(saveAndCrawl).toBeVisible()
-  await expect(saveAndCrawl).toBeEnabled({ timeout: 10_000 })
-  await saveAndCrawl.click()
+  // Trigger Save & Crawl (ensure it's enabled)
+  const cta = app.getByRole('button', { name: 'Save and Crawl' })
+  await expect(cta).toBeVisible()
+  await expect(cta).toBeEnabled({ timeout: 10_000 })
+  await cta.click()
 
-  // Expect a redirect to /app/imports with started params
+  // Assert redirect happened automatically (auto-confirm branch) without user modal interaction
   await page.waitForURL('**/app/imports**started=1**', { timeout: 15_000 })
   const current = page.url()
   const url = new URL(current)
-  expect(url.pathname.endsWith('/app/imports')).toBeTruthy()
   expect(url.searchParams.get('started')).toBe('1')
   expect(url.searchParams.get('tpl')).toBe(templateId)
-  expect(url.searchParams.get('c')).toBe('7')
-  expect(url.searchParams.get('eta')).toBe('60')
-  expect(url.searchParams.get('exp')).toBe('14')
+  expect(url.searchParams.get('c')).toBe('1')
+  expect(url.searchParams.get('eta')).toBe('30')
+  expect(url.searchParams.get('exp')).toBe('2')
 })

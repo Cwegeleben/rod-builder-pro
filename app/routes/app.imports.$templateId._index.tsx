@@ -2,7 +2,7 @@
 // This file holds the Import Settings page content as the index child of the template route.
 import React from 'react'
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from '@remix-run/node'
-import { json } from '@remix-run/node'
+import { json, redirect } from '@remix-run/node'
 // <!-- BEGIN RBP GENERATED: importer-crawlB-polaris-v1 -->
 import {
   Page,
@@ -297,6 +297,61 @@ export default function ImportSettingsIndex() {
         const staged = (data as { stagedCount?: number }).stagedCount || 0
         setOverwriteStagedCount(staged)
         setOverwriteForceClear(false)
+        // Auto-confirm small benign overwrites (tiny leftover staged rows) to reduce friction.
+        // Heuristic: if staged rows are very small (<=3) we proceed automatically once.
+        if (staged > 0 && staged <= 3) {
+          try {
+            const auto = await fetch('/api/importer/prepare', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                templateId,
+                confirmOverwrite: true,
+                overwriteExisting: false,
+                autoConfirm: true,
+                stagedCountHint: staged,
+              }),
+            })
+            const aData = (await auto.json()) as Record<string, unknown>
+            const aResp = auto
+            if (aResp.ok && (aData as { runId?: string }).runId) {
+              const c =
+                typeof (aData as { candidates?: number }).candidates === 'number'
+                  ? (aData as { candidates?: number }).candidates
+                  : undefined
+              const eta =
+                typeof (aData as { etaSeconds?: number }).etaSeconds === 'number'
+                  ? (aData as { etaSeconds?: number }).etaSeconds
+                  : undefined
+              const exp =
+                typeof (aData as { expectedItems?: number }).expectedItems === 'number'
+                  ? (aData as { expectedItems?: number }).expectedItems
+                  : undefined
+              const qs = new URLSearchParams(location.search)
+              qs.set('started', '1')
+              qs.set('tpl', templateId!)
+              if (typeof c === 'number') qs.set('c', String(c))
+              if (typeof eta === 'number') qs.set('eta', String(eta))
+              if (typeof exp === 'number') qs.set('exp', String(exp))
+              try {
+                setShowSavedToast(true)
+              } catch {
+                /* noop */
+              }
+              navigateToImports(qs)
+              return
+            }
+          } catch (autoErr) {
+            // Fall through to manual confirmation modal
+            // Provide a subtle hint in save error to aid debugging
+            try {
+              const m = (autoErr as Error)?.message
+              if (m) setSaveError(m)
+            } catch {
+              /* ignore */
+            }
+          }
+        }
         overwriteContinueRef.current = async () => {
           const res2 = await startPrepare(true, overwriteForceClear)
           const resp2 = res2.resp
@@ -680,12 +735,19 @@ export default function ImportSettingsIndex() {
                         diffs?: number
                       }
                       error?: string
+                      code?: string
+                      hint?: string
                     }
-                    if (!resp.ok || jr?.ok === false) throw new Error(jr?.error || 'Failed to preview delete')
+                    if (!resp.ok || jr?.ok === false) {
+                      const msg = (jr?.error || 'Failed to preview delete') + (jr?.hint ? ` — ${jr.hint}` : '')
+                      throw new Error(msg)
+                    }
                     setDeleteCounts(jr.counts || null)
                     setDeleteModalOpen(true)
                   } catch (e) {
                     setDeleteError((e as Error)?.message || 'Failed to preview delete')
+                    // Open the modal to surface the error banner to the user
+                    setDeleteModalOpen(true)
                   } finally {
                     setDeleteLoading(false)
                   }
@@ -1055,8 +1117,14 @@ export default function ImportSettingsIndex() {
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ templateIds: [templateId] }),
                     })
-                    const jr = await resp.json()
-                    if (!resp.ok || jr?.ok === false) throw new Error(jr?.error || 'Delete failed')
+                    const jr = (await resp.json()) as { ok?: boolean; error?: string; code?: string; hint?: string }
+                    if (!resp.ok || jr?.ok === false) {
+                      const msg = (jr?.error || 'Delete failed') + (jr?.hint ? ` — ${jr.hint}` : '')
+                      throw new Error(msg)
+                    }
+                    // Close modal immediately on success to avoid lingering UI when navigation is delayed/blocked
+                    setDeleteModalOpen(false)
+                    setDeleteCounts(null)
                     // Navigate to imports list with toast param
                     try {
                       const qs = new URLSearchParams(location.search)
@@ -1069,8 +1137,7 @@ export default function ImportSettingsIndex() {
                     setDeleteError((e as Error)?.message || 'Delete failed')
                   } finally {
                     setDeleteLoading(false)
-                    setDeleteModalOpen(false)
-                    setDeleteCounts(null)
+                    // Keep the modal open on error to display the banner. It will close on success via navigation.
                   }
                 },
               }}
@@ -1151,6 +1218,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!id) return json({ error: 'Missing template id' }, { status: 400 })
   const form = await request.formData()
   const intent = String(form.get('intent') || '')
+  // If no intent provided, treat as an unexpected POST (likely a redirect carrying POST method) and convert to GET.
+  if (!intent) {
+    return redirect(`/app/imports/${id}?created=1`, 303)
+  }
   if (intent !== 'save') return json({ error: 'Unsupported intent' }, { status: 400 })
   const name = String(form.get('name') || '').trim()
   if (!name) return json({ error: 'Name is required' }, { status: 400 })
