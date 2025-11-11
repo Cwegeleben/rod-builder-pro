@@ -1,10 +1,10 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
-import { prisma } from '../db.server'
 import { guardSmokeRoute } from '../lib/smokes.server'
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   guardSmokeRoute({ request } as LoaderFunctionArgs)
+  const { prisma } = await import('../db.server')
   const url = new URL(request.url)
   const id = url.searchParams.get('id')
   if (!id) return new Response('Missing id', { status: 400 })

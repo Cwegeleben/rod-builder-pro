@@ -21,6 +21,12 @@ import { assertRateLimit } from '../lib/rateLimit.server'
 export async function action({ request }: ActionFunctionArgs) {
   await requireHqShopOr404(request)
 
+  // When running in exclusive canonical product_db mode, disable staging clear entirely.
+  // This endpoint is legacy and only relevant when using PartStaging as an intermediate surface.
+  if (process.env.PRODUCT_DB_EXCLUSIVE === '1' || process.env.PRODUCT_DB_ENABLED === '1') {
+    return json({ ok: false, error: 'Staging clear is disabled in canonical product_db mode' }, { status: 404 })
+  }
+
   let body: Record<string, unknown> = {}
   try {
     body = (await request.json()) as Record<string, unknown>

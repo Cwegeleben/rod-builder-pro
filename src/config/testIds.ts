@@ -5,6 +5,7 @@ export const TEST_IDS = {
   btnNewImport: 'btn-new-import',
   btnManageTemplates: 'btn-manage-templates',
   btnProductsImport: 'btn-products-import',
+  headingProducts: 'heading-products',
   crumbBackToRuns: 'crumb-back-to-runs',
   chipTemplate: 'chip-template',
 } as const

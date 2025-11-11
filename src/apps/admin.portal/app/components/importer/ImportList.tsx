@@ -24,6 +24,7 @@ type Row = {
   nextRunAt?: string
   hadFailures?: boolean
   preparing?: { runId: string; startedAt?: string; etaSeconds?: number; pct?: number; phase?: string }
+  publishing?: { runId: string; processed?: number; target?: number; pct?: number }
   hasSeeds?: boolean
   hasStaged?: boolean
   queuedCount?: number
@@ -271,6 +272,108 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
 
   const resourceName = { singular: 'import', plural: 'imports' }
   const [selected, setSelected] = useState<string[]>([])
+  // Live prepare polling throttle
+  const [lastRefresh, setLastRefresh] = useState<number>(0)
+
+  // Opportunistic lightweight polling for any rows that are currently preparing but not yet in SSE (fallback)
+  useEffect(() => {
+    const active = rows.filter(r => r.preparing?.runId).map(r => ({ tpl: r.templateId, run: r.preparing!.runId }))
+    if (!active.length) return
+    let cancelled = false
+    const tick = async () => {
+      if (cancelled) return
+      const now = Date.now()
+      if (now - lastRefresh < 3000) return // 3s minimum interval
+      setLastRefresh(now)
+      for (const a of active) {
+        try {
+          const res = await fetch(`/api/importer/runs/${a.run}/status`)
+          if (!res.ok) continue
+          const js = (await res.json()) as {
+            status?: string
+            progress?: { percent?: number; phase?: string; etaSeconds?: number }
+            startedAt?: string
+          }
+          // no-op: ensure js typed
+          setRows(cur =>
+            cur.map(r => {
+              if (r.templateId !== a.tpl) return r
+              if (js.status === 'staged') return { ...r, preparing: undefined, hasStaged: true }
+              if (js.status && ['failed', 'cancelled'].includes(js.status)) return { ...r, preparing: undefined }
+              const pct = typeof js.progress?.percent === 'number' ? js.progress.percent : r.preparing?.pct
+              return {
+                ...r,
+                preparing: r.preparing
+                  ? {
+                      ...r.preparing,
+                      pct: pct,
+                      phase: js.progress?.phase || r.preparing.phase,
+                      startedAt: js.startedAt || r.preparing.startedAt,
+                    }
+                  : r.preparing,
+              }
+            }),
+          )
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    const interval = setInterval(tick, 2500)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [rows, lastRefresh])
+
+  // Poll publishing progress for rows with a last run while publishing
+  useEffect(() => {
+    const active = rows.filter(r => !r.preparing && r.runId).map(r => ({ tpl: r.templateId, run: r.runId! }))
+    if (!active.length) return
+    let cancelled = false
+    const tick = async () => {
+      if (cancelled) return
+      for (const a of active) {
+        try {
+          const res = await fetch(`/api/importer/runs/${a.run}/status`)
+          if (!res.ok) continue
+          const js = (await res.json()) as {
+            status?: string
+            publishProgress?: { processed?: number; target?: number; percent?: number } | null
+          }
+          const pct = typeof js.publishProgress?.percent === 'number' ? js.publishProgress.percent : undefined
+          setRows(cur =>
+            cur.map(r => {
+              if (r.templateId !== a.tpl) return r
+              // Clear when leaving publishing
+              if (js.status && js.status !== 'publishing') {
+                return { ...r, publishing: undefined }
+              }
+              if (js.status === 'publishing' && typeof pct === 'number') {
+                return {
+                  ...r,
+                  publishing: {
+                    runId: a.run,
+                    processed: js.publishProgress?.processed,
+                    target: js.publishProgress?.target,
+                    pct,
+                  },
+                }
+              }
+              return r
+            }),
+          )
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    const interval = setInterval(tick, 2000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [rows])
 
   async function bulkDelete(ids: string[]) {
     if (!ids.length) return
@@ -577,9 +680,17 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                               })()
                         return <ProgressBar progress={pct} size="small" />
                       })()}
+                      <div style={{ marginTop: 6 }}>
+                        <ImportRowStateBadge
+                          state={r.state}
+                          extra={{ preparingPct: r.preparing?.pct, preparingPhase: r.preparing?.phase }}
+                        />
+                      </div>
                     </div>
                   ) : (
-                    <ImportRowStateBadge state={r.state} />
+                    <div>
+                      <ImportRowStateBadge state={r.state} extra={{ publishingPct: r.publishing?.pct }} />
+                    </div>
                   )}
                 </IndexTable.Cell>
                 <IndexTable.Cell>
@@ -596,6 +707,25 @@ export default function ImportList({ initialDbTemplates }: { initialDbTemplates?
                       <Link url={`/app/imports/runs/${encodeURIComponent(r.runId)}/review${location.search}`}>
                         Review
                       </Link>
+                    ) : null}
+                    {r.preparing ? (
+                      <Button
+                        tone="critical"
+                        disabled={!r.preparing?.runId}
+                        onClick={async () => {
+                          if (!r.preparing?.runId) return
+                          try {
+                            await fetch(`/api/importer/runs/${encodeURIComponent(r.preparing.runId)}/cancel`, {
+                              method: 'POST',
+                            })
+                            setToast('Cancel requested')
+                          } catch {
+                            setError('Cancel failed')
+                          }
+                        }}
+                      >
+                        Cancel
+                      </Button>
                     ) : null}
                     {/* Inline schedule toggle when eligible */}
                     {r.state === ImportState.APPROVED || r.state === ImportState.SCHEDULED ? (

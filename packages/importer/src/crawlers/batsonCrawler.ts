@@ -65,6 +65,9 @@ export async function crawlBatson(
     politeness?: Politeness
     supplierId?: string
     ignoreSavedSources?: boolean
+    // Safety valves: cap total processed requests and optionally restrict discovery
+    maxRequestsPerCrawl?: number
+    discoveryMode?: 'full' | 'products-only'
   },
 ) {
   const SUPPLIER = options?.supplierId || 'batson'
@@ -92,12 +95,15 @@ export async function crawlBatson(
   const maxConc = options?.politeness?.maxConcurrency || 1
   const rpm = options?.politeness?.rpm || 30
   const blockAssets = options?.politeness?.blockAssetsOnLists !== false
+  const maxRequestsPerCrawl = Math.max(10, Math.min(2000, options?.maxRequestsPerCrawl ?? 400))
+  const discoveryMode = options?.discoveryMode || 'full'
 
   let headerSkipCount = 0
   const headerSkips: Array<{ externalId: string; reason: string; url: string }> = []
   const crawler = new PlaywrightCrawler({
     maxRequestsPerMinute: rpm,
     maxConcurrency: maxConc,
+    maxRequestsPerCrawl,
     requestHandlerTimeoutSecs: 120,
     navigationTimeoutSecs: 60,
     launchContext: {
@@ -141,53 +147,58 @@ export async function crawlBatson(
         const sameDomain = productHrefs.map(h => new URL(h, ORIGIN).toString()).filter(isOnDomain)
         const unique = Array.from(new Set(sameDomain))
         if (unique.length) {
-          await Promise.all(
-            unique.map(u => upsertProductSource(SUPPLIER, u, 'discovered', undefined, options?.templateId)),
-          )
-          await enqueueLinks({ urls: unique })
+          const productOnly = unique.filter(u => /\/(detail|products|product)\//i.test(u))
+          const toRecord = discoveryMode === 'products-only' ? productOnly : unique
+          if (toRecord.length) {
+            await Promise.all(
+              toRecord.map(u => upsertProductSource(SUPPLIER, u, 'discovered', undefined, options?.templateId)),
+            )
+            await enqueueLinks({ urls: toRecord })
+          }
         }
       }
 
       // 4) Intercept XHR responses to discover additional /ecom/ links
-      page.on('response', async r => {
-        try {
-          const u = r.url()
-          if (!/purchaselist/i.test(u) || !r.ok()) return
-          const headers = r.headers() as Record<string, string>
-          const ct = headers['content-type'] || headers['Content-Type'] || ''
-          const body = await r.text()
-          const found: string[] = []
-          if (/json/i.test(ct)) {
-            try {
-              const j = JSON.parse(body)
-              const allVals: string[] = []
-              const walk = (v: unknown) => {
-                if (typeof v === 'string') allVals.push(v)
-                else if (Array.isArray(v)) v.forEach(walk)
-                else if (v && typeof v === 'object') Object.values(v as Record<string, unknown>).forEach(walk)
+      if (discoveryMode === 'full')
+        page.on('response', async r => {
+          try {
+            const u = r.url()
+            if (!/purchaselist/i.test(u) || !r.ok()) return
+            const headers = r.headers() as Record<string, string>
+            const ct = headers['content-type'] || headers['Content-Type'] || ''
+            const body = await r.text()
+            const found: string[] = []
+            if (/json/i.test(ct)) {
+              try {
+                const j = JSON.parse(body)
+                const allVals: string[] = []
+                const walk = (v: unknown) => {
+                  if (typeof v === 'string') allVals.push(v)
+                  else if (Array.isArray(v)) v.forEach(walk)
+                  else if (v && typeof v === 'object') Object.values(v as Record<string, unknown>).forEach(walk)
+                }
+                walk(j)
+                found.push(...allVals.filter(s => /\/ecom\//i.test(s)))
+              } catch {
+                /* ignore JSON parse errors */
               }
-              walk(j)
-              found.push(...allVals.filter(s => /\/ecom\//i.test(s)))
-            } catch {
-              /* ignore JSON parse errors */
+            } else {
+              const hrefs = Array.from(body.matchAll(/href=["']([^"']*\/ecom\/[^"]+)["']/gi)).map(m => m[1])
+              found.push(...hrefs)
             }
-          } else {
-            const hrefs = Array.from(body.matchAll(/href=["']([^"']*\/ecom\/[^"]+)["']/gi)).map(m => m[1])
-            found.push(...hrefs)
+            const urls = Array.from(new Set(found))
+              .map(h => new URL(h, ORIGIN).toString())
+              .filter(isOnDomain)
+            if (urls.length) {
+              await Promise.all(
+                urls.map(u => upsertProductSource(SUPPLIER, u, 'discovered', undefined, options?.templateId)),
+              )
+              await enqueueLinks({ urls })
+            }
+          } catch {
+            /* ignore response parsing errors */
           }
-          const urls = Array.from(new Set(found))
-            .map(h => new URL(h, ORIGIN).toString())
-            .filter(isOnDomain)
-          if (urls.length) {
-            await Promise.all(
-              urls.map(u => upsertProductSource(SUPPLIER, u, 'discovered', undefined, options?.templateId)),
-            )
-            await enqueueLinks({ urls })
-          }
-        } catch {
-          /* ignore response parsing errors */
-        }
-      })
+        })
 
       // 5) Anchor discovery on page (products + pagination)
       const allAnchors: string[] =
@@ -198,13 +209,36 @@ export async function crawlBatson(
       const sameDomainAnchors = allAnchors.map(h => new URL(h, ORIGIN).toString()).filter(isOnDomain)
 
       const isCollection = /\/collections\//i.test(currentUrl)
-      const productAnchors: string[] = sameDomainAnchors.filter(h => /\/(products|product|ecom|rod-blanks)\//i.test(h))
+      let productAnchors: string[] = sameDomainAnchors.filter(h => /\/(products|product|ecom|rod-blanks)\//i.test(h))
+      // Also discover links embedded via data-product-url attributes on tiles/cards
+      try {
+        const dataUrls: string[] =
+          (await page
+            .locator('[data-product-url]')
+            .evaluateAll(ns => ns.map(n => (n as HTMLElement).getAttribute('data-product-url') || '').filter(Boolean))
+            .catch(() => [])) || []
+        const absData = dataUrls
+          .map(h => {
+            try {
+              return new URL(h, ORIGIN).toString()
+            } catch {
+              return ''
+            }
+          })
+          .filter(u => u && isOnDomain(u))
+        if (absData.length) productAnchors = Array.from(new Set([...productAnchors, ...absData]))
+      } catch {
+        /* ignore data-product-url errors */
+      }
       // If Shopify products path exists but list heuristics are empty, include them
-      const pageAnchors: string[] = [
-        ...sameDomainAnchors.filter(
-          h => (/\/collections\//i.test(h) && /page=/.test(h)) || /\/ecom\/purchaselistsearch/i.test(h),
-        ),
-      ]
+      const pageAnchors: string[] =
+        discoveryMode === 'full'
+          ? [
+              ...sameDomainAnchors.filter(
+                h => (/\/collections\//i.test(h) && /page=/.test(h)) || /\/ecom\/purchaselistsearch/i.test(h),
+              ),
+            ]
+          : []
 
       log.debug(`batson discovery @ ${currentUrl}`, { products: productAnchors.length, pages: pageAnchors.length })
 
@@ -224,12 +258,14 @@ export async function crawlBatson(
         )
         await enqueueLinks({ urls: uniqueProducts })
       }
-      const uniquePages = Array.from(new Set(pageAnchors))
-      if (uniquePages.length) {
-        await Promise.all(
-          uniquePages.map(u => upsertProductSource(SUPPLIER, u, 'discovered', undefined, options?.templateId)),
-        )
-        await enqueueLinks({ urls: uniquePages })
+      if (discoveryMode === 'full') {
+        const uniquePages = Array.from(new Set(pageAnchors))
+        if (uniquePages.length) {
+          await Promise.all(
+            uniquePages.map(u => upsertProductSource(SUPPLIER, u, 'discovered', undefined, options?.templateId)),
+          )
+          await enqueueLinks({ urls: uniquePages })
+        }
       }
 
       // 7) Treat product-detail pages (including /ecom/ detail) as detail and stage
@@ -273,16 +309,12 @@ export async function crawlBatson(
 
       const rec = await extractProduct(page, { templateKey: options?.templateKey })
       if (rec?.externalId) {
-        // Skip staging for obvious series/listing pages (e.g., /rod-blanks/<series>) to avoid a spurious aggregate row
+        // Only skip when extractor signals an actual header (series aggregate). Do not rely solely on slug/path.
         try {
-          const u = new URL(currentUrl)
-          const isSeriesPath = /\/rod-blanks\//i.test(u.pathname) && !/\/(products|product|ecom)\//i.test(u.pathname)
-          const lastSeg = u.pathname.split('/').filter(Boolean).pop() || ''
-          const slugLike = lastSeg.toUpperCase().replace(/[^A-Z0-9-]+/g, '')
           const earlyHeader = rec.isHeader
-          if ((isSeriesPath && rec.externalId === slugLike) || earlyHeader) {
+          if (earlyHeader) {
             headerSkipCount++
-            const reason = rec.headerReason || (isSeriesPath ? 'series-path-slug' : 'header-heuristic')
+            const reason = rec.headerReason || 'header-heuristic'
             headerSkips.push({ externalId: rec.externalId, reason, url: currentUrl })
             log.info(`skip header ${rec.externalId} @ ${currentUrl} reason=${reason}`)
           } else if (!seen.has(rec.externalId)) {

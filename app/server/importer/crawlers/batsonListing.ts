@@ -42,14 +42,14 @@ export function crawlBatsonRodBlanksListing(html: string, base: string): string[
     urls.add(toAbs(href, base))
   })
 
-  // Regex fallback: scan raw HTML for data-product-url or href with /rod-blanks/
+  // Regex fallback: scan raw HTML for data-product-url or href with /rod-blanks/ or /ecom/
   try {
     const reDbl =
-      /\b(?:href|data-product-url)\s*=\s*"((?:\/rod-blanks\/|\/blanks-by-series\/|\/collections\/[^"']*blanks[^"']*)[^"#?<>]*)"/gi
+      /\b(?:href|data-product-url)\s*=\s*"((?:\/rod-blanks\/|\/blanks-by-series\/|\/ecom\/|\/collections\/[^"']*blanks[^"']*)[^"#?<>]*)"/gi
     let m: RegExpExecArray | null
     while ((m = reDbl.exec(html))) urls.add(toAbs(m[1], base))
     const reSgl =
-      /\b(?:href|data-product-url)\s*=\s*'((?:\/rod-blanks\/|\/blanks-by-series\/|\/collections\/[^'']*blanks[^'']*)[^'#?<>]*)'/gi
+      /\b(?:href|data-product-url)\s*=\s*'((?:\/rod-blanks\/|\/blanks-by-series\/|\/ecom\/|\/collections\/[^'']*blanks[^'']*)[^'#?<>]*)'/gi
     while ((m = reSgl.exec(html))) urls.add(toAbs(m[1], base))
   } catch {
     /* ignore */
@@ -69,7 +69,7 @@ export function crawlBatsonRodBlanksListing(html: string, base: string): string[
       }
     })
     // Keep likely series pages only; allow collections with blanks or known series markers
-    .filter(u => /\/(rod-blanks|blanks-by-series|collections\/.*(blank|rod|rx|immortal|revelation))/i.test(u))
+    .filter(u => /\/(rod-blanks|blanks-by-series|ecom|collections\/.*(blank|rod|rx|immortal|revelation))/i.test(u))
     .filter(u => !/\/(rod-blanks|blanks-by-series)\/?$/i.test(u))
 
   // Keep unique; no max cap (caller/UI can paginate if needed)

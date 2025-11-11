@@ -2,6 +2,7 @@
   "name": "shopify-remix-app-template",
   "private": true,
   "scripts": {
+    "diagnostics:explain:productdb": "node scripts/diagnostics/explain-productdb.mjs",
     "build": "remix vite:build",
     "dev": "shopify app dev --config development",
     "config:link": "shopify app config link",
@@ -9,6 +10,7 @@
     "deploy": "shopify app deploy",
     "deploy:shopify:prod": "cp shopify.app.production.toml shopify.app.toml && shopify app deploy",
     "deploy:shopify:staging": "cp shopify.app.staging.toml shopify.app.toml && shopify app deploy",
+    "deploy:fly:prod": "fly deploy --config fly.production.toml --now",
     "release:prod": "npm run typecheck && npm run build && npm run deploy:shopify:prod && fly deploy --config fly.production.toml --now",
     "release:staging": "npm run typecheck && npm run build && npm run deploy:shopify:staging && fly deploy --config fly.staging.toml --now",
     "config:use": "shopify app config use",

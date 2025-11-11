@@ -1,31 +1,20 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
-import { requireHqShopOr404 } from '../lib/access.server'
+import { guardSmokeRoute } from '../lib/smokes.server'
 import { prisma } from '../db.server'
-import { smokesEnabled, extractSmokeToken } from '../lib/smokes.server'
 
-// Return a lightweight status snapshot for polling.
-// GET: /api/importer/runs/:runId/status
-// { status, counts, preflight, startedAt, finishedAt, progress, publishProgress }
+// GET: /resources/smoke/importer/status/:runId
+// Returns: { runId, status, templateId, progress, counts, preflight, publishProgress, startedAt, finishedAt, productDb }
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  // Allow smoke-token access when smokes are enabled; otherwise require HQ shop
-  let bypassHq = false
-  try {
-    if (smokesEnabled()) {
-      const tok = extractSmokeToken(request)
-      const expected = process.env.SMOKE_TOKEN || 'smoke-ok'
-      bypassHq = !!tok && tok === expected
-    }
-  } catch {
-    bypassHq = false
-  }
-  if (!bypassHq) await requireHqShopOr404(request)
+  // Enforce smoke token + enabled flags; this route intentionally skips HQ auth for CI-style checks
+  guardSmokeRoute({ request } as LoaderFunctionArgs)
+
   const runId = String(params.runId || '')
   if (!runId) return json({ error: 'Missing run id' }, { status: 400 })
   const run = await prisma.importRun.findUnique({ where: { id: runId } })
   if (!run) return json({ error: 'Not found' }, { status: 404 })
   const supplierId = String(run.supplierId || '')
-  // Best-effort map run -> templateId
+
   let templateId: string | null = null
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,20 +27,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     /* ignore */
   }
 
+  // Handle TEXT storage: parse JSON if summary/progress are strings
+  const rawSummary = typeof run.summary === 'string' ? safeParse(run.summary) : (run.summary as unknown)
   const summary =
-    (run.summary as unknown as {
+    (rawSummary as {
       counts?: Record<string, number>
       preflight?: unknown
       publishProgress?: { processed?: number; target?: number; startedAt?: string; updatedAt?: string } | null
     }) || {}
-  // Derive simple percent if progress missing: approximate using staged vs expectedItems if available
+
+  // Normalize progress shape
+  const rawProgress =
+    typeof (run as unknown as { progress?: unknown }).progress === 'string'
+      ? safeParse((run as unknown as { progress?: unknown }).progress as string)
+      : (run as unknown as { progress?: unknown }).progress
   let progress =
-    ((run as unknown as { progress?: unknown }).progress as {
-      phase?: string
-      percent?: number
-      etaSeconds?: number
-      details?: unknown
-    } | null) || null
+    (rawProgress as { phase?: string; percent?: number; etaSeconds?: number; details?: unknown } | null) || null
   if (!progress) {
     try {
       const counts = summary.counts || {}
@@ -63,7 +54,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       /* ignore */
     }
   }
-  // Extract publish progress if available
+
   const publishProgress = (() => {
     try {
       const pp = (
@@ -80,27 +71,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return null
     }
   })()
-  // Optional product_db counts for quick parity verification when canonical tables exist.
+
+  // Optional product_db counts
   let productDb: { products?: number; versions?: number } | null = null
   try {
     const productTable = await prisma.$queryRawUnsafe<{ name: string }[]>(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='Product'",
     )
     if (productTable.length) {
-      // Count products/versions by supplier slug match (run.supplierId holds legacy slug)
-      const products = await prisma.$queryRawUnsafe<Array<{ c: number }>>(
+      const products = await prisma.$queryRawUnsafe<Array<{ c: unknown }>>(
         `SELECT COUNT(1) AS c FROM Product p JOIN Supplier s ON s.id = p.supplierId WHERE s.slug = ?`,
         supplierId,
       )
-      const versions = await prisma.$queryRawUnsafe<Array<{ c: number }>>(
+      const versions = await prisma.$queryRawUnsafe<Array<{ c: unknown }>>(
         `SELECT COUNT(1) AS c FROM ProductVersion v JOIN Product p ON p.id = v.productId JOIN Supplier s ON s.id = p.supplierId WHERE s.slug = ?`,
         supplierId,
       )
-      productDb = { products: products?.[0]?.c || 0, versions: versions?.[0]?.c || 0 }
+      const toNum = (v: unknown) => (typeof v === 'bigint' ? Number(v) : typeof v === 'number' ? v : Number(v) || 0)
+      productDb = { products: toNum(products?.[0]?.c), versions: toNum(versions?.[0]?.c) }
     }
   } catch {
     /* ignore */
   }
+
   return json({
     runId: run.id,
     status: run.status,
@@ -115,6 +108,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   })
 }
 
-export default function ImportRunStatusApi() {
-  return null
+// No default export to keep this as a pure resource route that returns JSON
+function safeParse(str: string): unknown {
+  try {
+    return JSON.parse(str)
+  } catch {
+    return {}
+  }
 }

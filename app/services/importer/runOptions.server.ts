@@ -101,6 +101,7 @@ export async function startImportFromOptions(
   runId?: string,
   admin?: AdminClient,
 ): Promise<string> {
+  const PRODUCT_DB_EXCLUSIVE = process.env.PRODUCT_DB_EXCLUSIVE === '1'
   // Lightweight progress updater that tolerates missing column before migration
   async function setProgress(
     id: string,
@@ -260,6 +261,235 @@ export async function startImportFromOptions(
       }
     }
   }
+  // Direct detail-page staging: visit product-detail seeds and stage via extractor without the full crawler
+  async function stageFromDetailPages(seedUrls: string[]) {
+    const { upsertStaging } = await import('../../../packages/importer/src/staging/upsert')
+    const { linkExternalIdForSource } = await import('../../../packages/importer/src/seeds/sources')
+    const { extractJsonLd, mapProductFromJsonLd } = await import('../../../packages/importer/src/extractors/jsonld')
+    const { slugFromPath, hash: hashUrl } = await import('../../../src/importer/extract/fallbacks')
+    const { buildBatsonTitle } = await import('../../../packages/importer/src/lib/titleBuild/batson')
+
+    const isDetailUrl = (url: string): boolean => {
+      try {
+        const u = new URL(url)
+        const p = u.pathname.toLowerCase()
+        return (
+          /\/(products|product)\//.test(p) || /\/ecom\//.test(p) || (/\/rod-blanks\//.test(p) && p !== '/rod-blanks')
+        )
+      } catch {
+        return false
+      }
+    }
+
+    async function stageFromStatic(url: string): Promise<boolean> {
+      // Fetch static HTML and extract via JSON-LD; fallback to slug/hash
+      const headers: Record<string, string> = {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      }
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 15000)
+      let html = ''
+      try {
+        const r = await fetch(url, { headers, signal: ctrl.signal })
+        if (!r.ok) return false
+        html = await r.text()
+      } catch {
+        return false
+      } finally {
+        clearTimeout(timer)
+      }
+      try {
+        const jldAll = extractJsonLd(html)
+        const jld = mapProductFromJsonLd(jldAll)
+        const currentUrl = url
+        let externalId = (jld?.externalId as string | undefined)?.toString()?.trim() || ''
+        if (!externalId) externalId = slugFromPath(currentUrl) || ''
+        if (!externalId) externalId = hashUrl(currentUrl)
+        externalId = externalId.toUpperCase().replace(/[^A-Z0-9-]+/g, '')
+        if (!externalId) return false
+        // jld may not have description/images fields (mapProductFromJsonLd shape); cast defensively
+        const jldObj = jld as Record<string, unknown> | null
+        const jldRawSpecs = (jldObj?.rawSpecs as Record<string, unknown>) || {}
+        const title = buildBatsonTitle({ title: (jldObj?.title as string) || externalId, rawSpecs: jldRawSpecs })
+        const images: string[] = Array.from(
+          new Set(((jldObj?.images as string[] | undefined) || []).filter(i => typeof i === 'string' && i.trim())),
+        ).filter(Boolean)
+        const toStage = {
+          externalId,
+          title,
+          partType: 'blank',
+          description: (jldObj?.description as string) || '',
+          images,
+          rawSpecs: jldRawSpecs,
+        }
+        await upsertStaging(supplierId, { ...toStage, templateId: templateId || undefined })
+        await linkExternalIdForSource(supplierId, url, externalId, templateId || undefined)
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    // Try Playwright path first; if Chromium unavailable, fall back to static extraction
+    let staged = 0
+    let browser: import('playwright').Browser | null = null
+    let context: import('playwright').BrowserContext | null = null
+    try {
+      const { chromium } = await import('playwright')
+      const { extractProduct } = await import('../../../packages/importer/src/extractors/batson.parse')
+      browser = await chromium.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      })
+      context = await browser.newContext({
+        userAgent:
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+        viewport: { width: 1280, height: 800 },
+      })
+      for (const url of seedUrls) {
+        if (!isDetailUrl(url)) continue
+        const page = await context.newPage()
+        try {
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 })
+          await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {})
+          const rec = await extractProduct(page, { templateKey: 'batson.product.v2' })
+          if (rec && rec.externalId) {
+            const allowHeaderByPath = /\/(products|product|ecom)\//i.test(url)
+            const isHeader = (rec as { isHeader?: boolean }).isHeader
+            if (!isHeader || allowHeaderByPath) {
+              const toStage = {
+                externalId: rec.externalId,
+                title: rec.title,
+                partType: rec.partType,
+                description: rec.description || '',
+                images: rec.images || [],
+                rawSpecs: rec.rawSpecs || {},
+              }
+              await upsertStaging(supplierId, { ...toStage, templateId: templateId || undefined })
+              await linkExternalIdForSource(supplierId, url, rec.externalId, templateId || undefined)
+              staged++
+              continue
+            }
+          }
+          // Fallback to static if extractor returned null/header
+          if (await stageFromStatic(url)) staged++
+        } catch {
+          if (await stageFromStatic(url)) staged++
+        } finally {
+          await page.close().catch(() => {})
+          await new Promise(res => setTimeout(res, 200))
+        }
+      }
+    } catch {
+      // Chromium path unavailable; static-only pass
+      for (const url of seedUrls) {
+        if (!isDetailUrl(url)) continue
+        if (await stageFromStatic(url)) staged++
+        await new Promise(res => setTimeout(res, 100))
+      }
+    } finally {
+      if (context) await context.close().catch(() => {})
+      if (browser) await browser.close().catch(() => {})
+    }
+    return staged
+  }
+  // Expand listing pages into series/detail URLs using server-side parser + headless fallback
+  async function expandSeedsFromListingIfNeeded(seedsIn: string[]): Promise<string[]> {
+    const looksLikeListing = (u: string) => /\/rod-blanks\/?$/i.test(u) || /\/collections\/blanks\/?$/i.test(u)
+    if (!seedsIn.some(looksLikeListing)) return seedsIn
+    const { crawlBatsonRodBlanksListing } = await import('../../server/importer/crawlers/batsonListing')
+    const { renderHeadlessHtml } = await import('../../server/headless/renderHeadlessHtml')
+    const headers: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    }
+    async function fetchStatic(url: string): Promise<string | null> {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 15_000)
+      try {
+        const r = await fetch(url, { headers, signal: ctrl.signal })
+        if (!r.ok) return null
+        return await r.text()
+      } catch {
+        return null
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+    const out = new Set<string>()
+    for (const s0 of seedsIn) {
+      const base = (() => {
+        try {
+          const u = new URL(s0)
+          return `${u.protocol}//${u.hostname}`
+        } catch {
+          return 'https://batsonenterprises.com'
+        }
+      })()
+      // Normalize listing URL with view=all & page param
+      const u0 = (() => {
+        try {
+          const u = new URL(s0)
+          u.searchParams.set('view', 'all')
+          if (!u.searchParams.get('page')) u.searchParams.set('page', '1')
+          return u
+        } catch {
+          return null
+        }
+      })()
+      if (!u0) continue
+      let lastPage = 1
+      for (let page = 1; page <= Math.min(4, lastPage); page++) {
+        try {
+          u0.searchParams.set('page', String(page))
+        } catch {
+          /* ignore */
+        }
+        const s = u0.toString()
+        // Try static first
+        let html: string | null = await fetchStatic(s)
+        if (!html) {
+          try {
+            html = await renderHeadlessHtml(s, { timeoutMs: 20_000 })
+          } catch {
+            html = null
+          }
+        }
+        if (!html) continue
+        // Detect LastPageNumber if present
+        try {
+          const $ = (await import('cheerio')).load(html)
+          const lastVal = $('input#LastPageNumber, input[name="LastPageNumber"]').attr('value') || ''
+          const n = Number(lastVal)
+          if (Number.isFinite(n) && n > 0) lastPage = n
+        } catch {
+          /* ignore */
+        }
+        const urls = crawlBatsonRodBlanksListing(html, base)
+        for (const u of urls) {
+          try {
+            const x = new URL(u)
+            // Include every rod-blanks detail/series page (exclude only root listing)
+            if (/^\/rod-blanks\//i.test(x.pathname) && !/^\/rod-blanks\/?$/i.test(x.pathname)) out.add(x.toString())
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+    const expanded = Array.from(out)
+    // If expansion yielded something, return it; else return original seeds
+    return expanded.length ? expanded : seedsIn
+  }
   // Record manual URLs as sources
   for (const url of options.manualUrls) {
     await upsertProductSource(supplierId, url, 'manual', options.notes, templateId || undefined)
@@ -288,15 +518,86 @@ export async function startImportFromOptions(
     if (runId)
       await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 30, details: { seeds: seeds.length } })
     await throwIfCancelled(runId)
-    await stageFromSeriesParser(seeds)
-    const crawlRes = await crawlBatson(seeds, {
-      templateKey: options.templateKey,
-      templateId: templateId || undefined,
-      politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
-      supplierId,
-      // Do not include previously saved seeds for series-targeted runs to avoid cross-series noise
-      ignoreSavedSources: true,
-    })
+    let seriesSeeds = await expandSeedsFromListingIfNeeded(seeds)
+    // If expansion produced nothing, fall back to original seeds (likely already detail pages)
+    if (!seriesSeeds.length) seriesSeeds = seeds
+    // Diagnostic logging for seed expansion
+    try {
+      const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'
+      await prisma.importLog.create({
+        data: {
+          templateId: tplForLog,
+          runId: runId!,
+          type: 'crawl:series-expand',
+          payload: { seriesSeedsCount: seriesSeeds.length, sample: seriesSeeds.slice(0, 25) },
+        },
+      })
+    } catch {
+      /* ignore logging errors */
+    }
+    if (runId)
+      await setProgress(runId, {
+        status: 'crawling',
+        phase: 'series-expand',
+        percent: 35,
+        details: { seriesSeeds: seriesSeeds.length },
+      })
+    // Pre-pass: stage directly from detail pages (fast extractor), then proceed to series parser
+    let prepassStaged = 0
+    try {
+      prepassStaged = await stageFromDetailPages(seriesSeeds)
+      if (runId) await setProgress(runId, { status: 'crawling', phase: 'direct-detail', percent: 40 })
+      try {
+        const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'
+        await prisma.importLog.create({
+          data: { templateId: tplForLog, runId: runId!, type: 'stage:direct', payload: { staged: prepassStaged } },
+        })
+      } catch {
+        /* ignore */
+      }
+    } catch {
+      /* ignore pre-pass errors */
+    }
+    await stageFromSeriesParser(seriesSeeds)
+    if (runId) await setProgress(runId, { status: 'crawling', phase: 'series-parse', percent: 45 })
+    let crawlRes: Awaited<ReturnType<typeof crawlBatson>> | null = null
+    try {
+      crawlRes = await crawlBatson(seriesSeeds, {
+        templateKey: options.templateKey,
+        templateId: templateId || undefined,
+        politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
+        // When using the series parser, run the crawler in a constrained backfill mode.
+        maxRequestsPerCrawl: Math.max(50, seriesSeeds.length * 10),
+        discoveryMode: 'products-only',
+        supplierId,
+        // Do not include previously saved seeds for series-targeted runs to avoid cross-series noise
+        ignoreSavedSources: true,
+      })
+    } catch (e) {
+      // Log crawl failure with stack/message
+      try {
+        const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'
+        await prisma.importLog.create({
+          data: {
+            templateId: tplForLog,
+            runId: runId!,
+            type: 'crawl:error',
+            payload: { message: (e as Error)?.message || String(e), stack: (e as Error)?.stack },
+          },
+        })
+      } catch {
+        /* ignore logging errors */
+      }
+      if (runId) {
+        try {
+          await prisma.importRun.update({ where: { id: runId }, data: { status: 'failed' } })
+        } catch {
+          /* ignore */
+        }
+      }
+      throw e
+    }
+    if (runId) await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 55 })
     try {
       if (runId && crawlRes) {
         const run = await prisma.importRun.findUnique({ where: { id: runId } })
@@ -322,13 +623,41 @@ export async function startImportFromOptions(
     if (runId)
       await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 30, details: { seeds: seeds.length } })
     await throwIfCancelled(runId)
-    const crawlRes = await crawlBatson(seeds, {
-      templateKey: options.templateKey,
-      templateId: templateId || undefined,
-      // Conservative defaults for Fly Machines with headless Chromium
-      politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
-      supplierId,
-    })
+    let crawlRes: Awaited<ReturnType<typeof crawlBatson>> | null = null
+    try {
+      crawlRes = await crawlBatson(seeds, {
+        templateKey: options.templateKey,
+        templateId: templateId || undefined,
+        // Conservative defaults for Fly Machines with headless Chromium
+        politeness: { jitterMs: [300, 800], maxConcurrency: 1, rpm: 30, blockAssetsOnLists: true },
+        supplierId,
+        // If manual seeds are provided, ignore previously saved sources to avoid reusing stale URLs
+        ignoreSavedSources: options.manualUrls && options.manualUrls.length > 0 ? true : false,
+      })
+    } catch (e) {
+      try {
+        const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'
+        await prisma.importLog.create({
+          data: {
+            templateId: tplForLog,
+            runId: runId!,
+            type: 'crawl:error',
+            payload: { message: (e as Error)?.message || String(e), stack: (e as Error)?.stack },
+          },
+        })
+      } catch {
+        /* ignore */
+      }
+      if (runId) {
+        try {
+          await prisma.importRun.update({ where: { id: runId }, data: { status: 'failed' } })
+        } catch {
+          /* ignore */
+        }
+      }
+      throw e
+    }
+    if (runId) await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 55 })
     try {
       if (runId && crawlRes) {
         const run = await prisma.importRun.findUnique({ where: { id: runId } })
@@ -355,7 +684,8 @@ export async function startImportFromOptions(
   await throwIfCancelled(runId)
   // Generate diffs
   // BEGIN product_db wiring (phase 1): write canonical Product + ProductVersion rows from current staging scope
-  if (process.env.PRODUCT_DB_ENABLED === '1') {
+  // Skip legacy PartStaging -> Product bulk copy in exclusive mode; canonical writes should occur upstream.
+  if (process.env.PRODUCT_DB_ENABLED === '1' && !PRODUCT_DB_EXCLUSIVE) {
     try {
       const stagingRows = await prisma.partStaging.findMany({ where: partStagingWhere(supplierId, templateId) })
       for (const r of stagingRows) {
@@ -381,6 +711,7 @@ export async function startImportFromOptions(
           if (Math.random() < 0.02) console.warn('[product_db_writer] upsert failed (sampled)', msg)
         }
       }
+      if (runId) await setProgress(runId, { status: 'staging', phase: 'canonical-write', percent: 70 })
     } catch (e) {
       console.warn('[product_db_writer] bulk upsert staging -> product_db failed (non-fatal)', (e as Error)?.message)
     }
@@ -509,7 +840,7 @@ export async function startImportFromOptions(
     await setProgress(newRunId, { status: 'diffing', phase: 'diff', percent: 80 })
     await throwIfCancelled(newRunId)
     // BEGIN product_db wiring (phase 1) for new run path
-    if (process.env.PRODUCT_DB_ENABLED === '1') {
+    if (process.env.PRODUCT_DB_ENABLED === '1' && !PRODUCT_DB_EXCLUSIVE) {
       try {
         const stagingRows = await prisma.partStaging.findMany({ where: partStagingWhere(supplierId, templateId) })
         for (const r of stagingRows) {
@@ -652,12 +983,33 @@ async function generateCounts(supplierId: string, templateId?: string): Promise<
     priceWh?: unknown
   }> = []
   staging = (await prisma.partStaging.findMany({ where: partStagingWhere(supplierId, templateId) })) as typeof staging
-  const partsTableExists = await prisma.$queryRawUnsafe<{ name: string }[]>(
-    `SELECT name FROM sqlite_master WHERE type='table' AND name='Part'`,
-  )
-  const existing = partsTableExists.length
-    ? await prisma.$queryRawUnsafe<Record<string, unknown>[]>(`SELECT * FROM Part WHERE supplierId = ?`, supplierId)
-    : []
+  // Canonical diff path: when PRODUCT_DB_ENABLED, prefer Product + ProductVersion content hash instead of legacy Part
+  let existing: Record<string, unknown>[] = []
+  if (process.env.PRODUCT_DB_ENABLED === '1') {
+    try {
+      const productExists = await prisma.$queryRawUnsafe<{ name: string }[]>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='Product'",
+      )
+      if (productExists.length) {
+        existing = (await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+          `SELECT p.id as id, p.sku as externalId, p.title as title, pv.contentHash as hashContent
+           FROM Product p LEFT JOIN ProductVersion pv ON pv.id = p.latestVersionId
+           WHERE p.supplierId = ?`,
+          supplierId,
+        )) as Record<string, unknown>[]
+      }
+    } catch {
+      existing = []
+    }
+  }
+  if (existing.length === 0) {
+    const partsTableExists = await prisma.$queryRawUnsafe<{ name: string }[]>(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='Part'`,
+    )
+    existing = partsTableExists.length
+      ? await prisma.$queryRawUnsafe<Record<string, unknown>[]>(`SELECT * FROM Part WHERE supplierId = ?`, supplierId)
+      : []
+  }
   const existingByExt = new Map(existing.map(p => [String((p as Record<string, unknown>)['externalId'] || ''), p]))
   const counts: Record<string, number> = {}
   for (const s of staging) {
@@ -731,12 +1083,33 @@ async function createDiffRowsForRun(
   staging = (await prisma.partStaging.findMany({
     where: partStagingWhere(supplierId, ctx?.templateId),
   })) as typeof staging
-  const partsTableExists = await prisma.$queryRawUnsafe<{ name: string }[]>(
-    `SELECT name FROM sqlite_master WHERE type='table' AND name='Part'`,
-  )
-  const existing = partsTableExists.length
-    ? await prisma.$queryRawUnsafe<Record<string, unknown>[]>(`SELECT * FROM Part WHERE supplierId = ?`, supplierId)
-    : []
+  // Prefer canonical Product for existing snapshot when flag enabled, else fall back to legacy Part
+  let existing: Record<string, unknown>[] = []
+  if (process.env.PRODUCT_DB_ENABLED === '1') {
+    try {
+      const productExists = await prisma.$queryRawUnsafe<{ name: string }[]>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='Product'",
+      )
+      if (productExists.length) {
+        existing = (await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+          `SELECT p.id as id, p.sku as externalId, p.title as title, pv.contentHash as hashContent, pv.id as versionId
+           FROM Product p LEFT JOIN ProductVersion pv ON pv.id = p.latestVersionId
+           WHERE p.supplierId = ?`,
+          supplierId,
+        )) as Record<string, unknown>[]
+      }
+    } catch {
+      existing = []
+    }
+  }
+  if (existing.length === 0) {
+    const partsTableExists = await prisma.$queryRawUnsafe<{ name: string }[]>(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='Part'`,
+    )
+    existing = partsTableExists.length
+      ? await prisma.$queryRawUnsafe<Record<string, unknown>[]>(`SELECT * FROM Part WHERE supplierId = ?`, supplierId)
+      : []
+  }
   const existingByExt = new Map(existing.map(p => [String((p as Record<string, unknown>)['externalId'] || ''), p]))
   const rows: {
     externalId: string

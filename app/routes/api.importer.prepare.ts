@@ -373,13 +373,22 @@ export async function action({ request }: ActionFunctionArgs) {
             } catch {
               /* ignore */
             }
+            // Also clear ProductSource rows scoped to this template/supplier to avoid reusing stale seeds
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const whereScope: any = templateId ? { supplierId, templateId } : { supplierId }
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              await (prisma as any).productSource.deleteMany({ where: whereScope })
+            } catch {
+              /* ignore */
+            }
             try {
               await prisma.importLog.create({
                 data: {
                   templateId,
                   runId: run.id,
                   type: seedChanged ? 'prepare:autowipe:seedChanged' : 'prepare:autowipe:forced',
-                  payload: { deleted: before, reason: seedChanged ? 'seedChanged' : 'forced' },
+                  payload: { deleted: before, reason: seedChanged ? 'seedChanged' : 'forced', clearedSources: true },
                 },
               })
             } catch {

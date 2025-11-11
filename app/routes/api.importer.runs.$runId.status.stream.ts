@@ -1,7 +1,9 @@
 import type { LoaderFunctionArgs } from '@remix-run/node'
-import { prisma } from '../db.server'
 import { requireHqShopOr404 } from '../lib/access.server'
+import { prisma } from '../db.server'
 
+// Server-Sent Events stream for a single run's status updates
+// GET: /api/importer/runs/:runId/status/stream
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireHqShopOr404(request)
   const runId = String(params.runId || '')
@@ -35,7 +37,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           } catch {
             /* ignore */
           }
-          const summary = (run.summary as unknown as { counts?: Record<string, number>; preflight?: unknown }) || {}
+          const summary =
+            (run.summary as unknown as {
+              counts?: Record<string, number>
+              preflight?: unknown
+              publishProgress?: { processed?: number; target?: number; startedAt?: string; updatedAt?: string } | null
+            }) || {}
+          // Best-effort compute publish percent
+          let publishProgress: null | (typeof summary.publishProgress & { percent?: number }) = null
+          try {
+            if (summary.publishProgress) {
+              const processed =
+                typeof summary.publishProgress.processed === 'number' ? summary.publishProgress.processed : 0
+              const target = typeof summary.publishProgress.target === 'number' ? summary.publishProgress.target : 0
+              const percent =
+                target > 0 ? Math.max(0, Math.min(100, Math.round((processed / target) * 100))) : undefined
+              publishProgress = { ...summary.publishProgress, percent }
+            }
+          } catch {
+            publishProgress = null
+          }
           const payload = {
             runId: run.id,
             status: run.status,
@@ -44,6 +65,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             progress: ((run as unknown as { progress?: unknown }).progress as unknown) || null,
             counts: summary.counts || {},
             preflight: summary.preflight || null,
+            publishProgress,
             startedAt: run.startedAt,
             finishedAt: run.finishedAt || null,
           }

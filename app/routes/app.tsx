@@ -1,4 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from '@remix-run/node'
+import { redirect } from '@remix-run/node'
 import { Link, Outlet, useLoaderData, useRouteError } from '@remix-run/react'
 import { boundary } from '@shopify/shopify-app-remix/server'
 import { AppProvider } from '@shopify/shopify-app-remix/react'
@@ -7,6 +8,12 @@ import polarisStyles from '@shopify/polaris/build/esm/styles.css?url'
 import { useEffect, useState, type PropsWithChildren } from 'react'
 
 import { authenticate } from '../shopify.server'
+import { isProductDbExclusive } from '../lib/flags.server'
+function isLegacyImporterPath(pathname: string): boolean {
+  return (
+    pathname.startsWith('/app/imports') || pathname.startsWith('/app/admin/import') || pathname.startsWith('/hq/import')
+  )
+}
 import AdminLayout from '../components/AdminLayout'
 
 export const links = () => [{ rel: 'stylesheet', href: polarisStyles }]
@@ -14,13 +21,30 @@ export const links = () => [{ rel: 'stylesheet', href: polarisStyles }]
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     await authenticate.admin(request)
-    return { apiKey: process.env.SHOPIFY_API_KEY ?? '' }
+    // Centralized gating: if exclusive, steer legacy importer routes to canonical products
+    const u = new URL(request.url)
+    const exclusive = isProductDbExclusive()
+    if (exclusive && isLegacyImporterPath(u.pathname)) {
+      const dest = new URL('/app/products', u.origin)
+      dest.searchParams.set('legacy', 'disabled')
+      throw redirect(dest.pathname + dest.search)
+    }
+    return { apiKey: process.env.SHOPIFY_API_KEY ?? '', exclusive }
   } catch (err) {
     // Allow HQ override in local/e2e runs without a full Shopify session
     try {
       const { isHqShop } = await import('../lib/access.server')
       const allow = process.env.ALLOW_HQ_OVERRIDE === '1' || (await isHqShop(request))
-      if (allow) return { apiKey: process.env.SHOPIFY_API_KEY ?? '' }
+      if (allow) {
+        const u = new URL(request.url)
+        const exclusive = isProductDbExclusive()
+        if (exclusive && isLegacyImporterPath(u.pathname)) {
+          const dest = new URL('/app/products', u.origin)
+          dest.searchParams.set('legacy', 'disabled')
+          throw redirect(dest.pathname + dest.search)
+        }
+        return { apiKey: process.env.SHOPIFY_API_KEY ?? '', exclusive }
+      }
     } catch {
       /* ignore */
     }
@@ -29,7 +53,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 }
 
 export default function App() {
-  const { apiKey } = useLoaderData<typeof loader>()
+  const { apiKey, exclusive } = useLoaderData<typeof loader>() as { apiKey: string; exclusive?: boolean }
 
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
@@ -45,7 +69,7 @@ export default function App() {
         <Link to="products">Products</Link>
         {/** Import links updated for importer-v2-3 */}
         {/* <!-- BEGIN RBP GENERATED: importer-v2-3 --> */}
-        <Link to="imports">Imports</Link>
+        {!exclusive ? <Link to="imports">Imports</Link> : null}
         {/* <!-- END RBP GENERATED: importer-v2-3 --> */}
       </SafeNavMenu>
       {/* END RBP GENERATED: admin-hq-importer-ux-v2 */}

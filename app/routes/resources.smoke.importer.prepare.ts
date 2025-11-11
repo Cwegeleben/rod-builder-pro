@@ -10,7 +10,16 @@ import { guardSmokeRoute } from '../lib/smokes.server'
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     // Auth + enablement guard (throws Response on failure)
-    guardSmokeRoute({ request } as LoaderFunctionArgs)
+    // Allow production invocation when a valid token is supplied; if token missing, surface clearer error.
+    try {
+      guardSmokeRoute({ request } as LoaderFunctionArgs)
+    } catch (e) {
+      if (e instanceof Response) throw e
+      return json(
+        { ok: false, error: 'Smoke auth failed; supply ?token=' + (process.env.SMOKE_TOKEN || 'smoke-ok') },
+        { status: 403 },
+      )
+    }
     const startedAt = Date.now()
     const url = new URL(request.url)
     const templateId = url.searchParams.get('templateId') || ''
@@ -19,6 +28,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .split(',')
       .map(s => s.trim())
       .filter(Boolean)
+    const discoverSeries = url.searchParams.get('discoverSeries') === '1'
     const notes = url.searchParams.get('notes') || 'smoke:prepare'
     console.warn('[smoke:prepare] init', {
       templateId,
@@ -58,6 +68,37 @@ export async function loader({ request }: LoaderFunctionArgs) {
           : seedUrls
       } catch {
         /* ignore */
+      }
+    }
+
+    // Auto-discover Batson seeds when requested:
+    // - If seed looks like /blanks-by-series -> discover series pages
+    // - If seed looks like /rod-blanks -> discover all rod blank detail URLs
+    if (targetId === 'batson-rod-blanks' && (discoverSeries || seedUrls.length === 1)) {
+      const s = seedUrls[0] || ''
+      try {
+        if (s.includes('/blanks-by-series')) {
+          const { discoverBatsonSeriesAllPages } = await import('../server/importer/crawlers/batsonSeries')
+          const start = s || 'https://batsonenterprises.com/blanks-by-series'
+          const found = await discoverBatsonSeriesAllPages(start, { maxPages: 100 })
+          if (found.urls.length > 0) seedUrls = found.urls
+        } else if (s.includes('/rod-blanks') || discoverSeries) {
+          const { discoverBatsonRodBlanksAllPages } = await import('../server/importer/crawlers/batsonSeries')
+          const start = s || 'https://batsonenterprises.com/rod-blanks'
+          // For smoke runs, constrain to first 2 pages but request 72 items per page to reach ~144 potential detail URLs.
+          const found = await discoverBatsonRodBlanksAllPages(start, { maxPages: 2, perPage: 72 })
+          if (found.urls.length > 0) {
+            seedUrls = found.urls
+            console.warn('[smoke:prepare] rod-blanks discovery', {
+              requestedPerPage: 72,
+              pagesVisited: found.debug.pagesVisited,
+              count: found.urls.length,
+              debug: found.debug,
+            })
+          }
+        }
+      } catch {
+        // fall back to provided seeds
       }
     }
 

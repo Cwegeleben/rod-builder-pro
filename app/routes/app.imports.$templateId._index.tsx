@@ -756,34 +756,36 @@ export default function ImportSettingsIndex() {
               >
                 Delete import…
               </Button>
-              <Button
-                tone="critical"
-                variant="secondary"
-                disabled={!templateId}
-                onClick={async () => {
-                  if (!templateId) return
-                  setClearError(null)
-                  setClearLoading(true)
-                  try {
-                    const r = await fetch('/api/importer/staging/clear', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ templateId, dryRun: true }),
-                    })
-                    const d = (await r.json()) as { ok?: boolean; count?: number; error?: string }
-                    if (!r.ok || !d?.ok) throw new Error(d?.error || 'Failed to estimate staged rows')
-                    setClearCount(typeof d.count === 'number' ? d.count : 0)
-                    setClearModalOpen(true)
-                  } catch (err) {
-                    setClearError((err as Error)?.message || 'Failed to estimate staged rows')
-                  } finally {
-                    setClearLoading(false)
-                  }
-                }}
-                loading={clearLoading}
-              >
-                Clear staging…
-              </Button>
+              {process.env.PRODUCT_DB_ENABLED === '1' ? null : (
+                <Button
+                  tone="critical"
+                  variant="secondary"
+                  disabled={!templateId}
+                  onClick={async () => {
+                    if (!templateId) return
+                    setClearError(null)
+                    setClearLoading(true)
+                    try {
+                      const r = await fetch('/api/importer/staging/clear', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ templateId, dryRun: true }),
+                      })
+                      const d = (await r.json()) as { ok?: boolean; count?: number; error?: string }
+                      if (!r.ok || !d?.ok) throw new Error(d?.error || 'Failed to estimate staged rows')
+                      setClearCount(typeof d.count === 'number' ? d.count : 0)
+                      setClearModalOpen(true)
+                    } catch (err) {
+                      setClearError((err as Error)?.message || 'Failed to estimate staged rows')
+                    } finally {
+                      setClearLoading(false)
+                    }
+                  }}
+                  loading={clearLoading}
+                >
+                  Clear staging…
+                </Button>
+              )}
               <Text as="span" tone="subdued">
                 {seeds.length === 0 ? 'Add or discover seeds to enable.' : `${seeds.length} seed(s) will be used.`}
               </Text>
@@ -963,7 +965,7 @@ export default function ImportSettingsIndex() {
           </Frame>
         ) : null}
 
-        {clearModalOpen ? (
+        {process.env.PRODUCT_DB_ENABLED === '1' ? null : clearModalOpen ? (
           <Frame>
             <Modal
               open
