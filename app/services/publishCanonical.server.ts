@@ -178,6 +178,10 @@ export async function publishCanonicalProduct({
     if (handle) {
       await prisma.$executeRawUnsafe('UPDATE Product SET publishHandle = ? WHERE id = ?', handle, r.id)
     }
+    // If anything was created or updated, mark the canonical Product as PUBLISHED
+    if (created + updated > 0) {
+      await prisma.$executeRawUnsafe("UPDATE Product SET status = 'PUBLISHED' WHERE id = ?", r.id)
+    }
   } catch {
     // non-fatal
   }

@@ -463,6 +463,91 @@ export default function ProductsIndex() {
                 {selectedResources.length} selected
               </Text>
               <InlineStack gap="200">
+                {canonical ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      disabled={selectedResources.length === 0}
+                      onClick={async () => {
+                        const ids = selectedResources.map(String)
+                        try {
+                          const resp = await fetch('/api/products/publish-bulk', {
+                            method: 'POST',
+                            headers: { 'content-type': 'application/json' },
+                            body: JSON.stringify({ ids, dryRun: true }),
+                          })
+                          const data = (await resp.json()) as {
+                            ok?: boolean
+                            created?: number
+                            updated?: number
+                            skipped?: number
+                            failed?: number
+                          }
+                          if (data?.ok) {
+                            const p = new URLSearchParams(params)
+                            p.set('banner', 'publishOk')
+                            p.set('created', String(data.created || 0))
+                            p.set('updated', String(data.updated || 0))
+                            p.set('skipped', String(data.skipped || 0))
+                            p.set('failed', String(data.failed || 0))
+                            window.location.search = p.toString()
+                          } else {
+                            const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+                            w.shopifyToast?.error?.('Dry-run failed')
+                          }
+                        } catch {
+                          const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+                          w.shopifyToast?.error?.('Dry-run failed')
+                        } finally {
+                          clearSelection()
+                        }
+                      }}
+                    >
+                      Dry-run publish
+                    </Button>
+                    <Button
+                      variant="primary"
+                      disabled={selectedResources.length === 0}
+                      onClick={async () => {
+                        if (!confirm(`Publish ${selectedResources.length} product(s) to Shopify?`)) return
+                        const ids = selectedResources.map(String)
+                        try {
+                          const resp = await fetch('/api/products/publish-bulk', {
+                            method: 'POST',
+                            headers: { 'content-type': 'application/json' },
+                            body: JSON.stringify({ ids, dryRun: false }),
+                          })
+                          const data = (await resp.json()) as {
+                            ok?: boolean
+                            created?: number
+                            updated?: number
+                            skipped?: number
+                            failed?: number
+                          }
+                          if (data?.ok) {
+                            const p = new URLSearchParams(params)
+                            p.set('banner', 'publishOk')
+                            p.set('created', String(data.created || 0))
+                            p.set('updated', String(data.updated || 0))
+                            p.set('skipped', String(data.skipped || 0))
+                            p.set('failed', String(data.failed || 0))
+                            window.location.search = p.toString()
+                          } else {
+                            const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+                            w.shopifyToast?.error?.('Publish failed')
+                          }
+                        } catch {
+                          const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+                          w.shopifyToast?.error?.('Publish failed')
+                        } finally {
+                          clearSelection()
+                        }
+                      }}
+                    >
+                      Publish to Shopify
+                    </Button>
+                  </>
+                ) : null}
                 <Button
                   disabled={selectedResources.length === 0 || fetcher.state === 'submitting'}
                   onClick={() => {
