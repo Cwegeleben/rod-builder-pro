@@ -1,5 +1,6 @@
 // <!-- BEGIN RBP GENERATED: hq-import-settings-v1 -->
 import { prisma } from '../../db.server'
+import type { Prisma } from '@prisma/client'
 import { enc } from '../crypto.server'
 
 export async function listManualSeeds(supplierId: string) {
@@ -8,14 +9,26 @@ export async function listManualSeeds(supplierId: string) {
 
 export async function addManualSeed(supplierId: string, url: string, label?: string) {
   return prisma.productSource.upsert({
-    where: { product_source_supplier_url_unique: { supplierId, url } },
+    where: {
+      product_source_supplier_template_url_unique: { supplierId, templateId: null, url },
+    } as unknown as Prisma.ProductSourceWhereUniqueInput,
     update: { lastSeenAt: new Date(), source: 'manual', notes: label || undefined },
-    create: { supplierId, url, source: 'manual', notes: label || undefined },
+    create: {
+      supplierId,
+      templateId: null,
+      url,
+      source: 'manual',
+      notes: label || undefined,
+    } as unknown as Prisma.ProductSourceCreateInput,
   })
 }
 
 export async function removeManualSeed(supplierId: string, url: string) {
-  return prisma.productSource.delete({ where: { product_source_supplier_url_unique: { supplierId, url } } })
+  return prisma.productSource.delete({
+    where: {
+      product_source_supplier_template_url_unique: { supplierId, templateId: null, url },
+    } as unknown as Prisma.ProductSourceWhereUniqueInput,
+  })
 }
 
 export async function getSchedule(supplierId: string) {

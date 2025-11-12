@@ -102,6 +102,10 @@ export async function startImportFromOptions(
   admin?: AdminClient,
 ): Promise<string> {
   const PRODUCT_DB_EXCLUSIVE = process.env.PRODUCT_DB_EXCLUSIVE === '1'
+  // Start timestamp for ETA calculations in sequential per-seed telemetry
+  const startedAtMs = Date.now()
+  // Aggregate counters (in-memory, flushed via progress.details.aggregate)
+  const aggregate = { staged: 0, products: 0, versions: 0, errors: 0 }
   // Lightweight progress updater that tolerates missing column before migration
   async function setProgress(
     id: string,
@@ -115,6 +119,8 @@ export async function startImportFromOptions(
       if (typeof data.percent === 'number') progress.percent = data.percent
       if (typeof data.etaSeconds === 'number') progress.etaSeconds = data.etaSeconds
       if (data.details) progress.details = data.details
+      // Stamp freshness for polling UI
+      progress.lastUpdated = new Date().toISOString()
       if (Object.keys(progress).length) patch.progress = progress as unknown as object
       await prisma.importRun.update({ where: { id }, data: patch })
     } catch {
@@ -130,11 +136,58 @@ export async function startImportFromOptions(
       return false
     }
   }
+  // Watchdog: if no heartbeat for >120s while running, mark the run as 'stuck'
+  function startWatchdog(id?: string) {
+    if (!id) return () => {}
+    let stopped = false
+    const interval = setInterval(async () => {
+      if (stopped) return
+      try {
+        const run = await prisma.importRun.findUnique({
+          where: { id },
+          select: { status: true, finishedAt: true, progress: true },
+        })
+        if (!run) return
+        if (run.finishedAt || ['staged', 'failed', 'cancelled'].includes(run.status)) return
+        const prog =
+          (run.progress as unknown as { lastUpdated?: string; details?: Record<string, unknown> } | null) || null
+        const lastIso = prog?.lastUpdated
+        if (!lastIso) return
+        const ageMs = Date.now() - new Date(lastIso).getTime()
+        if (ageMs > 120_000 && run.status !== 'stuck') {
+          const progressPatch: Record<string, unknown> = {
+            ...(prog || {}),
+            details: { ...(prog?.details || {}), stuck: true },
+            lastUpdated: new Date().toISOString(),
+          }
+          await prisma.importRun.update({
+            where: { id },
+            data: { status: 'stuck', progress: progressPatch as unknown as object },
+          })
+        }
+      } catch {
+        /* ignore watchdog errors */
+      }
+    }, 30_000)
+    return () => {
+      stopped = true
+      clearInterval(interval)
+    }
+  }
   async function throwIfCancelled(id?: string) {
     if (!id) return
     if (await isCancelRequested(id)) {
       try {
         await prisma.importRun.update({ where: { id }, data: { status: 'cancelled', finishedAt: new Date() } })
+        // Clear template preparingRunId on cancel so UI can launch new runs
+        const tplId = options.templateId || null
+        if (tplId) {
+          try {
+            await prisma.importTemplate.update({ where: { id: tplId }, data: { preparingRunId: null } })
+          } catch {
+            /* ignore */
+          }
+        }
       } catch {
         /* ignore */
       }
@@ -147,7 +200,7 @@ export async function startImportFromOptions(
   const supplierId = options.supplierId || 'batson'
   const templateId = options.templateId || null
   // Helper to stage from series parser (Batson attribute grid)
-  async function stageFromSeriesParser(seedUrls: string[]) {
+  async function stageFromSeriesParser(seedUrls: string[], runIdForProgress?: string) {
     const { renderHeadlessHtml } = await import('../../server/headless/renderHeadlessHtml')
     const { PRODUCT_MODELS } = await import('../../server/importer/products/models')
     const { upsertStaging } = await import('../../../packages/importer/src/staging/upsert')
@@ -174,7 +227,9 @@ export async function startImportFromOptions(
       }
     }
     const parse = PRODUCT_MODELS['batson-attribute-grid']
-    for (const src of seedUrls) {
+    for (let i = 0; i < seedUrls.length; i++) {
+      const src = seedUrls[i]
+      const seedStart = Date.now()
       let html: string | null = await fetchStatic(src)
       if (!html) {
         try {
@@ -238,19 +293,24 @@ export async function startImportFromOptions(
         const priceWh = toNumberOrNull((r.raw as { price?: unknown }).price)
         const priceMsrp = toNumberOrNull((r.raw as { msrp?: unknown }).msrp)
         const availability = r.raw.availability ?? null
-        await upsertStaging(supplierId, {
-          templateId: templateId || undefined,
-          externalId,
-          title,
-          partType,
-          description,
-          images,
-          rawSpecs,
-          normSpecs,
-          priceWh,
-          priceMsrp,
-          availability,
-        })
+        try {
+          await upsertStaging(supplierId, {
+            templateId: templateId || undefined,
+            externalId,
+            title,
+            partType,
+            description,
+            images,
+            rawSpecs,
+            normSpecs,
+            priceWh,
+            priceMsrp,
+            availability,
+          })
+          aggregate.staged++
+        } catch {
+          aggregate.errors++
+        }
         // Proactively seed a search URL to reach detail pages for image extraction
         try {
           const searchUrl = `${base}/ecom/purchaselistsearch?keywords=${encodeURIComponent(externalId)}`
@@ -259,10 +319,36 @@ export async function startImportFromOptions(
           /* ignore */
         }
       }
+      // Per-seed telemetry (series parser pass): map progression into percent 40-55 range
+      if (runIdForProgress) {
+        const processed = i + 1
+        const total = seedUrls.length
+        const elapsedMs = Date.now() - startedAtMs
+        const avgPerSeed = processed > 0 ? elapsedMs / processed : 0
+        const remaining = Math.max(0, total - processed)
+        const etaSeconds = avgPerSeed > 0 ? Math.round((avgPerSeed * remaining) / 1000) : undefined
+        // Recalibrated percent window: series-parse now maps 30 -> 55
+        const percent = 30 + Math.round((processed / total) * 25) // 30 -> 55 window during parse
+        const lastSeedDurationMs = Math.max(0, Date.now() - seedStart)
+        await setProgress(runIdForProgress, {
+          status: 'crawling',
+          phase: 'series-parse',
+          percent,
+          etaSeconds,
+          details: {
+            seedIndex: processed,
+            seedsTotal: total,
+            currentSeed: src,
+            lastSeedDurationMs,
+            aggregate: { ...aggregate },
+          },
+        })
+        await throwIfCancelled(runIdForProgress)
+      }
     }
   }
   // Direct detail-page staging: visit product-detail seeds and stage via extractor without the full crawler
-  async function stageFromDetailPages(seedUrls: string[]) {
+  async function stageFromDetailPages(seedUrls: string[], runIdForProgress?: string) {
     const { upsertStaging } = await import('../../../packages/importer/src/staging/upsert')
     const { linkExternalIdForSource } = await import('../../../packages/importer/src/seeds/sources')
     const { extractJsonLd, mapProductFromJsonLd } = await import('../../../packages/importer/src/extractors/jsonld')
@@ -351,7 +437,9 @@ export async function startImportFromOptions(
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
         viewport: { width: 1280, height: 800 },
       })
-      for (const url of seedUrls) {
+      for (let i = 0; i < seedUrls.length; i++) {
+        const url = seedUrls[i]
+        const seedStart = Date.now()
         if (!isDetailUrl(url)) continue
         const page = await context.newPage()
         try {
@@ -370,27 +458,99 @@ export async function startImportFromOptions(
                 images: rec.images || [],
                 rawSpecs: rec.rawSpecs || {},
               }
-              await upsertStaging(supplierId, { ...toStage, templateId: templateId || undefined })
+              try {
+                await upsertStaging(supplierId, { ...toStage, templateId: templateId || undefined })
+                aggregate.staged++
+              } catch {
+                aggregate.errors++
+              }
               await linkExternalIdForSource(supplierId, url, rec.externalId, templateId || undefined)
               staged++
               continue
             }
           }
           // Fallback to static if extractor returned null/header
-          if (await stageFromStatic(url)) staged++
+          if (await stageFromStatic(url)) {
+            staged++
+            aggregate.staged++
+          } else {
+            aggregate.errors++
+          }
         } catch {
-          if (await stageFromStatic(url)) staged++
+          if (await stageFromStatic(url)) {
+            staged++
+            aggregate.staged++
+          } else {
+            aggregate.errors++
+          }
         } finally {
           await page.close().catch(() => {})
           await new Promise(res => setTimeout(res, 200))
+          if (runIdForProgress) {
+            const processed = i + 1
+            const total = seedUrls.length
+            const elapsedMs = Date.now() - startedAtMs
+            const avgPerSeed = processed > 0 ? elapsedMs / processed : 0
+            const remaining = Math.max(0, total - processed)
+            const etaSeconds = avgPerSeed > 0 ? Math.round((avgPerSeed * remaining) / 1000) : undefined
+            // Recalibrated percent window: direct-detail now maps 10 -> 30
+            const percent = 10 + Math.round((processed / total) * 20) // 10 -> 30 direct-detail range
+            const lastSeedDurationMs = Math.max(0, Date.now() - seedStart)
+            await setProgress(runIdForProgress, {
+              status: 'crawling',
+              phase: 'direct-detail',
+              percent,
+              etaSeconds,
+              details: {
+                seedIndex: processed,
+                seedsTotal: total,
+                currentSeed: url,
+                lastSeedDurationMs,
+                aggregate: { ...aggregate },
+              },
+            })
+            await throwIfCancelled(runIdForProgress)
+          }
         }
       }
     } catch {
       // Chromium path unavailable; static-only pass
-      for (const url of seedUrls) {
+      for (let i = 0; i < seedUrls.length; i++) {
+        const url = seedUrls[i]
+        const seedStart = Date.now()
         if (!isDetailUrl(url)) continue
-        if (await stageFromStatic(url)) staged++
+        if (await stageFromStatic(url)) {
+          staged++
+          aggregate.staged++
+        } else {
+          aggregate.errors++
+        }
         await new Promise(res => setTimeout(res, 100))
+        if (runIdForProgress) {
+          const processed = i + 1
+          const total = seedUrls.length
+          const elapsedMs = Date.now() - startedAtMs
+          const avgPerSeed = processed > 0 ? elapsedMs / processed : 0
+          const remaining = Math.max(0, total - processed)
+          const etaSeconds = avgPerSeed > 0 ? Math.round((avgPerSeed * remaining) / 1000) : undefined
+          // Recalibrated percent window: direct-detail static maps 10 -> 30
+          const percent = 10 + Math.round((processed / total) * 20)
+          const lastSeedDurationMs = Math.max(0, Date.now() - seedStart)
+          await setProgress(runIdForProgress, {
+            status: 'crawling',
+            phase: 'direct-detail',
+            percent,
+            etaSeconds,
+            details: {
+              seedIndex: processed,
+              seedsTotal: total,
+              currentSeed: url,
+              lastSeedDurationMs,
+              aggregate: { ...aggregate },
+            },
+          })
+          await throwIfCancelled(runIdForProgress)
+        }
       }
     } finally {
       if (context) await context.close().catch(() => {})
@@ -511,12 +671,20 @@ export async function startImportFromOptions(
   }
   const seeds = Array.from(new Set([...saved, ...options.manualUrls])).filter(isValidHttpUrl)
   if (runId)
-    await setProgress(runId, { status: 'discover', phase: 'discover', percent: 15, details: { seeds: seeds.length } })
+    // Discover phase now 0-10; initial snapshot at 5 when seeds enumerated
+    await setProgress(runId, { status: 'discover', phase: 'discover', percent: 5, details: { seeds: seeds.length } })
   await throwIfCancelled(runId)
   // Stage products: for Batson, run the reliable series parser first, then follow with the crawler to backfill any misses
   if (options.useSeriesParser) {
+    const stopWatch = runId ? startWatchdog(runId) : () => {}
     if (runId)
-      await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 30, details: { seeds: seeds.length } })
+      // Crawl (listing expansion) pre-pass now occupies 55-60 later; early direct-detail start at 10
+      await setProgress(runId, {
+        status: 'crawling',
+        phase: 'direct-detail',
+        percent: 10,
+        details: { seeds: seeds.length },
+      })
     await throwIfCancelled(runId)
     let seriesSeeds = await expandSeedsFromListingIfNeeded(seeds)
     // If expansion produced nothing, fall back to original seeds (likely already detail pages)
@@ -545,8 +713,8 @@ export async function startImportFromOptions(
     // Pre-pass: stage directly from detail pages (fast extractor), then proceed to series parser
     let prepassStaged = 0
     try {
-      prepassStaged = await stageFromDetailPages(seriesSeeds)
-      if (runId) await setProgress(runId, { status: 'crawling', phase: 'direct-detail', percent: 40 })
+      prepassStaged = await stageFromDetailPages(seriesSeeds, runId)
+      if (runId) await setProgress(runId, { status: 'crawling', phase: 'direct-detail', percent: 30 })
       try {
         const tplForLog = options.templateId || options.notes?.replace(/^prepare:/, '') || 'n/a'
         await prisma.importLog.create({
@@ -558,8 +726,8 @@ export async function startImportFromOptions(
     } catch {
       /* ignore pre-pass errors */
     }
-    await stageFromSeriesParser(seriesSeeds)
-    if (runId) await setProgress(runId, { status: 'crawling', phase: 'series-parse', percent: 45 })
+    await stageFromSeriesParser(seriesSeeds, runId)
+    if (runId) await setProgress(runId, { status: 'crawling', phase: 'series-parse', percent: 30 })
     let crawlRes: Awaited<ReturnType<typeof crawlBatson>> | null = null
     try {
       crawlRes = await crawlBatson(seriesSeeds, {
@@ -597,6 +765,7 @@ export async function startImportFromOptions(
       }
       throw e
     }
+    // Listing expansion (crawl) compressed to 55-60 window
     if (runId) await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 55 })
     try {
       if (runId && crawlRes) {
@@ -619,9 +788,21 @@ export async function startImportFromOptions(
     } catch {
       /* ignore header skip logging errors */
     }
+    // stop watchdog once series parser + crawl phase done (diffing still updates progress below)
+    try {
+      stopWatch()
+    } catch {
+      /* ignore */
+    }
   } else {
+    const stopWatch = runId ? startWatchdog(runId) : () => {}
     if (runId)
-      await setProgress(runId, { status: 'crawling', phase: 'crawl', percent: 30, details: { seeds: seeds.length } })
+      await setProgress(runId, {
+        status: 'crawling',
+        phase: 'direct-detail',
+        percent: 10,
+        details: { seeds: seeds.length },
+      })
     await throwIfCancelled(runId)
     let crawlRes: Awaited<ReturnType<typeof crawlBatson>> | null = null
     try {
@@ -679,7 +860,13 @@ export async function startImportFromOptions(
     } catch {
       /* ignore header skip logging errors */
     }
+    try {
+      stopWatch()
+    } catch {
+      /* ignore */
+    }
   }
+  // Staging now 60-70
   if (runId) await setProgress(runId, { status: 'staging', phase: 'stage', percent: 60 })
   await throwIfCancelled(runId)
   // Generate diffs
@@ -711,6 +898,7 @@ export async function startImportFromOptions(
           if (Math.random() < 0.02) console.warn('[product_db_writer] upsert failed (sampled)', msg)
         }
       }
+      // Canonical write now 70-78
       if (runId) await setProgress(runId, { status: 'staging', phase: 'canonical-write', percent: 70 })
     } catch (e) {
       console.warn('[product_db_writer] bulk upsert staging -> product_db failed (non-fatal)', (e as Error)?.message)
@@ -740,9 +928,10 @@ export async function startImportFromOptions(
       /* noop */
     }
     await prisma.importDiff.deleteMany({ where: { importRunId: runId } })
-    await setProgress(runId, { status: 'diffing', phase: 'diff', percent: 80 })
+    // Diff now 78-96 (will stream inside diff loop later). Start at 78
+    await setProgress(runId, { status: 'diffing', phase: 'diff', percent: 78 })
     await throwIfCancelled(runId)
-    await createDiffRowsForRun(supplierId, runId, { options, admin, templateId: templateId || undefined })
+    await createDiffRowsForRun(supplierId, runId, { options, admin, templateId: templateId || undefined, setProgress })
     if (options.skipSuccessful) {
       // Also mark previously successful externalIds as skipped (history ledger based on approvals)
       await markSkipSuccessfulForRun(supplierId, runId)
@@ -786,7 +975,17 @@ export async function startImportFromOptions(
     } catch {
       /* ignore */
     }
+    // Finalize 96-100; completion jumps to 100
     await setProgress(runId, { status: 'staged', phase: 'ready', percent: 100, details: { counts } })
+    // Clear preparingRunId now that run is staged
+    const tplIdDone = options.templateId || null
+    if (tplIdDone) {
+      try {
+        await prisma.importTemplate.update({ where: { id: tplIdDone }, data: { preparingRunId: null } })
+      } catch {
+        /* ignore */
+      }
+    }
     // Post-run consistency log: expectedItems (preflight) vs staged and diffs
     try {
       const run = await prisma.importRun.findUnique({ where: { id: runId } })
@@ -837,7 +1036,7 @@ export async function startImportFromOptions(
       /* noop */
     }
     await prisma.importDiff.deleteMany({ where: { importRunId: newRunId } })
-    await setProgress(newRunId, { status: 'diffing', phase: 'diff', percent: 80 })
+    await setProgress(newRunId, { status: 'diffing', phase: 'diff', percent: 78 })
     await throwIfCancelled(newRunId)
     // BEGIN product_db wiring (phase 1) for new run path
     if (process.env.PRODUCT_DB_ENABLED === '1' && !PRODUCT_DB_EXCLUSIVE) {
@@ -870,7 +1069,12 @@ export async function startImportFromOptions(
       }
     }
     // END product_db wiring (phase 1)
-    await createDiffRowsForRun(supplierId, newRunId, { options, admin, templateId: templateId || undefined })
+    await createDiffRowsForRun(supplierId, newRunId, {
+      options,
+      admin,
+      templateId: templateId || undefined,
+      setProgress,
+    })
     if (options.skipSuccessful) {
       await markSkipSuccessfulForRun(supplierId, newRunId)
     }
@@ -913,6 +1117,14 @@ export async function startImportFromOptions(
       /* ignore */
     }
     await setProgress(newRunId, { status: 'staged', phase: 'ready', percent: 100, details: { counts } })
+    const tplIdDone2 = options.templateId || null
+    if (tplIdDone2) {
+      try {
+        await prisma.importTemplate.update({ where: { id: tplIdDone2 }, data: { preparingRunId: null } })
+      } catch {
+        /* ignore */
+      }
+    }
     // Post-run consistency log for new run
     try {
       const run = await prisma.importRun.findUnique({ where: { id: newRunId } })
@@ -1066,7 +1278,21 @@ async function fetchShopifyHash(admin: AdminClient, handle: string): Promise<str
 async function createDiffRowsForRun(
   supplierId: string,
   runId: string,
-  ctx?: { options?: RunOptions; admin?: AdminClient; templateId?: string },
+  ctx?: {
+    options?: RunOptions
+    admin?: AdminClient
+    templateId?: string
+    setProgress?: (
+      id: string,
+      data: {
+        status?: string
+        phase?: string
+        percent?: number
+        etaSeconds?: number
+        details?: Record<string, unknown>
+      },
+    ) => Promise<void>
+  },
 ) {
   let staging: Array<{
     externalId: string
@@ -1197,15 +1423,44 @@ async function createDiffRowsForRun(
     }
   }
   if (rows.length) {
-    await prisma.importDiff.createMany({
-      data: rows.map(r => ({
-        importRunId: runId,
-        externalId: r.externalId,
-        diffType: r.diffType,
-        before: r.before as unknown as Prisma.InputJsonValue,
-        after: r.after as unknown as Prisma.InputJsonValue,
-      })),
-    })
+    // Stream creation in chunks to emit incremental progress & counts
+    const total = rows.length
+    const chunkSize = Math.max(25, Math.min(250, Math.round(total / 20))) // adaptive chunk size
+    let processed = 0
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const slice = rows.slice(i, i + chunkSize)
+      await prisma.importDiff.createMany({
+        data: slice.map(r => ({
+          importRunId: runId,
+          externalId: r.externalId,
+          diffType: r.diffType,
+          before: r.before as unknown as Prisma.InputJsonValue,
+          after: r.after as unknown as Prisma.InputJsonValue,
+        })),
+      })
+      processed += slice.length
+      // Compute partial counts cheaply from accumulated rows (avoid COUNT queries each tick)
+      const adds = rows.slice(0, processed).filter(r => r.diffType === 'add').length
+      const changes = rows.slice(0, processed).filter(r => r.diffType === 'change').length
+      const deletes = rows.slice(0, processed).filter(r => r.diffType === 'delete').length
+      // Conflicts not computed here (legacy logic uses separate detection); placeholder 0
+      const percent = 78 + Math.round((processed / total) * 18) // 78 -> 96 window
+      try {
+        if (ctx?.setProgress)
+          await ctx.setProgress(runId, {
+            status: 'diffing',
+            phase: 'diff',
+            percent: Math.min(96, percent),
+            details: {
+              counts: { add: adds, change: changes, delete: deletes, conflict: 0 },
+              diffProcessed: processed,
+              diffTotal: total,
+            },
+          })
+      } catch {
+        /* ignore progress errors */
+      }
+    }
   }
   try {
     console.log('[createDiffRowsForRun] created rows', { supplierId, runId, count: rows.length })

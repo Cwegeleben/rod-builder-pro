@@ -76,7 +76,7 @@ export function GlobalImportProgress() {
         for (const p of preps) {
           const key = p.runId
           if (sourcesRef.current[key]) continue
-          const url = `/api/importer/runs/${encodeURIComponent(key)}/status/stream`
+          const url = `/api/importer/runs/${encodeURIComponent(key)}/stream`
           const es = new EventSource(url)
           sourcesRef.current[key] = es
           es.addEventListener('update', e => {
@@ -179,7 +179,7 @@ export function GlobalImportProgress() {
             const news = tpls.map(t => t.preparing?.runId).filter(Boolean) as string[]
             for (const rid of news) {
               if (!sourcesRef.current[rid]) {
-                const url2 = `/api/importer/runs/${encodeURIComponent(rid)}/status/stream`
+                const url2 = `/api/importer/runs/${encodeURIComponent(rid)}/stream`
                 const es2 = new EventSource(url2)
                 sourcesRef.current[rid] = es2
                 es2.addEventListener('update', ev => {

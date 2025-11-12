@@ -66,7 +66,7 @@ export default function JobCenter() {
         const preparing = rows.map(r => r.preparing?.runId).filter(Boolean) as string[]
         for (const runId of preparing) {
           if (sourcesRef.current[runId]) continue
-          const es = new EventSource(`/api/importer/runs/${encodeURIComponent(runId)}/status/stream`)
+          const es = new EventSource(`/api/importer/runs/${encodeURIComponent(runId)}/stream`)
           sourcesRef.current[runId] = es
           es.addEventListener('update', e => {
             if (cancelled) return
@@ -129,7 +129,7 @@ export default function JobCenter() {
             const news = (j.templates || []).map(t => t.preparing?.runId).filter(Boolean) as string[]
             for (const rid of news) {
               if (!sourcesRef.current[rid]) {
-                const es2 = new EventSource(`/api/importer/runs/${encodeURIComponent(rid)}/status/stream`)
+                const es2 = new EventSource(`/api/importer/runs/${encodeURIComponent(rid)}/stream`)
                 sourcesRef.current[rid] = es2
                 es2.addEventListener('update', ev => {
                   if (cancelled) return

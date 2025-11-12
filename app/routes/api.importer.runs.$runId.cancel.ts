@@ -3,9 +3,9 @@ import { requireHqShopOr404 } from '../lib/access.server'
 import { prisma } from '../db.server'
 
 // POST /api/importer/runs/:runId/cancel
-// Body optional. Sets a cancelRequested flag on ImportRun.summary.control.
 export async function action({ request, params }: ActionFunctionArgs) {
   await requireHqShopOr404(request)
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 })
   const runId = String(params.runId || '')
   if (!runId) return json({ error: 'Missing run id' }, { status: 400 })
 

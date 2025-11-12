@@ -70,7 +70,7 @@ export default function ActiveImportsTable() {
     for (const p of preps) {
       const rid = p.run
       if (sourcesRef.current[rid]) continue
-      const es = new EventSource(`/api/importer/runs/${encodeURIComponent(rid)}/status/stream`)
+      const es = new EventSource(`/api/importer/runs/${encodeURIComponent(rid)}/stream`)
       sourcesRef.current[rid] = es
 
       es.addEventListener('update', ev => {

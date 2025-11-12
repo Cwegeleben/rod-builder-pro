@@ -21,7 +21,8 @@ import {
   Toast,
   Frame,
   Modal,
-  Checkbox,
+  Tooltip,
+  Link,
 } from '@shopify/polaris'
 // <!-- END RBP GENERATED: importer-crawlB-polaris-v1 -->
 // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
@@ -45,7 +46,8 @@ export default function ImportSettingsIndex() {
   const location = useLocation()
   const [params] = useSearchParams()
   const justCreated = params.get('created') === '1'
-  const reviewError = params.get('reviewError') === '1'
+  // reviewError removed with review feature
+  const runIdQuery = params.get('runId') || ''
   // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
   const fetcher = useFetcher<{ urls?: string[]; debug?: Record<string, unknown>; preview?: unknown }>()
   const discovering = fetcher.state !== 'idle'
@@ -64,14 +66,36 @@ export default function ImportSettingsIndex() {
   const [saveLoading, setSaveLoading] = React.useState<boolean>(false)
   const [saveError, setSaveError] = React.useState<string | null>(null)
   const [crawlLoading, setCrawlLoading] = React.useState<boolean>(false)
+  const [activeRunId, setActiveRunId] = React.useState<string>(runIdQuery)
+  const [progressPollMs] = React.useState<number>(3000)
+  // Using extended progress shape; legacy state removed.
+  type RunProgressExtended = {
+    status?: string
+    progress?: Record<string, unknown>
+    summary?: Record<string, unknown>
+    finished?: boolean
+    seedIndex?: number
+    seedsTotal?: number
+    etaSeconds?: number
+    stuck?: boolean
+    lastUpdated?: string
+    startedAt?: string
+  }
+  const [runProgressExtended, setRunProgressExtended] = React.useState<RunProgressExtended | null>(null)
+  React.useEffect(() => {
+    if (!activeRunId && loaderData?.preparingRunId) setActiveRunId(loaderData.preparingRunId)
+  }, [activeRunId, loaderData?.preparingRunId])
+  const [cancelLoading, setCancelLoading] = React.useState<boolean>(false)
+  // Shared SSE-driven logs and connection state
+  const [runLogs, setRunLogs] = React.useState<
+    Array<{ id: string; at: string; type: string; payload?: string | null }>
+  >([])
+  const [streamConn, setStreamConn] = React.useState<'connecting' | 'open' | 'closed' | 'fallback'>('connecting')
   // Overwrite confirmation (replace window.confirm)
-  const [overwriteModalOpen, setOverwriteModalOpen] = React.useState<boolean>(false)
+  // Overwrite modal removed
   const [runGuardDiscoverOpen, setRunGuardDiscoverOpen] = React.useState<boolean>(false)
-  const [runGuardSaveOpen, setRunGuardSaveOpen] = React.useState<boolean>(false)
-  const [overwriteStagedCount, setOverwriteStagedCount] = React.useState<number>(0)
-  const [overwriteConfirmLoading, setOverwriteConfirmLoading] = React.useState<boolean>(false)
-  const [overwriteForceClear, setOverwriteForceClear] = React.useState<boolean>(false)
-  const overwriteContinueRef = React.useRef<null | (() => Promise<void>)>(null)
+  // runGuardSaveOpen removed with legacy guard modal
+  // Overwrite workflow removed with legacy review/prepare flow
   // Clear staging modal state
   const [clearModalOpen, setClearModalOpen] = React.useState<boolean>(false)
   const [clearLoading, setClearLoading] = React.useState<boolean>(false)
@@ -221,208 +245,7 @@ export default function ImportSettingsIndex() {
       return false
     }
   }
-  async function onSaveAndCrawl() {
-    if (!templateId) return
-    if (!targetId) {
-      setSaveError('Please select a target before saving.')
-      return
-    }
-    const validSeeds = seeds.filter(s => {
-      try {
-        const u = new URL(s)
-        return u.protocol === 'http:' || u.protocol === 'https:'
-      } catch {
-        return false
-      }
-    })
-    if (validSeeds.length === 0) {
-      setSaveError('Please provide at least one valid URL (https://…) in Seeds.')
-      return
-    }
-    if (/^batson-/.test(targetId)) {
-      const bad = validSeeds.filter(s => {
-        try {
-          const u = new URL(s)
-          return !['batsonenterprises.com', 'www.batsonenterprises.com'].includes(u.hostname)
-        } catch {
-          return true
-        }
-      })
-      if (bad.length) {
-        setSaveError(
-          `Seeds must be within batsonenterprises.com. Off-domain URLs: ${bad.slice(0, 3).join(', ')}${
-            bad.length > 3 ? ` and ${bad.length - 3} more…` : ''
-          }`,
-        )
-        return
-      }
-    }
-    setCrawlLoading(true)
-    try {
-      const ok = await (async () => {
-        setSaveError(null)
-        setSaveLoading(true)
-        try {
-          const res = await fetch(`/api/importer/targets/${templateId}/settings`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: importName, target: targetId, discoverSeedUrls: validSeeds }),
-          })
-          const data = await res.json()
-          if (!res.ok || !data?.ok) throw new Error(String(data?.error || 'Failed to save settings'))
-          return true
-        } catch (err) {
-          const m = (err as Error)?.message || 'Failed to save settings'
-          if (!isBenignPatternError(m)) setSaveError(m)
-          return false
-        } finally {
-          setSaveLoading(false)
-        }
-      })()
-      if (!ok) return
-      const startPrepare = async (confirmOverwrite?: boolean, forceClear?: boolean) => {
-        const resp = await fetch('/api/importer/prepare', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            confirmOverwrite
-              ? { templateId, confirmOverwrite: true, overwriteExisting: Boolean(forceClear) }
-              : { templateId },
-          ),
-        })
-        return { resp, data: (await resp.json()) as Record<string, unknown> }
-      }
-      const { resp, data } = await startPrepare(false)
-      if (resp.status === 409 && (data as { code?: string }).code === 'confirm_overwrite') {
-        const staged = (data as { stagedCount?: number }).stagedCount || 0
-        setOverwriteStagedCount(staged)
-        setOverwriteForceClear(false)
-        // Auto-confirm small benign overwrites (tiny leftover staged rows) to reduce friction.
-        // Heuristic: if staged rows are very small (<=3) we proceed automatically once.
-        if (staged > 0 && staged <= 3) {
-          try {
-            const auto = await fetch('/api/importer/prepare', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                templateId,
-                confirmOverwrite: true,
-                overwriteExisting: false,
-                autoConfirm: true,
-                stagedCountHint: staged,
-              }),
-            })
-            const aData = (await auto.json()) as Record<string, unknown>
-            const aResp = auto
-            if (aResp.ok && (aData as { runId?: string }).runId) {
-              const c =
-                typeof (aData as { candidates?: number }).candidates === 'number'
-                  ? (aData as { candidates?: number }).candidates
-                  : undefined
-              const eta =
-                typeof (aData as { etaSeconds?: number }).etaSeconds === 'number'
-                  ? (aData as { etaSeconds?: number }).etaSeconds
-                  : undefined
-              const exp =
-                typeof (aData as { expectedItems?: number }).expectedItems === 'number'
-                  ? (aData as { expectedItems?: number }).expectedItems
-                  : undefined
-              const qs = new URLSearchParams(location.search)
-              qs.set('started', '1')
-              qs.set('tpl', templateId!)
-              if (typeof c === 'number') qs.set('c', String(c))
-              if (typeof eta === 'number') qs.set('eta', String(eta))
-              if (typeof exp === 'number') qs.set('exp', String(exp))
-              try {
-                setShowSavedToast(true)
-              } catch {
-                /* noop */
-              }
-              navigateToImports(qs)
-              return
-            }
-          } catch (autoErr) {
-            // Fall through to manual confirmation modal
-            // Provide a subtle hint in save error to aid debugging
-            try {
-              const m = (autoErr as Error)?.message
-              if (m) setSaveError(m)
-            } catch {
-              /* ignore */
-            }
-          }
-        }
-        overwriteContinueRef.current = async () => {
-          const res2 = await startPrepare(true, overwriteForceClear)
-          const resp2 = res2.resp
-          const data2 = res2.data
-          if (!resp2.ok || !(data2 as { runId?: string }).runId) {
-            const msg = (data2 as { error?: string })?.error || 'Save and Crawl failed'
-            throw new Error(msg)
-          }
-          const c =
-            typeof (data2 as { candidates?: number }).candidates === 'number'
-              ? (data2 as { candidates?: number }).candidates
-              : undefined
-          const eta =
-            typeof (data2 as { etaSeconds?: number }).etaSeconds === 'number'
-              ? (data2 as { etaSeconds?: number }).etaSeconds
-              : undefined
-          const exp =
-            typeof (data2 as { expectedItems?: number }).expectedItems === 'number'
-              ? (data2 as { expectedItems?: number }).expectedItems
-              : undefined
-          const qs = new URLSearchParams(location.search)
-          qs.set('started', '1')
-          qs.set('tpl', templateId!)
-          if (typeof c === 'number') qs.set('c', String(c))
-          if (typeof eta === 'number') qs.set('eta', String(eta))
-          if (typeof exp === 'number') qs.set('exp', String(exp))
-          try {
-            setShowSavedToast(true)
-          } catch {
-            // noop
-          }
-          navigateToImports(qs)
-        }
-        setOverwriteModalOpen(true)
-        return
-      }
-      if (!resp.ok || !(data as { runId?: string }).runId) {
-        const msg = (data as { error?: string })?.error || 'Save and Crawl failed'
-        throw new Error(msg)
-      }
-      const c =
-        typeof (data as { candidates?: number }).candidates === 'number'
-          ? (data as { candidates?: number }).candidates
-          : undefined
-      const eta =
-        typeof (data as { etaSeconds?: number }).etaSeconds === 'number'
-          ? (data as { etaSeconds?: number }).etaSeconds
-          : undefined
-      const exp =
-        typeof (data as { expectedItems?: number }).expectedItems === 'number'
-          ? (data as { expectedItems?: number }).expectedItems
-          : undefined
-      const qs = new URLSearchParams(location.search)
-      qs.set('started', '1')
-      qs.set('tpl', templateId!)
-      if (typeof c === 'number') qs.set('c', String(c))
-      if (typeof eta === 'number') qs.set('eta', String(eta))
-      if (typeof exp === 'number') qs.set('exp', String(exp))
-      try {
-        setShowSavedToast(true)
-      } catch {
-        // noop
-      }
-      navigateToImports(qs)
-    } catch (e) {
-      const m = (e as Error)?.message || 'Save and Crawl failed'
-      if (!isBenignPatternError(m)) setSaveError(m)
-    } finally {
-      setCrawlLoading(false)
-    }
-  }
+  // Removed legacy onSaveAndCrawl combined handler
   function navigateToImports(qs: URLSearchParams) {
     const rel = `/app/imports?${qs.toString()}`
     try {
@@ -453,7 +276,7 @@ export default function ImportSettingsIndex() {
     <Page
       title="Import Settings"
       data-testid="settings-page"
-      subtitle={debug ? 'Route: imports-settings' : 'Guided flow: 1) Setup → 2) Seeds → 3) Save & Crawl'}
+      subtitle={debug ? 'Route: imports-settings' : 'Guided flow: 1) Setup → 2) Seeds → 3) Save / Crawl'}
       backAction={{ content: 'Back to Imports', url: `/app/imports${location.search}` }}
     >
       <BlockStack gap="400">
@@ -462,19 +285,7 @@ export default function ImportSettingsIndex() {
             <Loading />
           </Frame>
         ) : null}
-        {reviewError ? (
-          <Banner tone="critical" title="Couldn’t prepare Review">
-            <p>
-              We couldn’t crawl and stage items for review just now. You can adjust settings and try again. If the
-              problem persists, Review will still open using any existing staging data.
-            </p>
-            <InlineStack gap="200">
-              <Button url={`/app/imports/${templateId}/review${location.search}`} variant="primary">
-                Try Review again
-              </Button>
-            </InlineStack>
-          </Banner>
-        ) : null}
+        {/* Review functionality removed */}
         {showSavedToast ? (
           <Frame>
             <Toast content="Settings saved" onDismiss={() => setShowSavedToast(false)} duration={2000} />
@@ -501,7 +312,7 @@ export default function ImportSettingsIndex() {
             <InlineStack gap="300" blockAlign="center">
               <Badge tone="success">1. Setup target</Badge>
               <Badge tone={seeds.length ? 'success' : 'attention'}>2. Seeds</Badge>
-              <Badge tone="attention">3. Save & Crawl</Badge>
+              <Badge tone="attention">3. Save / Crawl</Badge>
             </InlineStack>
           </BlockStack>
         </Card>
@@ -658,7 +469,7 @@ export default function ImportSettingsIndex() {
                 autoComplete="off"
                 multiline={16}
                 placeholder={seedsFetched.length ? '' : 'Paste one URL per line'}
-                helpText="Edit the discovered list or paste your own. These will be saved when you click Save & Crawl."
+                helpText="Edit the discovered list or paste your own. These will be saved when you click Save."
               />
               {seedsText ? (
                 <details>
@@ -668,7 +479,7 @@ export default function ImportSettingsIndex() {
               ) : null}
               {!seedsFetched.length && !seeds.length ? (
                 <Banner tone="warning" title="No seeds yet">
-                  <p>Click Discover to fetch seeds, or paste URLs above and then click Save & Crawl.</p>
+                  <p>Click Discover to fetch seeds, or paste URLs above and then click Save.</p>
                 </Banner>
               ) : null}
             </BlockStack>
@@ -678,38 +489,102 @@ export default function ImportSettingsIndex() {
         <Card>
           <BlockStack gap="300">
             <Text as="h2" variant="headingMd">
-              Save & Crawl
+              Save Settings
             </Text>
             <Text as="p" tone="subdued">
-              This will save the settings (name, selected target, and current seeds) and start a background crawl to
-              prepare a Review. You can track progress from the Imports list.
+              Persist name, target, and seeds without starting a crawl.
             </Text>
             <InlineStack gap="200" align="start">
               <Button
                 variant="primary"
-                onClick={() => {
-                  if (loaderData.preparingRunId) {
-                    setRunGuardSaveOpen(true)
+                onClick={async () => {
+                  if (!templateId) return
+                  if (!targetId) {
+                    setSaveError('Select a target before saving.')
                     return
                   }
-                  onSaveAndCrawl()
+                  const validSeeds = seeds.filter(s => {
+                    try {
+                      const u = new URL(s)
+                      return ['http:', 'https:'].includes(u.protocol)
+                    } catch {
+                      return false
+                    }
+                  })
+                  setSaveLoading(true)
+                  setSaveError(null)
+                  try {
+                    const resp = await fetch(`/api/importer/targets/${templateId}/settings`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ name: importName, target: targetId, discoverSeedUrls: validSeeds }),
+                    })
+                    const jr = await resp.json()
+                    if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Failed to save settings')
+                    setShowSavedToast(true)
+                  } catch (e) {
+                    setSaveError((e as Error)?.message || 'Failed to save settings')
+                  } finally {
+                    setSaveLoading(false)
+                  }
                 }}
-                loading={crawlLoading || saveLoading}
-                disabled={crawlLoading || saveLoading || seeds.length === 0}
+                loading={saveLoading}
+                disabled={saveLoading}
               >
-                Save and Crawl
+                Save
               </Button>
-              <Button variant="secondary" disabled={!templateId} onClick={() => setRecrawlConfirmOpen(true)}>
-                Update All (Recrawl + Publish)
-              </Button>
-              {recrawlGoal != null ? <Badge tone="info">{`Goal: ${recrawlGoal} item(s)`}</Badge> : null}
               <Button
-                url={`/app/imports/${templateId}/review${location.search}`}
                 variant="secondary"
-                disabled={!templateId}
+                tone="success"
+                onClick={async () => {
+                  if (!templateId) return
+                  if (loaderData.preparingRunId && !activeRunId) {
+                    setSaveError(
+                      'A crawl run is already in progress. Please wait or cancel it before starting another.',
+                    )
+                    return
+                  }
+                  setCrawlLoading(true)
+                  setSaveError(null)
+                  try {
+                    const resp = await fetch('/api/importer/run', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ templateId }),
+                    })
+                    const jr = await resp.json()
+                    if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Failed to start crawl')
+                    const qs = new URLSearchParams(location.search)
+                    qs.set('started', '1')
+                    qs.set('tpl', templateId)
+                    qs.set('runId', String(jr.runId))
+                    navigateToImports(qs)
+                    setActiveRunId(String(jr.runId))
+                  } catch (e) {
+                    setSaveError((e as Error)?.message || 'Failed to start crawl')
+                  } finally {
+                    setCrawlLoading(false)
+                  }
+                }}
+                loading={crawlLoading}
+                disabled={Boolean(
+                  crawlLoading || saveLoading || !templateId || (loaderData.preparingRunId && !activeRunId),
+                )}
               >
-                Review
+                Crawl & Update
               </Button>
+              <Button
+                variant="secondary"
+                disabled={Boolean(!templateId || (loaderData.preparingRunId && !activeRunId))}
+                onClick={() => setRecrawlConfirmOpen(true)}
+              >
+                Recrawl + Publish
+              </Button>
+              {loaderData.preparingRunId && !activeRunId ? (
+                <Badge tone="attention">{`Run active ${loaderData.preparingRunId.slice(0, 8)} — crawl disabled`}</Badge>
+              ) : null}
+              {recrawlGoal != null ? <Badge tone="info">{`Goal: ${recrawlGoal} item(s)`}</Badge> : null}
+              {/* Review button removed */}
               <Button
                 tone="critical"
                 variant="secondary"
@@ -756,96 +631,491 @@ export default function ImportSettingsIndex() {
               >
                 Delete import…
               </Button>
-              {process.env.PRODUCT_DB_ENABLED === '1' ? null : (
-                <Button
-                  tone="critical"
-                  variant="secondary"
-                  disabled={!templateId}
-                  onClick={async () => {
-                    if (!templateId) return
-                    setClearError(null)
-                    setClearLoading(true)
-                    try {
-                      const r = await fetch('/api/importer/staging/clear', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ templateId, dryRun: true }),
-                      })
-                      const d = (await r.json()) as { ok?: boolean; count?: number; error?: string }
-                      if (!r.ok || !d?.ok) throw new Error(d?.error || 'Failed to estimate staged rows')
-                      setClearCount(typeof d.count === 'number' ? d.count : 0)
-                      setClearModalOpen(true)
-                    } catch (err) {
-                      setClearError((err as Error)?.message || 'Failed to estimate staged rows')
-                    } finally {
-                      setClearLoading(false)
-                    }
-                  }}
-                  loading={clearLoading}
-                >
-                  Clear staging…
-                </Button>
-              )}
+              {/* Clear staging button removed */}
               <Text as="span" tone="subdued">
-                {seeds.length === 0 ? 'Add or discover seeds to enable.' : `${seeds.length} seed(s) will be used.`}
+                {seeds.length === 0
+                  ? 'Add or discover seeds, then Save.'
+                  : `${seeds.length} local seed(s) (saved when you click Save).`}
               </Text>
             </InlineStack>
+            {activeRunId ? (
+              <div style={{ marginTop: 16 }}>
+                <BlockStack gap="200">
+                  <InlineStack gap="200" blockAlign="center" wrap>
+                    <Badge tone="info">{`Run: ${activeRunId.slice(0, 8)}`}</Badge>
+                    {runProgressExtended?.status ? (
+                      <Badge
+                        tone={
+                          runProgressExtended?.finished
+                            ? 'success'
+                            : runProgressExtended?.stuck
+                              ? 'critical'
+                              : 'attention'
+                        }
+                      >
+                        {runProgressExtended.stuck ? 'Stuck' : runProgressExtended.status}
+                      </Badge>
+                    ) : null}
+                    {typeof runProgressExtended?.progress?.['percent'] === 'number' ? (
+                      <Text as="span" variant="bodySm">{`Progress: ${runProgressExtended.progress!['percent']}%`}</Text>
+                    ) : null}
+                    {(() => {
+                      const seedIndex = runProgressExtended?.seedIndex
+                      const seedsTotal = runProgressExtended?.seedsTotal
+                      if (typeof seedIndex === 'number' && typeof seedsTotal === 'number') {
+                        return <Text as="span" variant="bodySm">{`Seed ${seedIndex} / ${seedsTotal}`}</Text>
+                      }
+                      return null
+                    })()}
+                    {(() => {
+                      const etaSeconds = runProgressExtended?.etaSeconds
+                      if (typeof etaSeconds === 'number') {
+                        return (
+                          <Text as="span" variant="bodySm" tone="subdued">{`ETA ~${Math.max(0, etaSeconds)}s`}</Text>
+                        )
+                      }
+                      return null
+                    })()}
+                    {(() => {
+                      // Smoothed seeds/min using last N poll samples (client-side ring buffer)
+                      const N = 6
+                      // Attach ring buffer to window to persist across re-renders without state churn
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const w: any = typeof window !== 'undefined' ? window : {}
+                      if (!w.__rbpSeedSamples) w.__rbpSeedSamples = []
+                      const startedAt = runProgressExtended?.startedAt
+                      const seedIndex = runProgressExtended?.seedIndex
+                      if (startedAt && typeof seedIndex === 'number') {
+                        try {
+                          const now = Date.now()
+                          // Push new sample
+                          w.__rbpSeedSamples.push({ t: now, i: seedIndex })
+                          // Trim
+                          if (w.__rbpSeedSamples.length > N) w.__rbpSeedSamples.splice(0, w.__rbpSeedSamples.length - N)
+                          if (w.__rbpSeedSamples.length >= 2) {
+                            const first = w.__rbpSeedSamples[0]
+                            const last = w.__rbpSeedSamples[w.__rbpSeedSamples.length - 1]
+                            const deltaSeeds = last.i - first.i
+                            const deltaMinutes = (last.t - first.t) / 60000
+                            if (deltaSeeds > 0 && deltaMinutes > 0) {
+                              const rate = (deltaSeeds / deltaMinutes).toFixed(2)
+                              return (
+                                <Text as="span" variant="bodySm" tone="subdued">{`${rate} seeds/min (smoothed)`}</Text>
+                              )
+                            }
+                          }
+                          // Fallback to whole-run average if insufficient samples
+                          const elapsedMs = now - new Date(startedAt).getTime()
+                          if (elapsedMs > 5000) {
+                            const seedsPerMin = (seedIndex / (elapsedMs / 60000)).toFixed(2)
+                            return <Text as="span" variant="bodySm" tone="subdued">{`${seedsPerMin} seeds/min`}</Text>
+                          }
+                        } catch {
+                          /* ignore */
+                        }
+                      }
+                      return null
+                    })()}
+                    {(() => {
+                      const lastUpdated = runProgressExtended?.lastUpdated
+                      if (lastUpdated) {
+                        try {
+                          const ageSec = Math.floor((Date.now() - new Date(lastUpdated).getTime()) / 1000)
+                          const stale = ageSec > 30 && !runProgressExtended?.finished && !runProgressExtended?.stuck
+                          return (
+                            <Text as="span" variant="bodySm" tone={stale ? 'critical' : 'subdued'}>
+                              {stale ? `Heartbeat ${ageSec}s ago` : `Updated ${ageSec}s ago`}
+                            </Text>
+                          )
+                        } catch {
+                          /* ignore */
+                        }
+                      }
+                      return null
+                    })()}
+                    {(() => {
+                      const det = runProgressExtended?.progress?.['details']
+                      const rawMs =
+                        det && typeof (det as Record<string, unknown>)['lastSeedDurationMs'] === 'number'
+                          ? ((det as Record<string, unknown>)['lastSeedDurationMs'] as number)
+                          : undefined
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const w: any = typeof window !== 'undefined' ? window : {}
+                      if (!w.__rbpSeedDurSamples) w.__rbpSeedDurSamples = []
+                      if (typeof rawMs === 'number' && rawMs > 0 && rawMs < 600000) {
+                        w.__rbpSeedDurSamples.push(rawMs)
+                        if (w.__rbpSeedDurSamples.length > 10)
+                          w.__rbpSeedDurSamples.splice(0, w.__rbpSeedDurSamples.length - 10)
+                        const avgMs =
+                          w.__rbpSeedDurSamples.reduce((a: number, b: number) => a + b, 0) /
+                          w.__rbpSeedDurSamples.length
+                        const lastSec = (rawMs / 1000).toFixed(1)
+                        const avgSec = (avgMs / 1000).toFixed(1)
+                        // Sparkline generation (mini polyline of last samples scaled to 0-1 range within viewBox heights)
+                        const samples: number[] = w.__rbpSeedDurSamples.slice()
+                        const max = Math.max(...samples)
+                        const min = Math.min(...samples)
+                        const range = Math.max(1, max - min)
+                        const points = samples
+                          .map((v, idx) => {
+                            const x = (idx / Math.max(1, samples.length - 1)) * 60 // width 60
+                            const norm = (v - min) / range
+                            const y = 16 - norm * 14 // top padding 2, bottom 2
+                            return `${x.toFixed(1)},${y.toFixed(1)}`
+                          })
+                          .join(' ')
+                        return (
+                          <InlineStack gap="100" blockAlign="center">
+                            <Text as="span" variant="bodySm" tone="subdued">{`Last seed: ${lastSec}s`}</Text>
+                            <Text
+                              as="span"
+                              variant="bodySm"
+                              tone="subdued"
+                            >{`Avg (${w.__rbpSeedDurSamples.length}): ${avgSec}s`}</Text>
+                            {samples.length >= 2 ? (
+                              <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                <svg
+                                  width={64}
+                                  height={18}
+                                  viewBox="0 0 64 18"
+                                  role="img"
+                                  aria-label="Seed duration sparkline"
+                                  style={{ overflow: 'visible' }}
+                                >
+                                  <polyline
+                                    points={points}
+                                    fill="none"
+                                    stroke="var(--p-color-border-critical)"
+                                    strokeWidth={1.4}
+                                    strokeLinejoin="round"
+                                    strokeLinecap="round"
+                                  />
+                                  {samples.length ? (
+                                    <circle
+                                      cx={(() => {
+                                        const lastIdx = samples.length - 1
+                                        return (lastIdx / Math.max(1, samples.length - 1)) * 60
+                                      })()}
+                                      cy={(() => {
+                                        const lastV = samples[samples.length - 1]
+                                        const norm = (lastV - min) / range
+                                        return 16 - norm * 14
+                                      })()}
+                                      r={2.2}
+                                      fill="var(--p-color-bg-critical-subdued)"
+                                      stroke="var(--p-color-border-critical)"
+                                      strokeWidth={1}
+                                    />
+                                  ) : null}
+                                </svg>
+                              </span>
+                            ) : null}
+                          </InlineStack>
+                        )
+                      }
+                      return null
+                    })()}
+                    <Button
+                      tone="critical"
+                      variant="secondary"
+                      disabled={cancelLoading || runProgressExtended?.finished}
+                      loading={cancelLoading}
+                      onClick={async () => {
+                        if (!activeRunId) return
+                        setCancelLoading(true)
+                        try {
+                          const resp = await fetch(`/api/importer/runs/${activeRunId}/cancel`, { method: 'POST' })
+                          const jr = await resp.json()
+                          if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Cancel failed')
+                        } catch (e) {
+                          setSaveError((e as Error)?.message || 'Cancel failed')
+                        } finally {
+                          setCancelLoading(false)
+                        }
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </InlineStack>
+                  {/* Phase label rendered below with segmented bar */}
+                  {typeof runProgressExtended?.progress?.['percent'] === 'number'
+                    ? (() => {
+                        const pct = Math.max(0, Math.min(100, Number(runProgressExtended.progress!['percent'])))
+                        const phase = String(runProgressExtended.progress?.['phase'] || '')
+                        const last = runProgressExtended?.lastUpdated
+                        const isStale = last
+                          ? !runProgressExtended?.finished && Date.now() - new Date(last).getTime() > 30_000
+                          : false
+                        const isStuck = !!runProgressExtended?.stuck
+                        const segments = [
+                          { key: 'discover', start: 0, end: 10, label: 'Discover', tone: 'info' },
+                          { key: 'direct-detail', start: 10, end: 30, label: 'Detail', tone: 'attention' },
+                          { key: 'series-parse', start: 30, end: 55, label: 'Series', tone: 'warning' },
+                          { key: 'crawl', start: 55, end: 60, label: 'Expand', tone: 'info' },
+                          { key: 'stage', start: 60, end: 70, label: 'Stage', tone: 'success' },
+                          { key: 'canonical-write', start: 70, end: 78, label: 'Write', tone: 'attention' },
+                          { key: 'diff', start: 78, end: 96, label: 'Diff', tone: 'critical' },
+                          { key: 'ready', start: 96, end: 100, label: 'Finalize', tone: 'success' },
+                        ] as const
+                        const activeIdx = segments.findIndex(s => s.key === phase)
+                        return (
+                          <div style={{ maxWidth: 520 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  width: '100%',
+                                  height: 14,
+                                  borderRadius: 6,
+                                  overflow: 'hidden',
+                                  border: '1px solid var(--p-color-border-subdued)',
+                                  position: 'relative',
+                                }}
+                              >
+                                {segments.map((s, i) => {
+                                  const widthPct = s.end - s.start
+                                  const filled =
+                                    pct >= s.end ? 1 : pct <= s.start ? 0 : (pct - s.start) / (s.end - s.start)
+                                  const bgBase = 'var(--p-color-bg-subdued)'
+                                  const toneColor = (() => {
+                                    switch (s.tone) {
+                                      case 'success':
+                                        return 'var(--p-color-bg-success-subdued)'
+                                      case 'critical':
+                                        return 'var(--p-color-bg-critical-subdued)'
+                                      case 'warning':
+                                        return 'var(--p-color-bg-warning-subdued)'
+                                      case 'attention':
+                                        return 'var(--p-color-bg-caution-subdued)'
+                                      case 'info':
+                                        return 'var(--p-color-bg-info-subdued)'
+                                      default:
+                                        return bgBase
+                                    }
+                                  })()
+                                  const active = i === activeIdx
+                                  return (
+                                    <div
+                                      key={s.key}
+                                      style={{ position: 'relative', flex: `${widthPct} 0 auto`, background: bgBase }}
+                                    >
+                                      <div
+                                        style={{
+                                          position: 'absolute',
+                                          inset: 0,
+                                          background: toneColor,
+                                          opacity: Math.max(0.15, filled * 0.85),
+                                          transition: 'opacity 0.3s linear',
+                                        }}
+                                      />
+                                      {active ? (
+                                        <div
+                                          style={{
+                                            position: 'absolute',
+                                            inset: 0,
+                                            boxShadow: '0 0 0 1px var(--p-color-border)',
+                                            borderRadius: 0,
+                                          }}
+                                        />
+                                      ) : null}
+                                    </div>
+                                  )
+                                })}
+                                {isStuck || isStale ? (
+                                  <div
+                                    style={{
+                                      position: 'absolute',
+                                      inset: 0,
+                                      pointerEvents: 'none',
+                                      background:
+                                        'repeating-linear-gradient(45deg, rgba(220,53,69,0.18), rgba(220,53,69,0.18) 6px, rgba(220,53,69,0.1) 6px, rgba(220,53,69,0.1) 12px)',
+                                    }}
+                                  />
+                                ) : null}
+                              </div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-start' }}>
+                                {segments.map(s => {
+                                  const current = s.key === phase
+                                  const windowTip =
+                                    `${s.label} ${s.start}–${s.end}%` +
+                                    (current ? ` (in progress ${pct.toFixed(1)}%)` : '')
+                                  return (
+                                    <Tooltip key={s.key} content={windowTip} dismissOnMouseOut>
+                                      <span
+                                        style={{
+                                          fontSize: 11,
+                                          opacity: current ? 0.95 : 0.55,
+                                          fontWeight: current ? 600 : 400,
+                                        }}
+                                      >
+                                        {s.label}
+                                      </span>
+                                    </Tooltip>
+                                  )
+                                })}
+                                <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.7 }}>{pct}%</span>
+                              </div>
+                              <InlineStack gap="200" blockAlign="center">
+                                {phase ? (
+                                  <Text as="p" tone="subdued">
+                                    Phase: {phase}
+                                  </Text>
+                                ) : null}
+                                {isStuck || isStale
+                                  ? (() => {
+                                      const last = runProgressExtended?.lastUpdated
+                                      let ageSec: number | null = null
+                                      if (last) {
+                                        try {
+                                          ageSec = Math.floor((Date.now() - new Date(last).getTime()) / 1000)
+                                        } catch {
+                                          ageSec = null
+                                        }
+                                      }
+                                      const stuckMsg = isStuck ? 'Watchdog marked run as stuck.' : 'Heartbeat stale.'
+                                      const phaseMsg = phase ? `Phase: ${phase}` : ''
+                                      const ageMsg = ageSec != null ? `Last update ${ageSec}s ago.` : 'No timestamp.'
+                                      const tip = [stuckMsg, ageMsg, phaseMsg].filter(Boolean).join(' ')
+                                      return (
+                                        <div style={{ display: 'inline-flex', gap: 8 }}>
+                                          <Tooltip content={tip} dismissOnMouseOut>
+                                            <Badge tone="critical">{isStuck ? 'Stuck detected' : 'No heartbeat'}</Badge>
+                                          </Tooltip>
+                                          {activeRunId ? (
+                                            <Link
+                                              url={`/api/importer/runs/${activeRunId}/debug.raw`}
+                                              target="_blank"
+                                              removeUnderline
+                                            >
+                                              Diagnostics
+                                            </Link>
+                                          ) : null}
+                                        </div>
+                                      )
+                                    })()
+                                  : null}
+                              </InlineStack>
+                            </div>
+                          </div>
+                        )
+                      })()
+                    : null}
+                  {runProgressExtended?.progress?.['details'] ? (
+                    <details>
+                      <summary style={{ cursor: 'pointer' }}>Details</summary>
+                      <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto' }}>
+                        {JSON.stringify(runProgressExtended.progress!['details'], null, 2)}
+                      </pre>
+                    </details>
+                  ) : null}
+                  {(() => {
+                    const runId = activeRunId
+                    if (!runId) return null
+                    return (
+                      <div style={{ maxWidth: 520 }}>
+                        <InlineStack gap="100" blockAlign="center">
+                          <Text as="p" tone="subdued" variant="bodySm">
+                            Recent log tail
+                          </Text>
+                          <Badge
+                            tone={
+                              streamConn === 'open'
+                                ? 'success'
+                                : streamConn === 'connecting'
+                                  ? 'attention'
+                                  : streamConn === 'fallback'
+                                    ? 'warning'
+                                    : 'critical'
+                            }
+                          >
+                            {streamConn === 'open'
+                              ? 'live'
+                              : streamConn === 'connecting'
+                                ? 'connecting…'
+                                : streamConn === 'fallback'
+                                  ? 'fallback'
+                                  : 'closed'}
+                          </Badge>
+                        </InlineStack>
+                        <div
+                          style={{
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            maxHeight: 160,
+                            overflow: 'auto',
+                            border: '1px solid var(--p-color-border-subdued)',
+                            padding: 8,
+                            borderRadius: 4,
+                          }}
+                        >
+                          {runLogs.length === 0 ? (
+                            <div style={{ opacity: 0.6 }}>
+                              {streamConn === 'open' ? 'No logs yet…' : 'Waiting for stream…'}
+                            </div>
+                          ) : (
+                            runLogs.map(l => {
+                              const t = new Date(l.at).toLocaleTimeString(undefined, { hour12: false })
+                              return (
+                                <div key={l.id} style={{ display: 'flex', gap: 8 }}>
+                                  <span style={{ opacity: 0.6 }}>{t}</span>
+                                  <span>{l.type}</span>
+                                  {l.payload ? (
+                                    <span
+                                      style={{
+                                        opacity: 0.6,
+                                        whiteSpace: 'nowrap',
+                                        textOverflow: 'ellipsis',
+                                        overflow: 'hidden',
+                                        maxWidth: 240,
+                                      }}
+                                    >
+                                      {l.payload}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              )
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
+                  {(() => {
+                    const d = runProgressExtended?.progress?.['details'] as Record<string, unknown> | undefined
+                    const agg = (d?.['aggregate'] as Record<string, number> | undefined) || undefined
+                    const counts = (d?.['counts'] as Record<string, number> | undefined) || undefined
+                    const badges: Array<React.ReactNode> = []
+                    if (agg) {
+                      if (typeof agg.staged === 'number')
+                        badges.push(<Badge key="agg-staged" tone="success">{`Staged: ${agg.staged}`}</Badge>)
+                      if (typeof agg.errors === 'number' && agg.errors > 0)
+                        badges.push(<Badge key="agg-errors" tone="critical">{`Errors: ${agg.errors}`}</Badge>)
+                    }
+                    if (counts) {
+                      if (typeof counts.add === 'number')
+                        badges.push(<Badge key="cnt-add" tone="success">{`Adds: ${counts.add}`}</Badge>)
+                      if (typeof counts.change === 'number')
+                        badges.push(<Badge key="cnt-change" tone="attention">{`Changes: ${counts.change}`}</Badge>)
+                      if (typeof counts.delete === 'number')
+                        badges.push(<Badge key="cnt-delete" tone="warning">{`Deletes: ${counts.delete}`}</Badge>)
+                      if (typeof counts.conflict === 'number' && counts.conflict > 0)
+                        badges.push(<Badge key="cnt-conflict" tone="critical">{`Conflicts: ${counts.conflict}`}</Badge>)
+                    }
+                    if (badges.length)
+                      return (
+                        <InlineStack gap="300" align="start">
+                          {badges}
+                        </InlineStack>
+                      )
+                    return null
+                  })()}
+                </BlockStack>
+              </div>
+            ) : null}
           </BlockStack>
         </Card>
 
-        {overwriteModalOpen ? (
-          <Frame>
-            <Modal
-              open
-              title="Overwrite staged items?"
-              onClose={() => {
-                setOverwriteModalOpen(false)
-                overwriteContinueRef.current = null
-                setSaveError('Cancelled by user. Existing staged items were left untouched.')
-              }}
-              primaryAction={{
-                content: 'Overwrite and continue',
-                destructive: true,
-                loading: overwriteConfirmLoading,
-                onAction: async () => {
-                  if (!overwriteContinueRef.current) return
-                  try {
-                    setOverwriteConfirmLoading(true)
-                    await overwriteContinueRef.current()
-                  } catch (err) {
-                    setSaveError((err as Error)?.message || 'Save and Crawl failed')
-                  } finally {
-                    setOverwriteConfirmLoading(false)
-                    setOverwriteModalOpen(false)
-                    overwriteContinueRef.current = null
-                  }
-                },
-              }}
-              secondaryActions={[
-                {
-                  content: 'Cancel',
-                  onAction: () => {
-                    setOverwriteModalOpen(false)
-                    overwriteContinueRef.current = null
-                    setSaveError('Cancelled by user. Existing staged items were left untouched.')
-                  },
-                },
-              ]}
-            >
-              <Modal.Section>
-                <Text as="p">This will overwrite {overwriteStagedCount} staged item(s). Continue?</Text>
-                <div style={{ marginTop: 12 }}>
-                  <Checkbox
-                    label="Force fresh staging (delete all staged rows before running)"
-                    checked={overwriteForceClear}
-                    onChange={val => setOverwriteForceClear(Boolean(val))}
-                    helpText="Best-effort wipe of existing staged rows for this supplier before the new run."
-                  />
-                </div>
-              </Modal.Section>
-            </Modal>
-          </Frame>
-        ) : null}
+        {/* Overwrite modal removed */}
 
         {runGuardDiscoverOpen ? (
           <Frame>
@@ -883,31 +1153,7 @@ export default function ImportSettingsIndex() {
           </Frame>
         ) : null}
 
-        {runGuardSaveOpen ? (
-          <Frame>
-            <Modal
-              open
-              title="Start new Save & Crawl during active prepare?"
-              onClose={() => setRunGuardSaveOpen(false)}
-              primaryAction={{
-                content: 'Continue & Crawl',
-                destructive: true,
-                onAction: () => {
-                  setRunGuardSaveOpen(false)
-                  onSaveAndCrawl()
-                },
-              }}
-              secondaryActions={[{ content: 'Cancel', onAction: () => setRunGuardSaveOpen(false) }]}
-            >
-              <Modal.Section>
-                <Text as="p">
-                  A prepare run (<code>{loaderData.preparingRunId}</code>) is currently in progress. Launching a new
-                  crawl will create a new run and may overwrite staged data after confirmation. Continue?
-                </Text>
-              </Modal.Section>
-            </Modal>
-          </Frame>
-        ) : null}
+        {/* Save & Crawl guard modal removed */}
 
         {discoverReplaceModalOpen ? (
           <Frame>
@@ -1170,8 +1416,172 @@ export default function ImportSettingsIndex() {
           </Frame>
         ) : null}
       </BlockStack>
+      {/** Stream run progress + logs via unified SSE (falls back to polling) */}
+      {activeRunId ? (
+        <RunProgressSSE
+          runId={activeRunId}
+          fallbackIntervalMs={progressPollMs}
+          onUpdate={(p: RunProgressPayloadExtended) => {
+            setRunProgressExtended(p)
+          }}
+          onLog={batch => {
+            if (!Array.isArray(batch) || batch.length === 0) return
+            setRunLogs(prev => {
+              const existing = new Set(prev.map(l => l.id))
+              const fresh = batch.filter(l => !existing.has(l.id))
+              return [...fresh, ...prev].slice(0, 50)
+            })
+          }}
+          onConnStateChange={s => setStreamConn(s)}
+        />
+      ) : null}
     </Page>
   )
+}
+
+// Lightweight inline component for polling without introducing external dependencies
+interface RunProgressPayloadExtended {
+  ok?: boolean
+  runId?: string
+  status?: string
+  progress?: Record<string, unknown>
+  summary?: Record<string, unknown>
+  finished?: boolean
+  seedIndex?: number
+  seedsTotal?: number
+  etaSeconds?: number
+  stuck?: boolean
+  lastUpdated?: string
+  startedAt?: string
+}
+// Legacy polling component removed after SSE adoption
+
+// SSE-based progress updater with polling fallback (unified /stream)
+function RunProgressSSE({
+  runId,
+  fallbackIntervalMs,
+  onUpdate,
+  onLog,
+  onConnStateChange,
+}: {
+  runId: string
+  fallbackIntervalMs: number
+  onUpdate: (p: RunProgressPayloadExtended) => void
+  onLog?: (logs: Array<{ id: string; at: string; type: string; payload?: string | null }>) => void
+  onConnStateChange?: (state: 'connecting' | 'open' | 'closed' | 'fallback') => void
+}) {
+  React.useEffect(() => {
+    let es: EventSource | null = null
+    let stopped = false
+
+    const setConn = (s: 'connecting' | 'open' | 'closed' | 'fallback') => {
+      try {
+        if (onConnStateChange) onConnStateChange(s)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const startFallback = () => {
+      if (stopped) return
+      setConn('fallback')
+      ;(async function poll() {
+        if (stopped) return
+        try {
+          const resp = await fetch(`/api/importer/runs/${runId}/progress`)
+          const jr = await resp.json()
+          if (resp.ok && jr?.ok && !stopped) onUpdate(jr)
+        } catch {
+          /* ignore */
+        } finally {
+          if (!stopped) setTimeout(poll, fallbackIntervalMs)
+        }
+      })()
+    }
+
+    try {
+      if (
+        typeof window === 'undefined' ||
+        typeof (window as unknown as { EventSource?: unknown }).EventSource === 'undefined'
+      ) {
+        startFallback()
+        return () => {
+          stopped = true
+        }
+      }
+      setConn('connecting')
+      es = new EventSource(`/api/importer/runs/${runId}/stream`)
+      es.addEventListener('progress', ev => {
+        try {
+          const data = JSON.parse((ev as MessageEvent).data) as {
+            status?: string
+            progress?: Record<string, unknown>
+            seedIndex?: number
+            seedsTotal?: number
+            etaSeconds?: number
+            stuck?: boolean
+            lastUpdated?: string
+            startedAt?: string
+          }
+          const finished = data.status === 'staged' || data.status === 'failed' || data.status === 'cancelled'
+          onUpdate({
+            ok: true,
+            runId,
+            status: data.status,
+            progress: (data.progress || {}) as Record<string, unknown>,
+            seedIndex: data.seedIndex,
+            seedsTotal: data.seedsTotal,
+            etaSeconds: data.etaSeconds,
+            stuck: data.stuck,
+            lastUpdated: data.lastUpdated,
+            startedAt: data.startedAt,
+            finished,
+          })
+        } catch {
+          /* ignore */
+        }
+      })
+      es.addEventListener('log', ev => {
+        try {
+          const data = JSON.parse((ev as MessageEvent).data) as {
+            logs?: Array<{ id: string; at: string; type: string; payload?: string | null }>
+            nextCursor?: string
+          }
+          if (onLog && data.logs && data.logs.length) onLog(data.logs)
+        } catch {
+          /* ignore */
+        }
+      })
+      es.addEventListener('ping', () => setConn('open'))
+      es.addEventListener('end', () => {
+        setConn('closed')
+        try {
+          es?.close()
+        } catch {
+          /* noop */
+        }
+      })
+      es.addEventListener('error', () => {
+        try {
+          es?.close()
+        } catch {
+          /* noop */
+        }
+        startFallback()
+      })
+    } catch {
+      startFallback()
+    }
+    return () => {
+      stopped = true
+      try {
+        if (es) es.close()
+      } catch {
+        /* noop */
+      }
+    }
+  }, [runId, fallbackIntervalMs, onUpdate, onLog, onConnStateChange])
+  return null
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {

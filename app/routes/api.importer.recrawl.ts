@@ -223,7 +223,7 @@ export async function action({ request }: ActionFunctionArgs) {
     } catch {
       /* ignore log failure */
     }
-    return json({ ok: true, runId, queued: false, goal, publish: pubObj })
+    return json({ ok: true, runId, queued: false, goal, publish: pubObj, code: 'recrawl_done' })
   }
 
   return json({ ok: true, runId, queued: false, goal, code: 'recrawl_done' })

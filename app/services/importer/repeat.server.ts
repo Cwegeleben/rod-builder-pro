@@ -1,5 +1,6 @@
 // <!-- BEGIN RBP GENERATED: hq-repeat-scrape-services-v1 -->
 import { prisma } from '../../db.server'
+import type { Prisma } from '@prisma/client'
 import { normalizeUrl } from '../../../packages/importer/src/lib/url'
 
 /**
@@ -55,10 +56,20 @@ export async function saveRepeatSet(supplierId: string, urls: string[], cron: st
   for (const raw of urls) {
     const n = normalizeUrl(raw)
     if (!n) continue
+    // Schema unique on (supplierId, templateId, url). Use null templateId scope explicitly.
     await prisma.productSource.upsert({
-      where: { product_source_supplier_url_unique: { supplierId, url: n } },
+      where: {
+        product_source_supplier_template_url_unique: { supplierId, templateId: null, url: n },
+      } as unknown as Prisma.ProductSourceWhereUniqueInput,
       update: { lastSeenAt: now, source: `scheduled:${groupId}` },
-      create: { supplierId, url: n, source: `scheduled:${groupId}`, firstSeenAt: now, lastSeenAt: now },
+      create: {
+        supplierId,
+        templateId: null,
+        url: n,
+        source: `scheduled:${groupId}`,
+        firstSeenAt: now,
+        lastSeenAt: now,
+      } as unknown as Prisma.ProductSourceCreateInput,
     })
   }
 
