@@ -50,21 +50,36 @@ export function isHqShopDomain(shop: string | null | undefined): boolean {
 }
 
 export async function isHqShop(request: Request): Promise<boolean> {
-  // Allow override via query/header/cookie for internal admin tools (debugging)
-  // This makes it easy for the Admin portal to fetch importer diagnostics without a full Shopify session.
-  const allowOverride = true
-  if (allowOverride) {
-    try {
-      const url = new URL(request.url)
-      const force = url.searchParams.get('hq') === '1'
-      const cookie = request.headers.get('cookie') || ''
-      const hasCookie = /(?:^|;\s*)rbp_hq=1(?:;|$)/.test(cookie)
-      const header = request.headers.get('x-hq-override') === '1'
-      if (force || hasCookie || header) return true
-    } catch {
-      // ignore URL parse errors
+  // Fast-path: explicit bypass / override signals (intended for e2e, smoke, preflight diagnostics) when enabled.
+  // Hard off switch: ALLOW_HQ_OVERRIDE must be '1' OR legacy always-on (for local dev) if ALLOW_HQ_OVERRIDE is undefined and NODE_ENV !== 'production'.
+  const allowOverrideEnv = process.env.ALLOW_HQ_OVERRIDE === '1'
+  const implicitDev =
+    typeof process !== 'undefined' && process.env.NODE_ENV !== 'production' && process.env.ALLOW_HQ_OVERRIDE !== '0'
+  const allowOverride = allowOverrideEnv || implicitDev
+
+  // Secondary high-security bypass via shared secret token (never echoed) for CI where env flag may be off.
+  // Provide HQ_BYPASS_TOKEN=<secret>; request must send header x-hq-bypass: <secret>.
+  const bypassToken = process.env.HQ_BYPASS_TOKEN || ''
+
+  try {
+    const url = new URL(request.url)
+    const cookie = request.headers.get('cookie') || ''
+    const h = (name: string) => request.headers.get(name) || ''
+
+    // Token header has highest precedence.
+    if (bypassToken && h('x-hq-bypass') === bypassToken) return true
+
+    if (allowOverride) {
+      const viaQuery = url.searchParams.get('hq') === '1' || url.searchParams.get('hqBypass') === '1'
+      const viaCookie = /(?:^|;\s*)rbp_hq=1(?:;|$)/.test(cookie) || /(?:^|;\s*)rbp_hq_bypass=1(?:;|$)/.test(cookie)
+      const viaHeader = h('x-hq-override') === '1' || h('x-hq-bypass') === '1'
+      if (viaQuery || viaCookie || viaHeader) return true
     }
+  } catch {
+    // ignore URL parse errors
   }
+
+  // Fallback: real authenticated shop check.
   try {
     const authenticate = await getAuthenticate()
     const { session } = await authenticate.admin(request)

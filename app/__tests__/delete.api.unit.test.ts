@@ -35,27 +35,44 @@ vi.mock('../db.server', () => {
     prisma: {
       importTemplate: {
         findMany: vi.fn(
-          async ({ where, select }: { where?: { id?: { in?: string[] } }; select?: { importConfig?: boolean } }) => {
-            // First call requests importConfig; second call checks preparingRunId
+          async ({
+            where,
+          }: {
+            where?: { id?: { in?: string[] } }
+            select?: { importConfig?: boolean; preparingRunId?: boolean }
+          }) => {
             const ids: string[] = where?.id?.in || []
-            if (select?.importConfig) {
-              return ids
-                .filter(id => Boolean(templatesById[id]))
-                .map(id => ({ id, importConfig: templatesById[id].importConfig }))
-            }
-            // preparingRunId check
-            return activePrepareIds.filter(id => ids.includes(id)).map(id => ({ id }))
+            return ids
+              .filter(id => Boolean(templatesById[id]))
+              .map(id => ({
+                id,
+                importConfig: templatesById[id].importConfig,
+                preparingRunId: activePrepareIds.includes(id) ? 'prep-run-' + id : null,
+              }))
           },
         ),
-        deleteMany: vi.fn(async () => ({ count: 1 })),
+        deleteMany: vi.fn(async ({ where }: { where: { id?: { in?: string[] } } }) => ({
+          count: where.id?.in?.length || 0,
+        })),
       },
       importLog: {
         count: vi.fn(async () => fixedCounts.logs),
         findMany: vi.fn(
-          async ({ where }: { where: { templateId?: { in?: string[] }; type?: string; at?: { gte?: string } } }) => {
+          async ({
+            where,
+          }: {
+            where: { templateId?: { in?: string[] }; type?: string; at?: { gte?: string } }
+            select?: { runId?: boolean; templateId?: boolean }
+          }) => {
             const ids: string[] = where?.templateId?.in || []
+            const type = where?.type || ''
+            // Simulate publish progress logs only for publishInProgressTemplateIds
             const hit = ids.filter(id => publishInProgressTemplateIds.includes(id))
-            return hit.map(templateId => ({ templateId }))
+            if (type === 'publish:progress') {
+              return hit.map(templateId => ({ templateId }))
+            }
+            // runId discovery pass: return synthetic runIds for all templates
+            return ids.map((templateId, idx) => ({ runId: `run-${idx + 1}`, templateId }))
           },
         ),
       },
@@ -94,8 +111,19 @@ function jsonRequest(url: string, body: unknown): Request {
 }
 
 describe('delete importer endpoint', () => {
-  type ErrorResponse = { error: string; templates?: string[] }
-  type OkResponse = { ok: boolean; dryRun?: boolean; deleted?: number; counts?: Record<string, unknown> }
+  type ErrorResponse = {
+    error: string
+    templates?: string[]
+    code?: string
+    blockers?: Array<{ code: string; templateIds: string[] }>
+  }
+  type OkResponse = {
+    ok: boolean
+    dryRun?: boolean
+    deleted?: number
+    counts?: Record<string, unknown>
+    forced?: boolean
+  }
 
   it('returns dry-run counts and supplier scope', async () => {
     const req = jsonRequest('http://localhost/api/importer/delete', { templateIds: ['tpl-1', 'tpl-2'], dryRun: true })
@@ -115,6 +143,7 @@ describe('delete importer endpoint', () => {
     const j = (await res.json()) as ErrorResponse
     expect(j.error).toMatch(/blocked/i)
     expect(j.templates).toContain('tpl-1')
+    expect(j.code).toBe('blocked')
   })
 
   it('blocks when publish is in progress', async () => {
@@ -124,6 +153,7 @@ describe('delete importer endpoint', () => {
     expect(res.status).toBe(409)
     const j = (await res.json()) as ErrorResponse
     expect(j.error).toMatch(/publish/i)
+    expect(j.code).toBe('blocked')
   })
 
   it('deletes templates and related artifacts', async () => {
@@ -135,5 +165,18 @@ describe('delete importer endpoint', () => {
     const j = (await res.json()) as OkResponse
     expect(j.ok).toBe(true)
     expect(j.deleted).toBe(2)
+    expect(j.forced).toBeUndefined()
+  })
+
+  it('forces delete when prepare active', async () => {
+    activePrepareIds = ['tpl-1']
+    publishInProgressTemplateIds = []
+    const req = jsonRequest('http://localhost/api/importer/delete?force=1', { templateIds: ['tpl-1'] })
+    const res = await deleteAction({ request: req } as unknown as ActionFunctionArgs)
+    expect(res.status).toBe(200)
+    const j = (await res.json()) as OkResponse
+    expect(j.ok).toBe(true)
+    expect(j.deleted).toBe(1)
+    expect(j.forced).toBe(true)
   })
 })

@@ -1,5 +1,11 @@
 import { PrismaClient } from '@prisma/client'
 
+// Ensure a sane default DATABASE_URL in production when not provided by env (e.g., fresh Fly staging)
+if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL) {
+  // Default to the persistent volume path used by Fly
+  process.env.DATABASE_URL = 'file:/data/dev.sqlite'
+}
+
 declare global {
   // eslint-disable-next-line no-var
   var prisma: PrismaClient

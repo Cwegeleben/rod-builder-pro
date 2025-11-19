@@ -61,9 +61,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const adminTagQuery = tag ? `tag:${safeTagForQuery}` : ''
   // <!-- END RBP GENERATED: importer-publish-shopify-v1 -->
   const q = url.searchParams.get('q') || ''
+  const typeFilter = url.searchParams.get('type') || ''
   const statusParams = url.searchParams.getAll('status')
   const sortParam = url.searchParams.get('sort') || 'updatedAt desc'
-  const first = Math.max(1, Math.min(100, parseInt(url.searchParams.get('first') || '25', 10)))
+  // Increase max page size and support cursor pagination for canonical view as well
+  const first = Math.max(1, Math.min(250, parseInt(url.searchParams.get('first') || '50', 10)))
   const after = url.searchParams.get('after') || undefined
 
   const mapSort = (s: string): { sortKey: 'UPDATED_AT' | 'TITLE'; reverse: boolean } => {
@@ -130,6 +132,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       })
     }
   }
+  let totalCountOut: number | undefined = undefined
   if (useCanonical) {
     // product_db path: local SQLite canonical products
     // Ensure Product table exists; if not, return an empty list instead of throwing
@@ -176,9 +179,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         canonical: true,
       })
     }
-    // Basic filtering: q matches sku OR title (case-insensitive substring)
-    const whereTitleSku: string | undefined = q ? `%${q.toLowerCase()}%` : undefined
-    // Fetch products (limit first) ordered by updatedAt desc unless overridden
+    // Build filters for SQL (canonical path): q matches sku OR title; optional type match
     // Prisma can handle filtering; simpler manual filter post-fetch for substring
     type CanonicalProduct = {
       id: string
@@ -192,47 +193,109 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
     // Access product table via prisma.$queryRawUnsafe (runtime guard path in db.server.ts may have skipped generation)
     let rows: CanonicalProduct[] = []
+    let totalCount = 0
     try {
-      rows = (await prisma.$queryRawUnsafe<CanonicalProduct[]>(
-        `SELECT id, supplierId, sku, title, type, status, updatedAt, latestVersionId FROM Product ORDER BY updatedAt DESC LIMIT ?`,
-        first,
-      )) as CanonicalProduct[]
+      // Keyset pagination using (updatedAt DESC, id DESC)
+      type Cursor = { updatedAt: string; id: string }
+      const conds: string[] = []
+      const condParams: Array<string | number | Date> = []
+      const condsNoCursor: string[] = []
+      const paramsNoCursor: Array<string | number | Date> = []
+      if (typeFilter) {
+        conds.push('type = ?')
+        condParams.push(typeFilter)
+        condsNoCursor.push('type = ?')
+        paramsNoCursor.push(typeFilter)
+      }
+      if (q) {
+        // Normalize query to be punctuation-agnostic so "Dual Trigger" matches titles/skus like "dual-trigger"
+        const qRaw = q.toLowerCase()
+        const qNorm = qRaw.replace(/[^a-z0-9]+/g, ' ').trim()
+        // Build SQL that also compares with hyphens/underscores removed (SQLite REPLACE nesting)
+        const cond = `(
+          lower(title) LIKE ? OR lower(sku) LIKE ? OR
+          REPLACE(REPLACE(lower(title), '-', ' '), '_', ' ') LIKE ? OR
+          REPLACE(REPLACE(lower(sku), '-', ' '), '_', ' ') LIKE ?
+        )`
+        conds.push(cond)
+        condParams.push(`%${qRaw}%`, `%${qRaw}%`, `%${qNorm}%`, `%${qNorm}%`)
+        condsNoCursor.push(cond)
+        paramsNoCursor.push(`%${qRaw}%`, `%${qRaw}%`, `%${qNorm}%`, `%${qNorm}%`)
+      }
+      if (after) {
+        try {
+          const decoded = Buffer.from(after, 'base64').toString('utf8')
+          const cur = JSON.parse(decoded) as Cursor
+          if (cur && cur.updatedAt && cur.id) {
+            // Use julianday() to compare datetimes in SQLite, which supports both space and 'T' ISO formats
+            conds.push('(julianday(updatedAt) < julianday(?) OR (julianday(updatedAt) = julianday(?) AND id < ?))')
+            condParams.push(cur.updatedAt, cur.updatedAt, cur.id)
+          }
+        } catch {
+          // ignore bad cursor; treat as first page
+        }
+      }
+      const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
+      const whereNoCursor = condsNoCursor.length ? `WHERE ${condsNoCursor.join(' AND ')}` : ''
+      const limit = first + 1
+      const sql = `SELECT id, supplierId, sku, title, type, status, updatedAt, latestVersionId FROM Product ${where} ORDER BY updatedAt DESC, id DESC LIMIT ?`
+      rows = (await prisma.$queryRawUnsafe<CanonicalProduct[]>(sql, ...condParams, limit)) as CanonicalProduct[]
+      const sqlCount = `SELECT COUNT(1) as c FROM Product ${whereNoCursor}`
+      // COUNT() may come back as BigInt in newer Node/Prisma versions; coerce safely for JSON serialization
+      const countRows = await prisma.$queryRawUnsafe<Array<{ c: number | bigint }>>(sqlCount, ...paramsNoCursor)
+      const rawCount = countRows?.[0]?.c ?? 0
+      if (typeof rawCount === 'bigint') {
+        const asNumber = Number(rawCount)
+        totalCount = Number.isSafeInteger(asNumber) ? asNumber : Number.MAX_SAFE_INTEGER
+      } else {
+        totalCount = Number(rawCount) || 0
+      }
     } catch {
       rows = []
     }
-    items = rows
-      .filter((p: CanonicalProduct) => {
-        if (!whereTitleSku) return true
-        const t = p.title?.toLowerCase() || ''
-        const sku = p.sku?.toLowerCase() || ''
-        return t.includes(q.toLowerCase()) || sku.includes(q.toLowerCase())
-      })
-      .map((p: CanonicalProduct) => ({
-        id: p.id,
-        title: p.title,
-        status: p.status === 'PUBLISHED' ? 'ACTIVE' : p.status === 'READY' ? 'DRAFT' : 'DRAFT',
-        vendor: null,
-        productType: p.type || null,
-        updatedAt: (() => {
-          try {
-            const d = new Date(p.updatedAt)
-            const pad = (n: number) => String(n).padStart(2, '0')
-            const YYYY = d.getUTCFullYear()
-            const MM = pad(d.getUTCMonth() + 1)
-            const DD = pad(d.getUTCDate())
-            const hh = pad(d.getUTCHours())
-            const mm = pad(d.getUTCMinutes())
-            const ss = pad(d.getUTCSeconds())
-            return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss} UTC`
-          } catch {
-            return null
-          }
-        })(),
-        canonical: true,
-        supplierId: p.supplierId,
-        sku: p.sku,
-        latestVersionId: p.latestVersionId,
-      }))
+    // Compute next cursor from the last visible row (if more than page size present)
+    let hasMore = false
+    if (rows.length > first) {
+      hasMore = true
+      rows = rows.slice(0, first)
+    }
+    items = rows.map((p: CanonicalProduct) => ({
+      id: p.id,
+      title: p.title,
+      status: p.status === 'PUBLISHED' ? 'ACTIVE' : p.status === 'READY' ? 'DRAFT' : 'DRAFT',
+      vendor: null,
+      productType: p.type || null,
+      updatedAt: (() => {
+        try {
+          const d = new Date(p.updatedAt)
+          const pad = (n: number) => String(n).padStart(2, '0')
+          const YYYY = d.getUTCFullYear()
+          const MM = pad(d.getUTCMonth() + 1)
+          const DD = pad(d.getUTCDate())
+          const hh = pad(d.getUTCHours())
+          const mm = pad(d.getUTCMinutes())
+          const ss = pad(d.getUTCSeconds())
+          return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss} UTC`
+        } catch {
+          return null
+        }
+      })(),
+      canonical: true,
+      supplierId: p.supplierId,
+      sku: p.sku,
+      latestVersionId: p.latestVersionId,
+    }))
+    nextCursor = (() => {
+      if (!hasMore || items.length === 0) return null
+      try {
+        const last = rows[rows.length - 1] as { updatedAt: Date; id: string }
+        const cur = { updatedAt: last.updatedAt.toISOString(), id: last.id }
+        return Buffer.from(JSON.stringify(cur), 'utf8').toString('base64')
+      } catch {
+        return null
+      }
+    })()
+    totalCountOut = totalCount
   } else if (admin) {
     // Legacy Shopify path
     const resp = await admin.graphql(GQL, {
@@ -291,6 +354,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     failed,
     adminTagQuery,
     canonical: useCanonical,
+    totalCount: totalCountOut,
   })
 }
 
@@ -309,6 +373,7 @@ export default function ProductsIndex() {
     failed,
     adminTagQuery,
     canonical,
+    totalCount,
   } = useLoaderData<typeof loader>() as {
     items: ProductRow[]
     q: string
@@ -323,6 +388,7 @@ export default function ProductsIndex() {
     failed?: number
     adminTagQuery?: string
     canonical?: boolean
+    totalCount?: number
   }
   const [params, setParams] = useSearchParams()
   const location = useLocation()
@@ -333,6 +399,7 @@ export default function ProductsIndex() {
       { id: 'active', content: 'Active' },
       { id: 'draft', content: 'Draft' },
       { id: 'archived', content: 'Archived' },
+      { id: 'rod-blanks', content: 'Rod Blanks' },
     ],
     [],
   )
@@ -390,7 +457,7 @@ export default function ProductsIndex() {
   })) as unknown as [{ title: string }, ...{ title: string }[]]
 
   return (
-    <Card>
+    <Card data-testid="page-products">
       <BlockStack gap="400">
         {/* <!-- BEGIN RBP GENERATED: importer-publish-shopify-v1 --> */}
         {banner === 'publishOk' ? (
@@ -450,6 +517,11 @@ export default function ProductsIndex() {
             next.set('view', tab.id)
             next.delete('status')
             if (tab.id !== 'all') next.append('status', tab.id)
+            // Apply product type filter for Rod Blanks tab in canonical view
+            if (tab.id === 'rod-blanks') next.set('type', 'Rod Blank')
+            else next.delete('type')
+            // Reset cursor when switching tabs
+            next.delete('after')
             setParams(next)
           }}
           mode={mode}
@@ -516,7 +588,9 @@ export default function ProductsIndex() {
 
         {canonical ? (
           <Text as="p" tone="subdued">
-            Showing canonical product_db rows ({items.length}).
+            {typeof (totalCount as number | undefined) === 'number'
+              ? `Showing ${items.length} of ${totalCount} product(s)`
+              : `Showing canonical product_db rows (${items.length}).`}
           </Text>
         ) : null}
         {empty ? (
@@ -708,6 +782,18 @@ export default function ProductsIndex() {
               ))}
             </IndexTable>
             <InlineStack align="end" gap="200">
+              {params.get('after') ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const next = new URLSearchParams(params)
+                    next.delete('after')
+                    setParams(next)
+                  }}
+                >
+                  Reset
+                </Button>
+              ) : null}
               <Button
                 disabled={!nextCursor}
                 onClick={() => {

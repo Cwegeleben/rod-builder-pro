@@ -104,3 +104,14 @@ export async function startNextQueuedForTemplate(templateId: string): Promise<vo
     }
   }
 }
+
+// Lightweight kick wrapper: only attempts promotion if no active preparing run
+export async function kickTemplate(templateId: string): Promise<void> {
+  try {
+    const tpl = await prisma.importTemplate.findUnique({ where: { id: templateId }, select: { preparingRunId: true } })
+    if (tpl?.preparingRunId) return // active run occupies slot
+    await startNextQueuedForTemplate(templateId)
+  } catch {
+    /* ignore kick errors */
+  }
+}

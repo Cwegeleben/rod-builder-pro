@@ -14,6 +14,8 @@ primary_region = 'sjc'
   SHOPIFY_APP_URL = 'https://rbp-app-staging.fly.dev'
   # Staging VM is 1GB; advertise ~768MB usable to Crawlee
   CRAWLEE_MEMORY_MBYTES = '768'
+  # Allow HQ override on staging so importer diagnostics can run without Shopify session
+  ALLOW_HQ_OVERRIDE = '1'
 
 [processes]
   app = 'node ./dbsetup.js npm run docker-start'

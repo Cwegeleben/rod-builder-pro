@@ -21,9 +21,11 @@ primary_region = 'sjc'
   # Switch /app/products to read from canonical product_db instead of Shopify Admin API
   PRODUCT_DB_ENABLED = '1'
   # Optional: hide legacy importer UI and redirect those routes to /app/products
-  # PRODUCT_DB_EXCLUSIVE = '1'
+  PRODUCT_DB_EXCLUSIVE = '1'
   ENABLE_SMOKES = 'true'
   SMOKE_ALLOW_PROD = '1'
+  # Enable detailed normalize skip logging during importer runs
+  IMPORTER_DEBUG_SKIPS = '1'
   # Allow any dev HQ shop to access HQ-gated routes; tighten to exact bare if desired via HQ_SHOPS
   HQ_SHOPS_REGEX = '^rbp-hq.*dev.*$'
   # Temporarily allow HQ override via URL (?hq=1), cookie (rbp_hq=1), or header (x-hq-override: 1)

@@ -451,6 +451,23 @@ model ImportLog {
 }
 // <!-- END RBP GENERATED: importer-v2-3 -->
 
+// BEGIN importer delete audit (v1)
+/// Audit log for delete operations (dry-run previews and committed deletes).
+/// Provides accountability & rollback insight. Not strictly required for runtime logic.
+model ImportDeleteAudit {
+  id            String   @id @default(cuid())
+  templateIds   String   // comma-separated list to keep simple for SQLite (alternatively Json in future)
+  countsJson    Json?    // { templates, logs, runs, diffs, staging, sources }
+  deletedJson   Json?    // same shape as counts when committed
+  forced        Boolean  @default(false)
+  dryRun        Boolean  @default(false)
+  userHq        Boolean  @default(true) // whether HQ guard passed
+  blockedCodes  String?  // comma-separated blocker codes present when forced
+  durationMs    Int?
+  createdAt     DateTime @default(now())
+}
+// END importer delete audit (v1)
+
 // BEGIN publish telemetry (canonical products)
 model PublishTelemetry {
   id          String   @id @default(cuid())

@@ -6,7 +6,19 @@
 
 import Shopify from 'shopify-api-node'
 import crypto from 'node:crypto'
-import { prisma } from '../../../../app/db.server'
+// Avoid importing Prisma at module top-level to keep this file usable in unit tests that don't initialize Prisma.
+// We'll dynamically import prisma where needed.
+let _prisma: any | null = null
+async function getPrisma() {
+  if (_prisma) return _prisma
+  try {
+    const mod = await import('../../../../app/db.server')
+    _prisma = (mod as any).prisma
+  } catch {
+    _prisma = null
+  }
+  return _prisma
+}
 
 const NS = 'rbp'
 // Shopify namespace must match pattern: lowercase alnum, underscores, or hyphens; dots are NOT allowed.
@@ -511,6 +523,7 @@ export async function upsertShopifyForRun(
   cfg: ShopCfg,
 ): Promise<Array<{ externalId: string; productId: number; handle: string; action: 'created' | 'updated' }>> {
   const shopify = mkClient(cfg)
+  const prisma = await getPrisma()
   const db: any = prisma as any
   // Read run to obtain canonical supplierId for this import context
   let runSupplierId: string | null = null

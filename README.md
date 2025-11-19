@@ -447,6 +447,20 @@ npx prisma migrate deploy
 
 Document any manual resolve steps in the CHANGELOG for traceability.
 
+## Importer Delete & Audit
+
+The importer delete endpoint (`POST /api/importer/delete`) supports dry-run previews (`?dry=1`) and force overrides (`?force=1`). It removes importer template data (logs, runs, diffs, staged parts, sources). See `docs/importer/delete.md` for full contract, blocker codes, and audit logging details.
+
+Key points:
+
+- Structured error codes: `blocked`, `not_found`, `unknown`.
+- Blocker codes: `active_prepare`, `publish_in_progress`.
+- Force override bypasses blockers; audit row records `forced=true`.
+- Audit model `ImportDeleteAudit` stores counts, durationMs, and usage flags.
+- UI modal shows preview counts and offers a force checkbox when blockers detected.
+
+Future ideas (tracked separately): batch delete optimization, alert on force spike, richer partial-failure reporting.
+
 ## Smoke validation routes (Fly-only)
 
 For simple end-to-end checks in non-embedded contexts (useful on Fly), a set of minimal importer smoke routes exist. They are disabled by default and guarded by a bearer token.

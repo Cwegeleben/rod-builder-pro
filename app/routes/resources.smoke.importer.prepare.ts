@@ -29,6 +29,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .map(s => s.trim())
       .filter(Boolean)
     const discoverSeries = url.searchParams.get('discoverSeries') === '1'
+    const noExpand = url.searchParams.get('noExpand') === '1'
+    const limitParam = (() => {
+      const raw = url.searchParams.get('limit')
+      if (!raw) return undefined
+      const n = Number(raw)
+      return Number.isFinite(n) && n > 0 ? n : undefined
+    })()
+    const overrideSeries = (url.searchParams.get('overrideSeries') || '').trim() || undefined
+    const pipelineParam: 'simple' | 'full' | undefined = (() => {
+      const raw = (url.searchParams.get('pipeline') || '').toLowerCase()
+      if (raw === 'simple') return 'simple'
+      if (raw === 'full') return 'full'
+      return undefined
+    })()
     const notes = url.searchParams.get('notes') || 'smoke:prepare'
     console.warn('[smoke:prepare] init', {
       templateId,
@@ -74,7 +88,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Auto-discover Batson seeds when requested:
     // - If seed looks like /blanks-by-series -> discover series pages
     // - If seed looks like /rod-blanks -> discover all rod blank detail URLs
-    if (targetId === 'batson-rod-blanks' && (discoverSeries || seedUrls.length === 1)) {
+    if (!noExpand && targetId === 'batson-rod-blanks' && (discoverSeries || seedUrls.length === 1)) {
       const s = seedUrls[0] || ''
       try {
         if (s.includes('/blanks-by-series')) {
@@ -102,6 +116,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     }
 
+    // Apply limit if requested
+    if (typeof limitParam === 'number' && limitParam > 0 && seedUrls.length > limitParam) {
+      seedUrls = seedUrls.slice(0, limitParam)
+    }
+
     if (!targetId || seedUrls.length === 0)
       return json({ ok: false, error: 'Missing target or seeds' }, { status: 400 })
 
@@ -127,6 +146,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       variantTemplateId: undefined,
       scraperId: undefined,
       useSeriesParser: useSeriesParserForTarget(targetId),
+      includeSeedsOnly: noExpand,
+      limit: limitParam,
+      pipeline: pipelineParam,
+      overrideSeries,
     }
 
     // Create run via raw SQL to avoid JSON conversion issues; summary will be filled later by pipeline

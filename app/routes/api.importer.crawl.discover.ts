@@ -1,9 +1,7 @@
 import { json, type ActionFunctionArgs } from '@remix-run/node'
-import { requireHqShopOr404 } from '../lib/access.server'
-import { getDiscoverSiteById, getSiteConfigForUrlDiscoverV1, getSiteConfigForUrl } from '../server/importer/sites'
+import { isHqShop } from '../lib/access.server'
+import { getDiscoverSiteById, getSiteConfigForUrlDiscoverV1 } from '../server/importer/sites'
 import { renderHeadlessHtml } from '../server/headless/renderHeadlessHtml'
-import * as cheerio from 'cheerio'
-import { crawlBatsonRodBlanksListing as crawlRaw } from '../server/importer/crawlers/batsonListing'
 import {
   PRODUCT_MODELS,
   SHOPIFY_MAPPERS,
@@ -12,7 +10,7 @@ import {
 } from '../server/importer/products/models'
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requireHqShopOr404(request)
+  const hq = await isHqShop(request)
   const ct = request.headers.get('content-type') || ''
   const read = async () => {
     if (/application\/json/i.test(ct)) {
@@ -55,6 +53,9 @@ export async function action({ request }: ActionFunctionArgs) {
   const siteId = (siteIdRaw || '').trim()
   const sourceUrl = (sourceUrlRaw || '').trim()
   if (!sourceUrl) return json({ urls: [], debug: { notes: ['sourceUrl missing'] } })
+  if (!hq) {
+    return json({ urls: [], debug: { status: 403, reason: 'hq_required' } }, { status: 403 })
+  }
 
   const headers: Record<string, string> = {
     'User-Agent':
@@ -111,92 +112,42 @@ export async function action({ request }: ActionFunctionArgs) {
   const res = await siteObj.discover(fetchHtml, baseUrl)
   let urls = Array.isArray(res.seeds) ? res.seeds.map((s: { url: string }) => s.url) : []
   // Enhanced pagination: follow rel=next and numbered pages iteratively (same-host), with a safety cap
-  const htmlUsed = (res.usedMode === 'headless' ? headlessHtml : staticHtml) || ''
-  let pagesVisited = 1
-  const visitedPages = new Set<string>()
-  const pageQueue: string[] = []
-  let pageUrls: string[] = []
-  const hostname = (() => {
-    try {
-      return new URL(baseUrl).hostname
-    } catch {
-      return ''
-    }
-  })()
-  const normalizeAbs = (href: string) => {
-    try {
-      const abs = /^https?:/i.test(href) ? href : `${baseUrl}${href.startsWith('/') ? '' : '/'}${href}`
-      const u = new URL(abs)
-      u.hash = ''
-      return u.toString()
-    } catch {
-      return href
-    }
+  // Prefer site-provided pagination count when available; the site discovery handles pagination itself.
+  const pagesVisitedRaw = (res.debug as Record<string, unknown> | undefined)?.pagesVisited as number | undefined
+  const pagesVisited = Number.isFinite(pagesVisitedRaw) ? (pagesVisitedRaw as number) : 1
+  urls = Array.from(new Set(urls))
+  // Compare discovered vs expected results (from site debug) and emit a warning note if >5% off
+  const expectedResults = (res.debug as Record<string, unknown> | undefined)?.expectedResults as
+    | number
+    | null
+    | undefined
+  const apiNotes: string[] = []
+  if (typeof expectedResults === 'number' && expectedResults > 0) {
+    const diff = Math.abs(urls.length - expectedResults)
+    const pct = (diff / expectedResults) * 100
+    if (pct > 5)
+      apiNotes.push(`api: discovered ${urls.length} vs expected ${expectedResults} (diff ${pct.toFixed(1)}%)`)
   }
-  const collectPaginationLinks = ($: cheerio.CheerioAPI) => {
-    const out: string[] = []
-    $('a[href]').each((_i, a) => {
-      const href = String($(a).attr('href') || '').trim()
-      if (!href) return
-      const text = ($(a).text() || '').trim().toLowerCase()
-      const rel = String($(a).attr('rel') || '').toLowerCase()
-      const cls = String($(a).attr('class') || '').toLowerCase()
-      const abs = normalizeAbs(href)
-      try {
-        const u = new URL(abs)
-        if (u.hostname !== hostname) return
-        const isNext = rel.includes('next') || /\bnext\b/.test(text) || /\bnext\b/.test(cls)
-        const isPageParam = u.searchParams.has('page')
-        const isPagePath = /page\/(\d+)/i.test(u.pathname) || /page\d+/i.test(u.pathname)
-        if (isNext || isPageParam || isPagePath || /pagination|pager|page\b/.test(cls)) {
-          out.push(u.toString())
-        }
-      } catch {
-        /* ignore */
-      }
-    })
-    return Array.from(new Set(out))
-  }
+  // Persist discovered URLs as the category's seed set (best-effort)
+  let persistedCount = 0
+  let persistErrors = 0
   try {
-    if (htmlUsed) {
-      // Seed queue from initial page
-      const $0 = cheerio.load(htmlUsed)
-      const initial = collectPaginationLinks($0)
-      for (const u of initial) {
-        if (!visitedPages.has(u)) pageQueue.push(u)
-      }
-      pageUrls = initial.slice(0, 5)
-      const MAX_PAGES = 12
-      while (pageQueue.length && pagesVisited < MAX_PAGES) {
-        const pu = pageQueue.shift()!
-        if (!pu || visitedPages.has(pu)) continue
-        visitedPages.add(pu)
+    const supplierId = (siteId && siteId.trim()) || ((siteObj as { id?: string } | null)?.id || '').trim() || null
+    if (supplierId) {
+      const { upsertProductSource } = await import('../../packages/importer/src/seeds/sources')
+      for (const u of urls) {
         try {
-          const ctrl = new AbortController()
-          const timer = setTimeout(() => ctrl.abort(), 10_000)
-          const r = await fetch(pu, { headers, signal: ctrl.signal })
-          clearTimeout(timer)
-          if (r.ok) {
-            const html = await r.text()
-            const more = crawlRaw(html, baseUrl)
-            urls.push(...more)
-            pagesVisited++
-            // Discover more pagination links from this page (for deeper pages)
-            const $ = cheerio.load(html)
-            const nexts = collectPaginationLinks($)
-            for (const nx of nexts) {
-              if (!visitedPages.has(nx)) pageQueue.push(nx)
-            }
-          }
+          await upsertProductSource(supplierId, u, 'discovered', 'discover:category', undefined)
+          persistedCount++
         } catch {
-          /* ignore page errors */
+          persistErrors++
+          /* ignore individual seed errors */
         }
       }
     }
   } catch {
-    /* ignore pagination */
+    /* ignore persistence errors */
   }
-  urls = Array.from(new Set(urls))
   const debug = {
     siteId: siteObj.id || siteId || 'unknown',
     usedMode: res.usedMode || 'none',
@@ -205,12 +156,20 @@ export async function action({ request }: ActionFunctionArgs) {
     deduped: (res.debug as Record<string, unknown> | undefined)?.deduped || urls.length,
     sample: urls.slice(0, 5),
     htmlExcerpt: (staticHtml || headlessHtml || '').slice(0, 600),
-    notes: ((res.debug as Record<string, unknown> | undefined)?.notes as string[] | undefined) || [],
+    notes: [
+      ...((((res.debug as Record<string, unknown> | undefined)?.notes as string[] | undefined) || []) as string[]),
+      ...apiNotes,
+    ],
+    expectedResults: typeof expectedResults === 'number' ? expectedResults : undefined,
     status: 200,
     contentLength: (staticHtml || headlessHtml || '').length,
     textLength: (staticHtml || headlessHtml || '').replace(/<[^>]+>/g, '').length,
     pagesVisited,
-    pageUrlsSample: pageUrls.slice(0, 5),
+    pageUrlsSample: Array.isArray((res.debug as Record<string, unknown> | undefined)?.pageUrls)
+      ? ((res.debug as Record<string, unknown>)?.pageUrls as string[]).slice(0, 5)
+      : [],
+    persisted: persistedCount || undefined,
+    persistErrors: persistErrors || undefined,
   }
   // Optionally include a preview for the first (or provided) series URL
   if (alsoPreview) {
@@ -255,12 +214,8 @@ export async function action({ request }: ActionFunctionArgs) {
         }
       }
       if (html) {
-        const siteCfg = getSiteConfigForUrl(src)
-        const modelId =
-          (siteCfg as { products?: { scrapeType?: string } } | undefined)?.products?.scrapeType ===
-          'batson-attribute-grid'
-            ? 'batson-attribute-grid'
-            : 'batson-attribute-grid'
+        // Select model; currently Batson attribute-grid is expected on series pages
+        const modelId = 'batson-attribute-grid'
         const parse: ProductModel = PRODUCT_MODELS[modelId]
         const mapToShopify: ShopifyMapper = SHOPIFY_MAPPERS[modelId]
         let { rows } = parse(html, baseUrl)
@@ -289,6 +244,4 @@ export async function action({ request }: ActionFunctionArgs) {
   return json({ urls, debug })
 }
 
-export default function ImporterDiscoverApi() {
-  return null
-}
+// resource route (no default export)

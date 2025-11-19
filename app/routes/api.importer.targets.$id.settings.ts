@@ -2,7 +2,7 @@
 import type { ActionFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { createHash } from 'node:crypto'
-import { requireHqShopOr404 } from '../lib/access.server'
+import { isHqShop } from '../lib/access.server'
 import { getTargetById } from '../server/importer/sites/targets'
 
 type SettingsBody = {
@@ -27,7 +27,8 @@ function coerceUrls(v: unknown): string[] {
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  await requireHqShopOr404(request)
+  const hq = await isHqShop(request)
+  if (!hq) return json({ error: 'hq_required' }, { status: 403 })
   const id = params.id || ''
   if (!id) return json({ error: 'Missing id' }, { status: 400 })
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 })

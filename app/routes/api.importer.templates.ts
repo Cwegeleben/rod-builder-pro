@@ -7,7 +7,7 @@
 // <!-- END RBP GENERATED: importer-v2-3 -->
 // hq-importer-new-import-v2
 import { json, type LoaderFunctionArgs } from '@remix-run/node'
-import { requireHqShopOr404 } from '../lib/access.server'
+import { isHqShop } from '../lib/access.server'
 import { listTemplatesSummary } from '../models/specTemplate.server'
 import { listScrapers } from '../services/importer/scrapers.server'
 import { authenticate } from '../shopify.server'
@@ -26,7 +26,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: baseHeaders })
   }
-  await requireHqShopOr404(request)
+  const hq = await isHqShop(request)
+  if (!hq) {
+    return new Response(JSON.stringify({ templates: [], error: 'hq_required' }), {
+      status: 403,
+      headers: new Headers({ 'Content-Type': 'application/json', ...Object.fromEntries(baseHeaders) }),
+    })
+  }
   const url = new URL(request.url)
   const kind = (url.searchParams.get('kind') || '').toLowerCase()
   // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
@@ -239,6 +245,4 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json({ error: 'Missing or invalid kind' }, { status: 400 })
 }
 
-export default function TemplatesApi() {
-  return null
-}
+// resource route (no default export)

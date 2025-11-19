@@ -21,8 +21,6 @@ export function shouldStageBatsonProduct(
     return { stage: true }
   }
 }
-import { upsertStaging } from '../staging/upsert'
-import { fetchActiveSources, upsertProductSource, linkExternalIdForSource } from '../seeds/sources'
 import { normalizeUrl } from '../lib/url'
 
 const ORIGIN = 'https://batsonenterprises.com'
@@ -68,8 +66,12 @@ export async function crawlBatson(
     // Safety valves: cap total processed requests and optionally restrict discovery
     maxRequestsPerCrawl?: number
     discoveryMode?: 'full' | 'products-only'
+    auth?: { cookieHeader?: string }
   },
 ) {
+  // Lazy-load DB-backed helpers to avoid bringing Prisma into unit tests that import only pure helpers
+  const { fetchActiveSources, upsertProductSource, linkExternalIdForSource } = await import('../seeds/sources')
+  const { upsertStaging } = await import('../staging/upsert')
   const SUPPLIER = options?.supplierId || 'batson'
   const seen = new Set<string>()
   try {
@@ -77,6 +79,7 @@ export async function crawlBatson(
   } catch {
     /* keep default */
   }
+  const AUTH_COOKIE = options?.auth?.cookieHeader || process.env.BATSON_AUTH_COOKIE || process.env.BATSON_COOKIE || ''
   // Compose initial seeds: saved from DB + env forced + caller-provided
   const savedRows = options?.ignoreSavedSources ? [] : await fetchActiveSources(SUPPLIER, options?.templateId)
   const saved = (savedRows as Array<{ url: string }>).map((s: { url: string }) => s.url)
@@ -121,6 +124,17 @@ export async function crawlBatson(
         if (blockAssets && (/\/collections\//i.test(currentUrl) || /\/ecom\/purchaselistsearch/i.test(currentUrl))) {
           const rt = route.request().resourceType()
           if (rt === 'image' || rt === 'font') return route.abort()
+        }
+        // Inject Cookie header for authenticated wholesale pricing if provided
+        if (AUTH_COOKIE) {
+          try {
+            const req = route.request()
+            const hdrs = { ...req.headers() } as Record<string, string>
+            hdrs['cookie'] = AUTH_COOKIE
+            return route.continue({ headers: hdrs })
+          } catch {
+            /* fall through */
+          }
         }
         return route.continue()
       })

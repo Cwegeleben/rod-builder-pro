@@ -25,6 +25,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         description: string | null
         images: string | null
         normSpecs: string | null
+        rawSpecs: string | null
         priceMsrp: number | null
         priceWholesale: number | null
         availability: string | null
@@ -32,7 +33,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }>
     >(
       `SELECT p.id, p.supplierId, p.sku, p.title, p.type, p.status, p.updatedAt, p.latestVersionId,
-              v.description, v.images, v.normSpecs, v.priceMsrp, v.priceWholesale, v.availability, v.fetchedAt
+              v.description, v.images, v.normSpecs, v.rawSpecs, v.priceMsrp, v.priceWholesale, v.availability, v.fetchedAt
          FROM Product p
          LEFT JOIN ProductVersion v ON v.id = p.latestVersionId
         WHERE p.id = ?
@@ -63,6 +64,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         description: r.description,
         images: safeParse(r.images) as unknown,
         normSpecs: safeParse(r.normSpecs) as unknown,
+        rawSpecs: safeParse(r.rawSpecs) as unknown,
         priceMsrp: r.priceMsrp != null ? Number(r.priceMsrp) : null,
         priceWholesale: r.priceWholesale != null ? Number(r.priceWholesale) : null,
         availability: r.availability,
@@ -94,6 +96,7 @@ export default function ProductDetail() {
             description: string | null
             images: unknown
             normSpecs: unknown
+            rawSpecs: unknown
             priceMsrp: number | null
             priceWholesale: number | null
             availability: string | null
@@ -198,6 +201,116 @@ export default function ProductDetail() {
                     {data.product.version.priceWholesale ?? '-'}
                   </Text>
                   <Text as="p">Fetched: {data.product.version.fetchedAt || '-'}</Text>
+                  {/* Images preview */}
+                  {(() => {
+                    const imgs = data.product.version.images as unknown as unknown[] | null
+                    const urls = Array.isArray(imgs)
+                      ? ((imgs as unknown[]).filter(u => typeof u === 'string') as string[])
+                      : []
+                    if (!urls.length) return null
+                    return (
+                      <details>
+                        <summary style={{ cursor: 'pointer' }}>Images ({urls.length})</summary>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 6 }}>
+                          {urls.map(u => (
+                            <a
+                              key={u}
+                              href={u}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ border: '1px solid var(--p-color-border-subdued)', borderRadius: 4, padding: 4 }}
+                            >
+                              <img src={u} alt="" style={{ display: 'block', height: 96, width: 'auto' }} />
+                            </a>
+                          ))}
+                        </div>
+                      </details>
+                    )
+                  })()}
+                  {/* Attribute/spec details */}
+                  {(() => {
+                    const rawUnknown = data.product.version.rawSpecs as unknown
+                    const rawObj =
+                      rawUnknown && typeof rawUnknown === 'object' ? (rawUnknown as Record<string, unknown>) : null
+                    // Pick the first object-like among raw.spec, raw.raw, or raw itself
+                    let specObj: Record<string, unknown> | null = null
+                    if (rawObj && typeof rawObj === 'object') {
+                      const candidate1 = (rawObj as Record<string, unknown>)['spec']
+                      const candidate2 = (rawObj as Record<string, unknown>)['raw']
+                      if (candidate1 && typeof candidate1 === 'object') specObj = candidate1 as Record<string, unknown>
+                      else if (candidate2 && typeof candidate2 === 'object')
+                        specObj = candidate2 as Record<string, unknown>
+                      else specObj = rawObj
+                    }
+                    const attrs: Record<string, unknown> = specObj && typeof specObj === 'object' ? specObj : {}
+                    const entries = Object.entries(attrs).filter(entry => {
+                      const v = entry[1]
+                      if (v == null) return false
+                      const s = Array.isArray(v) ? v.join(', ') : String(v)
+                      return s.trim().length > 0
+                    })
+                    if (!entries.length) return null
+                    return (
+                      <details>
+                        <summary style={{ cursor: 'pointer' }}>Attributes ({entries.length})</summary>
+                        <div style={{ maxHeight: 320, overflow: 'auto', paddingTop: 4 }}>
+                          <table className="text-xs" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <tbody>
+                              {entries.map(([k, v]) => {
+                                const val = Array.isArray(v) ? v.join(', ') : String(v)
+                                return (
+                                  <tr key={k}>
+                                    <td style={{ verticalAlign: 'top', padding: '2px 6px', fontWeight: 500 }}>{k}</td>
+                                    <td style={{ verticalAlign: 'top', padding: '2px 6px' }}>{val || '-'}</td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+                    )
+                  })()}
+                  {/* Raw JSON dumps (debug) */}
+                  <details>
+                    <summary style={{ cursor: 'pointer' }}>Raw JSON</summary>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 6 }}>
+                      <div>
+                        <Text as="h3" variant="headingSm">
+                          rawSpecs
+                        </Text>
+                        <pre
+                          style={{
+                            whiteSpace: 'pre-wrap',
+                            maxHeight: 240,
+                            overflow: 'auto',
+                            border: '1px solid var(--p-color-border-subdued)',
+                            padding: 8,
+                            borderRadius: 4,
+                          }}
+                        >
+                          {JSON.stringify(data.product.version.rawSpecs, null, 2)}
+                        </pre>
+                      </div>
+                      <div>
+                        <Text as="h3" variant="headingSm">
+                          normSpecs
+                        </Text>
+                        <pre
+                          style={{
+                            whiteSpace: 'pre-wrap',
+                            maxHeight: 240,
+                            overflow: 'auto',
+                            border: '1px solid var(--p-color-border-subdued)',
+                            padding: 8,
+                            borderRadius: 4,
+                          }}
+                        >
+                          {JSON.stringify(data.product.version.normSpecs, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+                  </details>
                 </div>
               </div>
             </Card>

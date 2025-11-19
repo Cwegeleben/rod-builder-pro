@@ -1,5 +1,4 @@
 // <!-- BEGIN RBP GENERATED: importer-publish-shopify-v1 -->
-import { prisma } from '../../db.server'
 import { getShopAccessToken } from '../shopifyAdmin.server'
 import { upsertShopifyForRun } from '../../../packages/importer/src/sync/shopify'
 
@@ -35,6 +34,7 @@ export async function publishRunToShopify({
   dryRun?: boolean
   shopDomain?: string
 }): Promise<PublishResult> {
+  const { prisma } = await import('../../db.server')
   // Resolve templateId for logging (best-effort)
   let templateId: string | null = null
   try {

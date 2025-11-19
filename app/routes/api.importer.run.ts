@@ -1,9 +1,10 @@
 // Unified sequential crawl launcher (new API)
 import { json, type ActionFunctionArgs } from '@remix-run/node'
-import { requireHqShopOr404 } from '../lib/access.server'
+import { isHqShop } from '../lib/access.server'
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requireHqShopOr404(request)
+  const hq = await isHqShop(request)
+  if (!hq) return json({ error: 'hq_required' }, { status: 403 })
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 })
 
   let body: Record<string, unknown> = {}
@@ -60,9 +61,15 @@ export async function action({ request }: ActionFunctionArgs) {
       : []
 
     const { startImportFromOptions } = await import('../services/importer/runOptions.server')
+    // Use series parser for Reel Seats categories; otherwise follow simple path
+    const useSeriesParser = /reel/i.test(supplierId) || /reel/i.test(targetId)
+    // Force simple pipeline for settings-launched runs so it behaves like the successful smoke path
+    const pipeline = 'simple' as const
+    // No per-seed cap: ingest all rows for every series page unless an explicit limit is provided elsewhere.
+    const limit = undefined
     const options = {
       mode: 'discover' as const,
-      includeSeeds: false, // rely on manualUrls for full determinism
+      includeSeeds: true, // treat saved seeds as the final list (skip implicit expansion)
       manualUrls,
       skipSuccessful: false,
       notes: `prepare:${templateId}`,
@@ -71,7 +78,10 @@ export async function action({ request }: ActionFunctionArgs) {
       templateKey: undefined,
       variantTemplateId: undefined,
       scraperId: undefined,
-      useSeriesParser: false,
+      useSeriesParser,
+      pipeline,
+      includeSeedsOnly: true,
+      limit,
     }
 
     const runId = await startImportFromOptions(options)
@@ -83,13 +93,11 @@ export async function action({ request }: ActionFunctionArgs) {
       /* ignore */
     }
 
-    return json({ ok: true, runId, queued: false, approveAdds, publish: doPublish, dryRun })
+    return json({ ok: true, runId, queued: false, approveAdds, publish: doPublish, dryRun, pipeline })
   } catch (e) {
     const msg = (e as Error)?.message || 'Failed to start crawl'
     return json({ error: msg }, { status: 500 })
   }
 }
 
-export default function StartRunApi() {
-  return null
-}
+// resource route (no default export)

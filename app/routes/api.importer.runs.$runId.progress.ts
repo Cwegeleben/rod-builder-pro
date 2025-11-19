@@ -1,8 +1,9 @@
 import { json, type LoaderFunctionArgs } from '@remix-run/node'
-import { requireHqShopOr404 } from '../lib/access.server'
+import { isHqShop } from '../lib/access.server'
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requireHqShopOr404(request)
+  const ok = await isHqShop(request)
+  if (!ok) return json({ error: 'hq_required' }, { status: 403 })
   const runId = params.runId || ''
   if (!runId) return json({ error: 'Missing run id' }, { status: 400 })
   const { prisma } = await import('../db.server')
@@ -46,8 +47,4 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   } catch (e) {
     return json({ error: (e as Error)?.message || 'Failed to load progress' }, { status: 500 })
   }
-}
-
-export default function ImportRunProgress() {
-  return null
 }

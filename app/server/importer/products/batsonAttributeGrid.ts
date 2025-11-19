@@ -8,6 +8,8 @@ export type BatsonGridRowRaw = {
   availability?: string
   price?: number | null
   msrp?: number | null
+  // Optional: detail page link discovered from the row (absolute URL)
+  detailUrl?: string | null
   attributes: Record<string, string[]>
 }
 
@@ -17,6 +19,11 @@ export type BlankSpec = {
   length_label?: string
   pieces?: number
   color?: string
+  // Some categories (e.g., Reel Seats) expose a numeric or label size
+  size_label?: string
+  inside_dia_in?: number
+  hood_od_in?: number
+  body_od_in?: number
   action?: string
   power?: string
   material?: string
@@ -72,6 +79,8 @@ function mapLabelKey(label: string): string {
   if (L.startsWith('item length')) return 'length_in'
   if (L.startsWith('number of pieces')) return 'pieces'
   if (L.startsWith('rod blank color')) return 'color'
+  if (L === 'color') return 'color'
+  if (L === 'size') return 'size'
   if (L === 'action') return 'action'
   if (L === 'power') return 'power'
   if (L === 'material') return 'material'
@@ -79,6 +88,9 @@ function mapLabelKey(label: string): string {
   if (L.startsWith('lure weight rating')) return 'lure_rating'
   if (L.startsWith('weight')) return 'weight_oz'
   if (L.startsWith('butt diameter')) return 'butt_dia_in'
+  if (L.startsWith('inside diameter')) return 'inside_dia_in'
+  if (L.startsWith('hood outside diameter')) return 'hood_od_in'
+  if (L.startsWith('body outside diameter')) return 'body_od_in'
   if (L.startsWith('tip top size')) return 'tip_top_size'
   if (L.startsWith('rod blank application')) return 'applications'
   return L
@@ -123,7 +135,10 @@ export function extractBatsonAttributeGrid(html: string, baseUrl?: string) {
     const code = tds.eq(0).text().trim()
     if (!code) return
 
-    const model = tds.eq(1).text().trim() || undefined
+    // On many Batson pages the second/third columns are Color and Size (or similar)
+    const col2 = tds.eq(1).text().trim() || undefined
+    const col3 = tds.eq(2).text().trim() || undefined
+    const model = col2 // treat second column as model/variant label when present (often color)
     const infoTd = $tr.find('td.information-attributes').first()
     const attrs: Record<string, string[]> = {}
     infoTd.find('li.information-attribute').each((_j, li) => {
@@ -134,23 +149,59 @@ export function extractBatsonAttributeGrid(html: string, baseUrl?: string) {
       if (value) attrs[key].push(value)
     })
 
-    const availability = tds.eq(3).text().replace(/\s+/g, ' ').trim() || undefined
+    // If the row has the information-attributes TD, take availability from the following TD
+    let availability: string | undefined
+    if (infoTd.length) {
+      const infoIdx = infoTd.index()
+      const availIdx = infoIdx >= 0 ? infoIdx + 1 : 3
+      availability = tds.eq(availIdx).text().replace(/\s+/g, ' ').trim() || undefined
+    } else {
+      // Fallback to legacy position
+      availability = tds.eq(3).text().replace(/\s+/g, ' ').trim() || undefined
+    }
+
+    // Promote color/size columns into attributes when not already present
+    if (col2 && !(attrs['color'] && attrs['color'].length)) {
+      attrs['color'] = [col2]
+    }
+    if (col3 && !(attrs['size'] && attrs['size'].length)) {
+      attrs['size'] = [col3]
+    }
 
     const priceText = $tr
-      .find('.price')
+      .find('.price, .your-price, .our-price, .price-value')
       .first()
       .text()
       .replace(/[^\d.]/g, '')
     const price = priceText ? Number(priceText) : null
 
     const msrpText = $tr
-      .find('.muted')
+      .find('.muted, .msrp, .compare-at, .retail')
       .first()
       .text()
       .replace(/[^\d.]/g, '')
     const msrp = msrpText ? Number(msrpText) : null
 
-    rows.push({ code, model, availability, price, msrp, attributes: attrs })
+    // Try to capture a detail URL from any anchor within the row
+    let detailUrl: string | null = null
+    const hrefs: string[] = []
+    $tr.find('a[href]').each((_k, a) => {
+      const h = ($(a).attr('href') || '').trim()
+      if (h) hrefs.push(h)
+    })
+    for (const h of hrefs) {
+      try {
+        const abs = new URL(h, base).toString()
+        if (/\/ecom\//i.test(abs) || /\/products?\//i.test(abs) || /\/rod-blanks\//i.test(abs)) {
+          detailUrl = abs
+          break
+        }
+      } catch {
+        /* ignore bad href */
+      }
+    }
+
+    rows.push({ code, model, availability, price, msrp, detailUrl, attributes: attrs })
   })
 
   // Normalize
@@ -174,6 +225,9 @@ export function extractBatsonAttributeGrid(html: string, baseUrl?: string) {
         case 'color':
           n.color = v
           break
+        case 'size':
+          n.size_label = v
+          break
         case 'action':
           n.action = v
           break
@@ -183,6 +237,21 @@ export function extractBatsonAttributeGrid(html: string, baseUrl?: string) {
         case 'material':
           n.material = v
           break
+        case 'inside_dia_in': {
+          const num = Number(v.replace(/[^\d.]/g, ''))
+          if (!isNaN(num)) n.inside_dia_in = num
+          break
+        }
+        case 'hood_od_in': {
+          const num = Number(v.replace(/[^\d.]/g, ''))
+          if (!isNaN(num)) n.hood_od_in = num
+          break
+        }
+        case 'body_od_in': {
+          const num = Number(v.replace(/[^\d.]/g, ''))
+          if (!isNaN(num)) n.body_od_in = num
+          break
+        }
         case 'line_rating': {
           const { min, max } = parseRange(v)
           // Preserve human-readable string

@@ -5,9 +5,8 @@ import ImportsHome from '../../src/apps/admin.portal/app/routes/app.imports._ind
 import { useLocation, useLoaderData } from '@remix-run/react'
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
-import { redirect } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
-import { isProductDbExclusive } from '../lib/flags.server'
+// import { isProductDbExclusive } from '../lib/flags.server'
 
 type LoaderData = {
   templates: Array<{ id: string; name?: string; state: string; hadFailures?: boolean; lastRunAt?: string | null }>
@@ -26,12 +25,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Grab recent logs (global view)
     const logs = await (prisma as any).importLog.findMany({ orderBy: { at: 'desc' }, take: 25 })
     const templateNames = Object.fromEntries(rows.map((r: any) => [r.id, r.name || r.id])) as Record<string, string>
-    if (isProductDbExclusive()) {
-      const u = new URL(request.url)
-      const dest = new URL('/app/products', u.origin)
-      dest.searchParams.set('legacy', 'disabled')
-      return redirect(dest.pathname + dest.search)
-    }
     return json<LoaderData>({ templates: rows, logs, templateNames })
   } catch {
     return json<LoaderData>({ templates: [], logs: [], templateNames: {} })

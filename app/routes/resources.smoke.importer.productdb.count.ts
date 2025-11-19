@@ -2,12 +2,12 @@ import { json, type LoaderFunctionArgs } from '@remix-run/node'
 import { guardSmokeRoute } from '../lib/smokes.server'
 import { prisma } from '../db.server'
 
-// GET /resources/smoke/importer/productdb.count?supplierId=batson-rod-blanks
+// GET /resources/smoke/importer/productdb/count?supplierId=batson-reel-seats
 // Returns: { ok, supplierId, productCount, versionCount }
 export async function loader({ request }: LoaderFunctionArgs) {
   guardSmokeRoute({ request } as LoaderFunctionArgs)
   const url = new URL(request.url)
-  const supplierId = url.searchParams.get('supplierId') || 'batson-rod-blanks'
+  const supplierId = url.searchParams.get('supplierId') || 'batson-reel-seats'
 
   let productCount = 0
   let versionCount = 0

@@ -1,6 +1,5 @@
 // <!-- BEGIN RBP GENERATED: supplier-importer-v1 -->
 import { useState } from 'react'
-import { useFetcher } from '@remix-run/react'
 
 interface PreviewItem {
   dedupeKey: string
@@ -15,16 +14,22 @@ export function ImportWizard() {
   const [productType, setProductType] = useState('')
   const [mappingJson, setMappingJson] = useState('{}')
   const [preview, setPreview] = useState<PreviewItem[] | null>(null)
-  const fetcher = useFetcher()
+  const [hqError, setHqError] = useState<string | null>(null)
+  // Note: reserved for future use; fetch() is used directly for preview/run JSON endpoints
 
   const runPreview = async () => {
     try {
       const mapping = JSON.parse(mappingJson)
       const resp = await fetch('/api/importer/preview', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ url, productType, mapping }),
       })
+      if (resp.status === 403) {
+        setHqError('hq_required')
+        return
+      }
+      setHqError(null)
       const data = await resp.json()
       setPreview(data.items || [])
       setStep(2)
@@ -37,9 +42,14 @@ export function ImportWizard() {
     const mapping = JSON.parse(mappingJson)
     const resp = await fetch('/api/importer/run', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ url, productType, mapping }),
     })
+    if (resp.status === 403) {
+      setHqError('hq_required')
+      return
+    }
+    setHqError(null)
     const data = await resp.json()
     if (data.jobId) alert('Job enqueued: ' + data.jobId)
   }
@@ -47,6 +57,11 @@ export function ImportWizard() {
   return (
     <div className="p-m space-y-m">
       <h2>Supplier Import Wizard (v1)</h2>
+      {hqError === 'hq_required' ? (
+        <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+          Import actions are restricted to HQ. Add <code>?hq=1</code> to the URL or sign in as an HQ shop.
+        </div>
+      ) : null}
       {step === 0 && (
         <div className="space-y-s">
           <div>

@@ -40,6 +40,7 @@ export default function ImportSettingsIndex() {
     settings?: { target?: string; discoverSeedUrls?: string[] }
     preparingRunId?: string | null
     state?: string
+    pipeline?: 'simple' | 'full'
   }
   const { templateId } = useParams()
   // <!-- END RBP GENERATED: importer-save-settings-v1 -->
@@ -57,11 +58,7 @@ export default function ImportSettingsIndex() {
   // Track if the user (or a discover action) has modified the seeds so we don't overwrite with loader-saved values
   const [hasUserEditedSeeds, setHasUserEditedSeeds] = React.useState<boolean>(false)
   const [showSavedToast, setShowSavedToast] = React.useState<boolean>(false)
-  const [recrawlToast, setRecrawlToast] = React.useState<string | null>(null)
-  // Track recrawl async state (reserved for future button loading indicator)
-  const [recrawlLoading, setRecrawlLoading] = React.useState<boolean>(false)
-  const [recrawlGoal, setRecrawlGoal] = React.useState<number | null>(null)
-  const [recrawlConfirmOpen, setRecrawlConfirmOpen] = React.useState<boolean>(false)
+  // Recrawl + Publish removed: toast/loading/goal/confirm state eliminated
   // <!-- BEGIN RBP GENERATED: importer-save-settings-v1 -->
   const [saveLoading, setSaveLoading] = React.useState<boolean>(false)
   const [saveError, setSaveError] = React.useState<string | null>(null)
@@ -86,6 +83,9 @@ export default function ImportSettingsIndex() {
     if (!activeRunId && loaderData?.preparingRunId) setActiveRunId(loaderData.preparingRunId)
   }, [activeRunId, loaderData?.preparingRunId])
   const [cancelLoading, setCancelLoading] = React.useState<boolean>(false)
+  const [showCancelToast, setShowCancelToast] = React.useState<string | null>(null)
+  const [healLoading, setHealLoading] = React.useState<boolean>(false)
+  const [kickLoading, setKickLoading] = React.useState<boolean>(false)
   // Shared SSE-driven logs and connection state
   const [runLogs, setRunLogs] = React.useState<
     Array<{ id: string; at: string; type: string; payload?: string | null }>
@@ -114,6 +114,8 @@ export default function ImportSettingsIndex() {
     runs?: number
     diffs?: number
   } | null>(null)
+  const [forceDelete, setForceDelete] = React.useState<boolean>(false)
+  const [blockerCodes, setBlockerCodes] = React.useState<string[] | null>(null)
   // Mount diagnostics marker
   const debug = typeof location.search === 'string' && /[?&]debugRoute=1(&|$)/.test(location.search)
   React.useEffect(() => {
@@ -291,14 +293,15 @@ export default function ImportSettingsIndex() {
             <Toast content="Settings saved" onDismiss={() => setShowSavedToast(false)} duration={2000} />
           </Frame>
         ) : null}
-        {recrawlToast ? (
-          <Frame>
-            <Toast content={recrawlToast} onDismiss={() => setRecrawlToast(null)} duration={3000} />
-          </Frame>
-        ) : null}
+        {/* Recrawl toast removed */}
         {showClearedToast ? (
           <Frame>
             <Toast content="Cleared staged rows" onDismiss={() => setShowClearedToast(false)} duration={3000} />
+          </Frame>
+        ) : null}
+        {showCancelToast ? (
+          <Frame>
+            <Toast content={showCancelToast} onDismiss={() => setShowCancelToast(null)} duration={2500} />
           </Frame>
         ) : null}
         {saveError && !isBenignPatternError(saveError) ? (
@@ -547,19 +550,32 @@ export default function ImportSettingsIndex() {
                   setCrawlLoading(true)
                   setSaveError(null)
                   try {
-                    const resp = await fetch('/api/importer/run', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ templateId }),
-                    })
-                    const jr = await resp.json()
-                    if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Failed to start crawl')
+                    let runIdStr: string | null = null
+                    if (loaderData?.pipeline === 'simple') {
+                      // Token-gated simple runner that does not require Shopify admin session
+                      const resp = await fetch(`/resources/importer/simpleRun/${templateId}?token=smoke-ok`, {
+                        method: 'GET',
+                        headers: { Accept: 'application/json' },
+                      })
+                      const jr = await resp.json()
+                      if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Failed to start crawl')
+                      runIdStr = String(jr.runId)
+                    } else {
+                      const resp = await fetch('/api/importer/run', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ templateId }),
+                      })
+                      const jr = await resp.json()
+                      if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Failed to start crawl')
+                      runIdStr = String(jr.runId)
+                    }
                     const qs = new URLSearchParams(location.search)
                     qs.set('started', '1')
                     qs.set('tpl', templateId)
-                    qs.set('runId', String(jr.runId))
+                    if (runIdStr) qs.set('runId', runIdStr)
                     navigateToImports(qs)
-                    setActiveRunId(String(jr.runId))
+                    if (runIdStr) setActiveRunId(runIdStr)
                   } catch (e) {
                     setSaveError((e as Error)?.message || 'Failed to start crawl')
                   } finally {
@@ -571,19 +587,18 @@ export default function ImportSettingsIndex() {
                   crawlLoading || saveLoading || !templateId || (loaderData.preparingRunId && !activeRunId),
                 )}
               >
-                Crawl & Update
+                {loaderData?.pipeline === 'simple' ? 'Crawl & Update (Simple)' : 'Crawl & Update'}
               </Button>
-              <Button
-                variant="secondary"
-                disabled={Boolean(!templateId || (loaderData.preparingRunId && !activeRunId))}
-                onClick={() => setRecrawlConfirmOpen(true)}
-              >
-                Recrawl + Publish
-              </Button>
+              {loaderData?.pipeline ? (
+                <Badge tone={loaderData.pipeline === 'simple' ? 'success' : 'info'}>
+                  {`Pipeline: ${loaderData.pipeline === 'simple' ? 'Simple' : 'Full'}`}
+                </Badge>
+              ) : null}
+              {/* Recrawl + Publish button removed */}
               {loaderData.preparingRunId && !activeRunId ? (
                 <Badge tone="attention">{`Run active ${loaderData.preparingRunId.slice(0, 8)} — crawl disabled`}</Badge>
               ) : null}
-              {recrawlGoal != null ? <Badge tone="info">{`Goal: ${recrawlGoal} item(s)`}</Badge> : null}
+              {/* Recrawl goal badge removed */}
               {/* Review button removed */}
               <Button
                 tone="critical"
@@ -594,9 +609,10 @@ export default function ImportSettingsIndex() {
                   setDeleteError(null)
                   setDeleteLoading(true)
                   try {
-                    const resp = await fetch('/api/importer/delete?dry=1', {
+                    const previewUrl = forceDelete ? '/api/importer/delete?dry=1&force=1' : '/api/importer/delete?dry=1'
+                    const resp = await fetch(previewUrl, {
                       method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
+                      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                       body: JSON.stringify({ templateIds: [templateId] }),
                     })
                     const jr = (await resp.json()) as {
@@ -612,12 +628,16 @@ export default function ImportSettingsIndex() {
                       error?: string
                       code?: string
                       hint?: string
+                      blockers?: Array<{ code: string; templateIds: string[] }>
+                      forced?: boolean
+                      blockersForced?: string[]
                     }
                     if (!resp.ok || jr?.ok === false) {
                       const msg = (jr?.error || 'Failed to preview delete') + (jr?.hint ? ` — ${jr.hint}` : '')
                       throw new Error(msg)
                     }
                     setDeleteCounts(jr.counts || null)
+                    setBlockerCodes(jr.blockersForced || jr.blockers?.map(b => b.code) || null)
                     setDeleteModalOpen(true)
                   } catch (e) {
                     setDeleteError((e as Error)?.message || 'Failed to preview delete')
@@ -827,6 +847,10 @@ export default function ImportSettingsIndex() {
                           const resp = await fetch(`/api/importer/runs/${activeRunId}/cancel`, { method: 'POST' })
                           const jr = await resp.json()
                           if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Cancel failed')
+                          const msg = `Cancel requested${jr.alreadyTerminal ? ' (already terminal)' : ''}${
+                            jr.clearedSlot ? '; slot cleared' : ''
+                          }`
+                          setShowCancelToast(msg)
                         } catch (e) {
                           setSaveError((e as Error)?.message || 'Cancel failed')
                         } finally {
@@ -835,6 +859,53 @@ export default function ImportSettingsIndex() {
                       }}
                     >
                       Cancel
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={healLoading}
+                      loading={healLoading}
+                      onClick={async () => {
+                        setHealLoading(true)
+                        try {
+                          const resp = await fetch('/api/importer/maintenance/cleanup', { method: 'POST' })
+                          const jr = await resp.json()
+                          if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Heal failed')
+                          const inspected = typeof jr?.inspected === 'number' ? jr.inspected : 0
+                          const cleared = typeof jr?.cleared === 'number' ? jr.cleared : 0
+                          setShowCancelToast(`Healed slots: cleared ${cleared} / inspected ${inspected}`)
+                        } catch (e) {
+                          setSaveError((e as Error)?.message || 'Heal failed')
+                        } finally {
+                          setHealLoading(false)
+                        }
+                      }}
+                    >
+                      Heal Slot
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={kickLoading || !templateId}
+                      loading={kickLoading}
+                      onClick={async () => {
+                        if (!templateId) return
+                        setKickLoading(true)
+                        try {
+                          const resp = await fetch('/api/importer/maintenance/kick', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ templateId }),
+                          })
+                          const jr = await resp.json()
+                          if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Kick failed')
+                          setShowCancelToast('Kick sent to promote next queued run')
+                        } catch (e) {
+                          setSaveError((e as Error)?.message || 'Kick failed')
+                        } finally {
+                          setKickLoading(false)
+                        }
+                      }}
+                    >
+                      Kick Queue
                     </Button>
                   </InlineStack>
                   {/* Phase label rendered below with segmented bar */}
@@ -1289,58 +1360,7 @@ export default function ImportSettingsIndex() {
           </Frame>
         ) : null}
 
-        {recrawlConfirmOpen ? (
-          <Frame>
-            <Modal
-              open
-              title="Recrawl & Publish to Shopify?"
-              onClose={() => setRecrawlConfirmOpen(false)}
-              primaryAction={{
-                content: 'Start Recrawl + Publish',
-                loading: recrawlLoading,
-                onAction: async () => {
-                  if (!templateId) return
-                  try {
-                    setRecrawlToast('Recrawl started…')
-                    setRecrawlLoading(true)
-                    const resp = await fetch('/api/importer/recrawl', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ templateId, approveAdds: true, publish: true, dryRun: false }),
-                    })
-                    const jr = await resp.json()
-                    if (!resp.ok || !jr?.ok) throw new Error(jr?.error || 'Recrawl failed')
-                    if (typeof jr.goal === 'number') setRecrawlGoal(jr.goal)
-                    const t = jr?.publish?.totals
-                    if (t && typeof t.created === 'number') {
-                      setRecrawlToast(
-                        `Published — C:${t.created} U:${t.updated ?? 0} S:${t.skipped ?? 0} F:${t.failed ?? 0}`,
-                      )
-                    } else {
-                      setRecrawlToast('Recrawl completed')
-                    }
-                  } catch (e) {
-                    setSaveError((e as Error)?.message || 'Recrawl failed')
-                  } finally {
-                    setRecrawlLoading(false)
-                    setRecrawlConfirmOpen(false)
-                  }
-                },
-              }}
-              secondaryActions={[{ content: 'Cancel', onAction: () => setRecrawlConfirmOpen(false) }]}
-            >
-              <Modal.Section>
-                <Text as="p">
-                  This will re-discover and stage items, auto-approve new items, then publish to Shopify. If a prepare
-                  or publish is currently running, it will be blocked.
-                </Text>
-                {recrawlGoal != null ? (
-                  <Text as="p" tone="subdued">{`Goal: ${recrawlGoal} approved item(s) will be published.`}</Text>
-                ) : null}
-              </Modal.Section>
-            </Modal>
-          </Frame>
-        ) : null}
+        {/* Recrawl confirm modal removed */}
 
         {deleteModalOpen ? (
           <Frame>
@@ -1353,16 +1373,17 @@ export default function ImportSettingsIndex() {
                 setDeleteError(null)
               }}
               primaryAction={{
-                content: 'Delete import',
+                content: forceDelete ? 'Force delete import' : 'Delete import',
                 destructive: true,
                 loading: deleteLoading,
                 onAction: async () => {
                   if (!templateId) return
                   setDeleteLoading(true)
                   try {
-                    const resp = await fetch('/api/importer/delete', {
+                    const commitUrl = forceDelete ? '/api/importer/delete?force=1' : '/api/importer/delete'
+                    const resp = await fetch(commitUrl, {
                       method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
+                      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                       body: JSON.stringify({ templateIds: [templateId] }),
                     })
                     const jr = (await resp.json()) as { ok?: boolean; error?: string; code?: string; hint?: string }
@@ -1377,6 +1398,7 @@ export default function ImportSettingsIndex() {
                     try {
                       const qs = new URLSearchParams(location.search)
                       qs.set('deleted', '1')
+                      if (forceDelete) qs.set('forced', '1')
                       window.location.assign(`/app/imports?${qs.toString()}`)
                     } catch {
                       window.location.assign('/app/imports?deleted=1')
@@ -1401,6 +1423,26 @@ export default function ImportSettingsIndex() {
                   This will permanently remove the template, logs, staged items, sources, and runs associated with this
                   import. This cannot be undone.
                 </Text>
+                {blockerCodes && blockerCodes.length && !forceDelete ? (
+                  <Banner tone="warning" title="Blockers detected">
+                    <p>
+                      {`Blockers: ${blockerCodes.join(', ')}. You may force delete to override if you're sure it's safe.`}
+                    </p>
+                  </Banner>
+                ) : null}
+                {deleteCounts ? (
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={forceDelete}
+                        onChange={e => setForceDelete(e.currentTarget.checked)}
+                        disabled={deleteLoading}
+                      />
+                      <span>Force delete (override active blockers)</span>
+                    </label>
+                  </div>
+                ) : null}
                 {deleteCounts ? (
                   <BlockStack gap="050">
                     <Text as="p" tone="subdued">{`Templates: ${deleteCounts.templates ?? 1}`}</Text>
@@ -1600,12 +1642,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const discoverSeedUrls = Array.isArray(settings?.['discoverSeedUrls'])
       ? (settings?.['discoverSeedUrls'] as unknown[]).filter((x): x is string => typeof x === 'string')
       : undefined
+    // Show Simple to reflect the enforced pipeline used by /api/importer/run
+    const pipeline: 'simple' | 'full' = 'simple'
     return json(
       {
         name: row?.name || '',
         settings: { target, discoverSeedUrls },
         preparingRunId: typeof row?.preparingRunId === 'string' ? row!.preparingRunId : null,
         state: typeof row?.state === 'string' ? row!.state : null,
+        pipeline,
       },
       { headers: { 'X-RBP-Route': 'imports-settings', 'X-RBP-Template': id } },
     )

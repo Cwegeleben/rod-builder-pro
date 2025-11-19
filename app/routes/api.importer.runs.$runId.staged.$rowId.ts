@@ -1,11 +1,12 @@
 // <!-- BEGIN RBP GENERATED: importer-review-inline-v1 -->
 import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
-import { requireHqShopOr404 } from '../lib/access.server'
+import { isHqShop } from '../lib/access.server'
 import { getRowDetails } from '../server/importer/review.server'
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requireHqShopOr404(request)
+  const ok = await isHqShop(request)
+  if (!ok) return json({ error: 'hq_required' }, { status: 403 })
   const runId = String(params.runId || '')
   const rowId = String(params.rowId || '')
   try {

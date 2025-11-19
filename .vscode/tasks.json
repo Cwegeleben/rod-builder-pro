@@ -246,18 +246,6 @@
       "group": "build"
     },
     {
-      "label": "Deploy Fly (prod)",
-      "type": "shell",
-      "command": "npm run -s deploy:fly:prod",
-      "group": "build"
-    },
-    {
-      "label": "Deploy Fly (staging)",
-      "type": "shell",
-      "command": "npm run -s deploy:fly:staging",
-      "group": "build"
-    },
-    {
       "label": "Release (prod)",
       "type": "shell",
       "command": "npm run -s release:prod",
@@ -267,6 +255,66 @@
       "label": "Release (staging)",
       "type": "shell",
       "command": "npm run -s release:staging",
+      "group": "build"
+    },
+    {
+      "label": "Typecheck after backfill tweak",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build",
+      "group": "build"
+    },
+    {
+      "label": "Typecheck (post-env fallback)",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build",
+      "group": "build"
+    },
+    {
+      "label": "Typecheck and build (discover API tweak)",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build",
+      "group": "build"
+    },
+    {
+      "label": "Deploy Fly (staging)",
+      "type": "shell",
+      "command": "npm run -s deploy:fly:staging",
+      "group": "build"
+    },
+    {
+      "label": "Typecheck and build (DB fallback)",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build",
+      "group": "build"
+    },
+    {
+      "label": "Deploy Fly (staging)",
+      "type": "shell",
+      "command": "npm run -s deploy:fly:staging",
+      "group": "build"
+    },
+    {
+      "label": "Deploy Fly (staging)",
+      "type": "shell",
+      "command": "npm run -s deploy:fly:staging",
+      "group": "build"
+    },
+    {
+      "label": "Deploy Fly (prod)",
+      "type": "shell",
+      "command": "npm run -s deploy:fly:prod",
+      "group": "build"
+    },
+    {
+      "label": "Typecheck and build (API soft-guard)",
+      "type": "shell",
+      "command": "npm run -s typecheck && npm run -s build",
+      "group": "build"
+    },
+    {
+      "label": "Deploy Fly (prod)",
+      "type": "shell",
+      "command": "npm run -s deploy:fly:prod",
       "group": "build"
     }
   ]

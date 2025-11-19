@@ -4,19 +4,8 @@ import { json, type LoaderFunctionArgs } from '@remix-run/node'
 import { useEffect, useMemo, useState } from 'react'
 import { useFetcher, useLoaderData, Link, useLocation } from '@remix-run/react'
 import { requireHQAccess } from '../services/auth/guards.server'
-import { listManualSeeds, getSchedule } from '../services/importer/settings.server'
-import {
-  Card,
-  BlockStack,
-  InlineStack,
-  Text,
-  Button,
-  IndexTable,
-  TextField,
-  Checkbox,
-  Select,
-  Badge,
-} from '@shopify/polaris'
+import { listManualSeeds } from '../services/importer/settings.server'
+import { Card, BlockStack, InlineStack, Text, Button, IndexTable, TextField } from '@shopify/polaris'
 import { ImportNav } from '../components/importer/ImportNav'
 
 // We reuse the existing backend action at /app/admin/import/settings
@@ -24,40 +13,24 @@ import { ImportNav } from '../components/importer/ImportNav'
 
 type SeedRow = { url: string; label?: string }
 
-type LoaderData = {
-  seeds: SeedRow[]
-  schedule: { enabled: boolean; cron: string } | null
-}
+type LoaderData = { seeds: SeedRow[] }
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireHQAccess(request)
   const supplierId = 'batson'
-  const [seeds, schedule] = await Promise.all([listManualSeeds(supplierId), getSchedule(supplierId)])
-  return json<LoaderData>({ seeds, schedule })
+  const seeds = await listManualSeeds(supplierId)
+  return json<LoaderData>({ seeds })
 }
 
 export default function ImportSettingsIndex() {
-  const { seeds, schedule } = useLoaderData<typeof loader>() as LoaderData
+  const { seeds } = useLoaderData<typeof loader>() as LoaderData
   const location = useLocation()
 
   // Seeds state
   const [seedUrl, setSeedUrl] = useState('')
   const [seedLabel, setSeedLabel] = useState('')
 
-  // Schedule state
-  const [enabled, setEnabled] = useState(!!schedule?.enabled)
-  const [cron, setCron] = useState(schedule?.cron || '0 3 * * *')
-
-  // Credentials state
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [totp, setTotp] = useState('')
-  const [verified, setVerified] = useState(false)
-
   const seedFetcher = useFetcher<{ ok?: boolean; error?: string }>()
-  const scheduleFetcher = useFetcher<{ ok?: boolean; error?: string }>()
-  const credsFetcher = useFetcher<{ ok?: boolean; error?: string }>()
-  const verifyFetcher = useFetcher<{ ok?: boolean; error?: string }>()
 
   // Toast helper
   const toast = useMemo(
@@ -98,44 +71,6 @@ export default function ImportSettingsIndex() {
       }
     }
   }, [seedFetcher.state])
-
-  useEffect(() => {
-    if (scheduleFetcher.state === 'idle') {
-      if (scheduleFetcher.data?.ok) {
-        toast.success('Schedule saved')
-      } else if (scheduleFetcher.data && !scheduleFetcher.data.ok) {
-        toast.error('Failed to save schedule')
-      }
-    }
-  }, [scheduleFetcher.state])
-
-  useEffect(() => {
-    if (verifyFetcher.state === 'idle' && verifyFetcher.data) {
-      if (verifyFetcher.data.ok) {
-        setVerified(true)
-        toast.success('Credentials verified')
-      } else {
-        setVerified(false)
-        toast.error(verifyFetcher.data.error || 'Verification failed')
-      }
-    }
-  }, [verifyFetcher.state, verifyFetcher.data])
-
-  useEffect(() => {
-    if (credsFetcher.state === 'idle' && credsFetcher.data) {
-      if (credsFetcher.data.ok) {
-        toast.success('Credentials saved')
-      } else {
-        toast.error(credsFetcher.data.error || 'Save failed')
-      }
-    }
-  }, [credsFetcher.state, credsFetcher.data])
-
-  const cronPresets = [
-    { label: 'Hourly', value: '0 * * * *' },
-    { label: 'Daily @ 2am', value: '0 2 * * *' },
-    { label: 'Weekdays @ 3am', value: '0 3 * * 1-5' },
-  ]
 
   return (
     <Card>
@@ -200,80 +135,7 @@ export default function ImportSettingsIndex() {
           </BlockStack>
         </Card>
 
-        {/* Schedule Section */}
-        <Card roundedAbove="sm">
-          <BlockStack gap="300">
-            <Text as="h3" variant="headingMd">
-              Schedule
-            </Text>
-            <scheduleFetcher.Form method="post" action="/app/admin/import/settings">
-              <input type="hidden" name="intent" value="schedule:set" />
-              <InlineStack gap="300" align="start">
-                <Checkbox label="Enabled" checked={enabled} onChange={v => setEnabled(Boolean(v))} name="enabled" />
-                <div style={{ minWidth: 240 }}>
-                  <TextField label="Cron" value={cron} onChange={setCron} name="cron" autoComplete="off" />
-                </div>
-                <Select
-                  label="Presets"
-                  options={cronPresets}
-                  onChange={v => setCron(v)}
-                  value=""
-                  placeholder="Choose preset"
-                />
-                <Button submit disabled={scheduleFetcher.state === 'submitting'}>
-                  Save
-                </Button>
-              </InlineStack>
-            </scheduleFetcher.Form>
-          </BlockStack>
-        </Card>
-
-        {/* Credentials Section */}
-        <Card roundedAbove="sm">
-          <BlockStack gap="300">
-            <Text as="h3" variant="headingMd">
-              Credentials
-            </Text>
-            <InlineStack gap="300" align="start">
-              <div style={{ minWidth: 240 }}>
-                <TextField label="Username" value={username} onChange={setUsername} autoComplete="username" />
-              </div>
-              <div style={{ minWidth: 240 }}>
-                <TextField
-                  label="Password"
-                  type="password"
-                  value={password}
-                  onChange={setPassword}
-                  autoComplete="current-password"
-                />
-              </div>
-              <div style={{ minWidth: 200 }}>
-                <TextField label="TOTP (optional)" value={totp} onChange={setTotp} autoComplete="one-time-code" />
-              </div>
-              {verified && <Badge tone="success">Verified</Badge>}
-            </InlineStack>
-            <InlineStack gap="200">
-              <verifyFetcher.Form method="post" action="/app/admin/import/settings">
-                <input type="hidden" name="intent" value="creds:verify" />
-                <input type="hidden" name="username" value={username} />
-                <input type="hidden" name="password" value={password} />
-                <input type="hidden" name="totp" value={totp} />
-                <Button submit disabled={verifyFetcher.state === 'submitting' || !username || !password}>
-                  Verify
-                </Button>
-              </verifyFetcher.Form>
-              <credsFetcher.Form method="post" action="/app/admin/import/settings">
-                <input type="hidden" name="intent" value="creds:save" />
-                <input type="hidden" name="username" value={username} />
-                <input type="hidden" name="password" value={password} />
-                <input type="hidden" name="totp" value={totp} />
-                <Button submit disabled={credsFetcher.state === 'submitting' || !verified}>
-                  Save
-                </Button>
-              </credsFetcher.Form>
-            </InlineStack>
-          </BlockStack>
-        </Card>
+        {null}
       </BlockStack>
     </Card>
   )

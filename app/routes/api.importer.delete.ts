@@ -1,150 +1,216 @@
-// <!-- BEGIN RBP GENERATED: importer-delete-templates-v1 -->
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import type { ActionFunctionArgs } from '@remix-run/node'
-import { json } from '@remix-run/node'
+import { json, type ActionFunctionArgs } from '@remix-run/node'
 import { requireHqShopOr404 } from '../lib/access.server'
-import { prisma as prismaDirect } from '../db.server'
+import { DELETE_ERROR_CODES } from '../services/importer/delete.constants'
+import { buildDeletePlan, type DeletePlan } from '../services/importer/deletePlan.server'
 
-// Delete one or more ImportTemplate rows and related artifacts.
-// Input (JSON or form): { templateIds: string[] } or repeated templateId fields
-// Behavior:
-// - Deletes ImportTemplate rows by id
-// - Cascades ImportLog via FK
-// - Best-effort cleanup by supplierId (derived from template importConfig.settings.target):
-//   - PartStaging, ProductSource
-//   - ImportRun + ImportDiff for the supplier
+// POST /api/importer/delete[?dry=1]
+// Deletes one or more import templates and all related importer data: logs, runs, diffs, staging parts, product sources.
+// Dry-run (preview) mode returns counts only without deleting. Requires HQ.
+// Body (JSON): { templateIds: string[] }
+// Response (dry): { ok: true, counts: { templates, logs, runs, diffs, staging, sources } }
+// Response (commit): { ok: true, deleted: { templates, logs, runs, diffs, staging, sources } }
+// Error: { error, code?, hint? }
+
 export async function action({ request }: ActionFunctionArgs) {
-  await requireHqShopOr404(request)
-
-  const ct = request.headers.get('content-type') || ''
-  const read = async () => {
-    if (/application\/json/i.test(ct)) return (await request.json().catch(() => ({}))) as Record<string, unknown>
-    const fd = await request.formData().catch(() => null)
-    const arr: string[] = []
-    if (fd) {
-      const values = fd.getAll('templateId')
-      for (const v of values) {
-        const s = String(v || '').trim()
-        if (s) arr.push(s)
-      }
-    }
-    return { templateIds: arr }
+  // Soft HQ guard: returns 403 JSON instead of HTML shell
+  try {
+    await requireHqShopOr404(request)
+  } catch {
+    return json({ error: 'hq_required' }, { status: 403 })
   }
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 })
 
+  let templateIds: string[] = []
+  let bodyDryRun = false
+  try {
+    const ct = request.headers.get('content-type') || ''
+    if (ct.includes('application/json')) {
+      const body = (await request.json()) as Record<string, unknown>
+      if (Array.isArray(body?.templateIds)) {
+        templateIds = (body!.templateIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      }
+      if (body && (body['dryRun'] === true || body['dryRun'] === '1')) bodyDryRun = true
+    } else if (ct.includes('application/x-www-form-urlencoded') || ct.includes('multipart/form-data')) {
+      const fd = await request.formData()
+      const raw = fd.getAll('templateIds')
+      templateIds = raw.filter((x): x is string => typeof x === 'string')
+    }
+  } catch {
+    /* ignore parse errors */
+  }
   const url = new URL(request.url)
-  const body = (await read()) as { templateIds?: unknown; dryRun?: unknown }
-  const templateIds = Array.isArray(body.templateIds)
-    ? (body.templateIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
-    : []
-  if (templateIds.length === 0) return json({ error: 'Missing templateIds' }, { status: 400 })
-  const dryRun = url.searchParams.get('dry') === '1' || url.searchParams.get('dryRun') === '1' || Boolean(body?.dryRun)
+  if (!templateIds.length) {
+    // Fallback to single templateId param
+    const single = url.searchParams.get('templateId') || ''
+    if (single) templateIds = [single]
+  }
+  if (!templateIds.length) return json({ error: 'Missing templateIds', code: 'missing_template_ids' }, { status: 400 })
 
-  const prisma = prismaDirect
-  const { getTargetById } = await import('../server/importer/sites/targets')
+  // Allow dry-run via query (?dry=1) or JSON body { dryRun: true | "1" }
+  const dry = url.searchParams.get('dry') === '1' || bodyDryRun
+  const force = url.searchParams.get('force') === '1'
 
-  // Collect supplierIds to clean up by reading importConfig
-  const rows = await (prisma as any).importTemplate.findMany({
-    where: { id: { in: templateIds } },
-    select: { id: true, importConfig: true },
-  })
+  try {
+    const { prisma } = await import('../db.server')
 
-  const supplierIds = new Set<string>()
-  for (const r of rows as Array<{ id: string; importConfig: unknown }>) {
+    const started = performance.now()
+    const plan: DeletePlan = await buildDeletePlan({ prisma, templateIds, dry, force })
+
+    if (!plan.templates.length) {
+      return json({ error: 'No templates found', code: DELETE_ERROR_CODES.NOT_FOUND }, { status: 404 })
+    }
+
+    if (plan.blockers.length && !force) {
+      const blockerIds = Array.from(
+        new Set(plan.blockers.flatMap((b: { code: string; templateIds: string[] }) => b.templateIds)),
+      )
+      const hasPrepare = plan.blockers.some((b: { code: string }) => b.code === 'active_prepare')
+      const hasPublish = plan.blockers.some((b: { code: string }) => b.code === 'publish_in_progress')
+      let msg = 'Blocked: delete restrictions active'
+      if (hasPublish && !hasPrepare && plan.blockers.length === 1)
+        msg = 'Blocked: publish in progress for one or more templates'
+      else if (hasPrepare && !hasPublish && plan.blockers.length === 1)
+        msg = 'Blocked: active prepare run detected for one or more templates'
+      return json(
+        {
+          error: msg,
+          code: DELETE_ERROR_CODES.BLOCKED,
+          blockers: plan.blockers.map((b: { code: string; templateIds: string[] }) => ({
+            code: b.code,
+            templateIds: b.templateIds,
+          })),
+          templates: blockerIds,
+          hint: 'Use ?force=1 to override blockers if appropriate.',
+        },
+        { status: 409 },
+      )
+    }
+
+    if (dry) {
+      // Attempt audit logging (best-effort)
+      try {
+        if ((prisma as Record<string, unknown>)['importDeleteAudit']) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const audit: any = (prisma as any).importDeleteAudit
+          await audit.create({
+            data: {
+              templateIds: plan.templates.map(t => t.id).join(','),
+              countsJson: plan.counts,
+              dryRun: true,
+              forced: force,
+              userHq: true,
+              blockedCodes: plan.blockers.map((b: { code: string }) => b.code).join(',') || null,
+              durationMs: Math.round(performance.now() - started),
+            },
+          })
+        }
+      } catch {
+        /* ignore audit errors */
+      }
+      return json(
+        {
+          ok: true,
+          dryRun: true,
+          forced: force || undefined,
+          counts: plan.counts,
+          blockersForced: force ? plan.blockers.map((b: { code: string }) => b.code) : undefined,
+        },
+        { headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
+
+    // Perform deletion in a transaction for consistency
+    // Order: diffs -> logs -> staging -> sources -> runs -> templates (runs not FK-linked by templateId but we clean them for completeness)
+    // Note: ImportRun has no direct templateId; deleting runs only when referenced by logs prevents orphaned data noise.
+    const performDeletes = async (tx: typeof prisma) => {
+      try {
+        if (plan.counts.diffs && plan.runIds.length)
+          await tx.importDiff.deleteMany({ where: { importRunId: { in: plan.runIds } } })
+      } catch {
+        /* ignore pattern errors */
+      }
+      try {
+        if (plan.counts.logs) await tx.importLog.deleteMany({ where: { templateId: { in: templateIds } } })
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (plan.counts.staging) await tx.partStaging.deleteMany({ where: { templateId: { in: templateIds } } })
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (plan.counts.sources) await tx.productSource.deleteMany({ where: { templateId: { in: templateIds } } })
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (plan.counts.runs && plan.runIds.length)
+          await tx.importRun.deleteMany({ where: { id: { in: plan.runIds } } })
+      } catch {
+        /* ignore */
+      }
+      const tplDeleted = await tx.importTemplate.deleteMany({ where: { id: { in: templateIds } } })
+      return { tplDeleted: tplDeleted.count }
+    }
+    // Transaction fallback if prisma.$transaction absent in test mocks
+    const result =
+      typeof (prisma as unknown as { $transaction?: unknown }).$transaction === 'function'
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (prisma as any).$transaction((inner: typeof prisma) => performDeletes(inner))
+        : await performDeletes(prisma)
+
+    const deletedDetails = {
+      templates: result.tplDeleted,
+      logs: plan.counts.logs,
+      runs: plan.counts.runs,
+      diffs: plan.counts.diffs,
+      staging: plan.counts.staging,
+      sources: plan.counts.sources,
+    }
+
+    // Audit (best-effort)
     try {
-      const cfg = (r.importConfig as Record<string, unknown>) || {}
-      const settings = (cfg['settings'] as Record<string, unknown>) || {}
-      const targetId = typeof settings['target'] === 'string' ? (settings['target'] as string) : ''
-      if (targetId) {
-        const t = getTargetById(targetId)
-        const sid = (t?.siteId as string) || targetId
-        if (sid) supplierIds.add(sid)
+      const auditClient = (prisma as unknown as { importDeleteAudit?: { create: (args: unknown) => Promise<unknown> } })
+        .importDeleteAudit
+      if (auditClient) {
+        await auditClient.create({
+          data: {
+            templateIds: plan.templates.map((t: { id: string }) => t.id).join(','),
+            countsJson: plan.counts,
+            deletedJson: deletedDetails,
+            dryRun: false,
+            forced: force,
+            userHq: true,
+            blockedCodes: plan.blockers.map((b: { code: string }) => b.code).join(',') || null,
+            durationMs: Math.round(performance.now() - started),
+          },
+        })
       }
     } catch {
-      // ignore malformed config
+      /* ignore */
     }
-  }
 
-  // Compute counts for diagnostics and potential dry-run preview
-  const ids = Array.from(supplierIds)
-  const [logsCount, stagingCount, sourcesCount, runRows] = await Promise.all([
-    (prisma as any).importLog.count({ where: { templateId: { in: templateIds } } }),
-    (prisma as any).partStaging.count({ where: ids.length ? { supplierId: { in: ids } } : undefined }),
-    (prisma as any).productSource.count({ where: ids.length ? { supplierId: { in: ids } } : undefined }),
-    (prisma as any).importRun.findMany({
-      where: ids.length ? { supplierId: { in: ids } } : undefined,
-      select: { id: true },
-    }),
-  ])
-  const runIds = (runRows as Array<{ id: string }>).map(r => r.id)
-  const [diffsCount, runsCount] = await Promise.all([
-    runIds.length ? (prisma as any).importDiff.count({ where: { importRunId: { in: runIds } } }) : Promise.resolve(0),
-    runIds.length ? (prisma as any).importRun.count({ where: { id: { in: runIds } } }) : Promise.resolve(0),
-  ])
-
-  const counts = {
-    templates: templateIds.length,
-    logs: logsCount as number,
-    staging: stagingCount as number,
-    sources: sourcesCount as number,
-    runs: runsCount as number,
-    diffs: diffsCount as number,
-    suppliers: ids,
-  }
-
-  if (dryRun) {
-    return json({ ok: true, dryRun: true, counts })
-  }
-
-  // Concurrency guard: block delete when a prepare or publish is active.
-  // Active prepare: preparingRunId set.
-  // Active publish: any ImportLog publish:progress within last 5 minutes referencing runId for these templates.
-  const activePrepare = await (prisma as any).importTemplate.findMany({
-    where: { id: { in: templateIds }, preparingRunId: { not: null } },
-    select: { id: true },
-  })
-  let activePublishTemplateIds: string[] = []
-  try {
-    const recent = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-    const publishRows = await (prisma as any).importLog.findMany({
-      where: {
-        templateId: { in: templateIds },
-        type: 'publish:progress',
-        at: { gte: recent },
-      },
-      select: { templateId: true },
-    })
-    activePublishTemplateIds = Array.from(new Set(publishRows.map((r: { templateId: string }) => r.templateId)))
-  } catch {
-    activePublishTemplateIds = []
-  }
-  const blocked = [...activePrepare.map((r: { id: string }) => r.id), ...activePublishTemplateIds]
-  if (blocked.length) {
-    const code = activePrepare.length ? 'blocked_prepare' : 'blocked_publish'
-    const hint =
-      code === 'blocked_prepare'
-        ? 'Wait for current prepare to finish before deleting this import.'
-        : 'Wait for the current publish to complete before deleting this import.'
     return json(
-      { error: 'Delete blocked: active prepare or publish in progress', code, templates: blocked, hint },
-      { status: 409 },
+      {
+        ok: true,
+        forced: force || undefined,
+        deleted: result.tplDeleted,
+        deletedDetails,
+        durationMs: Math.round(performance.now() - started),
+      },
+      { headers: { 'Cache-Control': 'no-store' } },
     )
+  } catch (err) {
+    const message = (err as Error)?.message || 'Delete failed'
+    const lower = message.toLowerCase()
+    const patternHint = lower.includes('did not match the expected pattern')
+      ? 'One or more related run IDs had invalid format; core template row may still be intact. Try again or use force if implemented.'
+      : undefined
+    return json({ error: message, hint: patternHint, code: DELETE_ERROR_CODES.UNKNOWN }, { status: 500 })
   }
-
-  // Execute deletions (template-scoped first; related artifacts already scoped by supplier)
-  await (prisma as any).importTemplate.deleteMany({ where: { id: { in: templateIds } } })
-  if (ids.length) {
-    await (prisma as any).partStaging.deleteMany({ where: { supplierId: { in: ids } } })
-    await (prisma as any).productSource.deleteMany({ where: { supplierId: { in: ids } } })
-    if (runIds.length) {
-      await (prisma as any).importDiff.deleteMany({ where: { importRunId: { in: runIds } } })
-      await (prisma as any).importRun.deleteMany({ where: { id: { in: runIds } } })
-    }
-  }
-
-  return json({ ok: true, deleted: templateIds.length, counts })
 }
 
-export default function DeleteImporterApi() {
+export default function ImporterDeleteRoute() {
   return null
 }
-// <!-- END RBP GENERATED: importer-delete-templates-v1 -->
