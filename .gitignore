@@ -41,3 +41,6 @@ storage/datasets/
 # Local debug routes (do not commit)
 /app/routes/resources.metaobjects.debug.tsx
 app/routes/resources.debug-scopes.ts
+
+# Production snapshots (local-only; large and OS-specific)
+snapshots/
