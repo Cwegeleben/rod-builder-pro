@@ -4,6 +4,7 @@ export default defineWorkspace([
   {
     test: {
       include: ['**/*.unit.test.ts'],
+      exclude: ['snapshots/**', 'node_modules/**', 'build/**', 'dist/**'],
       name: 'unit',
       environment: 'node',
       // Serialize tests to avoid concurrent Prisma DB setup on SQLite
@@ -18,6 +19,7 @@ export default defineWorkspace([
   {
     test: {
       include: ['**/*.it.test.tsx'],
+      exclude: ['snapshots/**', 'node_modules/**', 'build/**', 'dist/**'],
       poolOptions: {
         threads: {
           singleThread: true,
