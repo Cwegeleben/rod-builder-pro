@@ -34,7 +34,7 @@ type PrismaLike = {
 }
 
 interface BuildArgs {
-  prisma: PrismaLike
+  prisma: PrismaLike | any
   templateIds: string[]
   dry: boolean
   force: boolean
@@ -64,7 +64,11 @@ export async function buildDeletePlan({ prisma, templateIds }: BuildArgs): Promi
       select: { templateId: true },
     })
     publishBlockedIds = Array.from(
-      new Set(rows.map(r => r.templateId).filter((id): id is string => typeof id === 'string')),
+      new Set(
+        rows
+          .map((r: { templateId?: string }) => r.templateId)
+          .filter((id: unknown): id is string => typeof id === 'string'),
+      ),
     )
   } catch {
     publishBlockedIds = []

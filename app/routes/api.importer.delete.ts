@@ -54,7 +54,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const { prisma } = await import('../db.server')
 
     const started = performance.now()
-    const plan: DeletePlan = await buildDeletePlan({ prisma, templateIds, dry, force })
+    const plan: DeletePlan = await buildDeletePlan({ prisma: prisma as any, templateIds, dry, force })
 
     if (!plan.templates.length) {
       return json({ error: 'No templates found', code: DELETE_ERROR_CODES.NOT_FOUND }, { status: 404 })
@@ -89,10 +89,13 @@ export async function action({ request }: ActionFunctionArgs) {
     if (dry) {
       // Attempt audit logging (best-effort)
       try {
-        if ((prisma as Record<string, unknown>)['importDeleteAudit']) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const audit: any = (prisma as any).importDeleteAudit
-          await audit.create({
+        const auditClient = (
+          prisma as unknown as {
+            importDeleteAudit?: { create: (args: unknown) => Promise<unknown> }
+          }
+        ).importDeleteAudit
+        if (auditClient) {
+          await auditClient.create({
             data: {
               templateIds: plan.templates.map(t => t.id).join(','),
               countsJson: plan.counts,
