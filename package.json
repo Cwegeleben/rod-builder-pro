@@ -61,7 +61,9 @@
     "importer:refresh:price": "pnpm exec tsx packages/importer/src/cli/run-price-avail.ts",
     "preflight:importer-v2-3": "node scripts/preflight/importer-v2-3.js",
     "preflight:discover:blanks": "SITE_ID=batson-rod-blanks SOURCE_URL=https://batsonenterprises.com/rod-blanks tsx scripts/preflight/discover-site.ts",
-    "preflight:discover:reelseats": "SITE_ID=batson-reel-seats SOURCE_URL=https://batsonenterprises.com/reel-seats tsx scripts/preflight/discover-site.ts"
+    "preflight:discover:reelseats": "SITE_ID=batson-reel-seats SOURCE_URL=https://batsonenterprises.com/reel-seats tsx scripts/preflight/discover-site.ts",
+    "preflight:discover:guides": "SITE_ID=batson-guides-tops SOURCE_URL=https://batsonenterprises.com/guides-tip-tops tsx scripts/preflight/discover-site.ts",
+    "preflight:discover-seed:guides": "SITE_ID=batson-guides-tops SOURCE_URL=https://batsonenterprises.com/guides-tip-tops tsx scripts/preflight/discoverAndSeed.ts"
   },
   "type": "module",
   "engines": {

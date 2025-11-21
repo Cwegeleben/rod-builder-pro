@@ -14,6 +14,12 @@ export const KNOWN_IMPORT_TARGETS: ImportTarget[] = [
     url: 'https://batsonenterprises.com/reel-seats',
     siteId: 'batson-reel-seats',
   },
+  {
+    id: 'batson-guides-tops',
+    label: 'Batson — Guides & Tip Tops',
+    url: 'https://batsonenterprises.com/guides-tip-tops',
+    siteId: 'batson-guides-tops',
+  },
 ]
 
 export function getTargetById(id: string): ImportTarget | undefined {

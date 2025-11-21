@@ -21,6 +21,36 @@ export function normalize(rec: {
   const act = rec.title.toUpperCase().match(/\b(XF|F|MF|M|S|SF)\b/)
   if (act) specs.action = act[1]
 
+  // Guide / Tip Top specific extraction heuristics from raw specs or title
+  if (rec.partType === 'guide' || rec.partType === 'tip_top') {
+    // Ring size: prefer explicit numeric or #number tokens
+    const ringRaw = String(specs.ring_size || specs.RING_SIZE || '').trim()
+    if (!ringRaw) {
+      const m = rec.title.match(/\br(?:ing)?\s?(size)?\s?(\d{1,2})\b/i) || rec.title.match(/#(\d{1,2})/) || null
+      if (m) specs.ring_size = Number(m[m.length - 1])
+    } else if (/^\d{1,2}$/.test(ringRaw)) {
+      specs.ring_size = Number(ringRaw)
+    }
+    // Tube size (tip top): look for 3.5, 4.5 etc with mm or ambiguous units
+    const tubeRaw = String(specs.tube_size || specs.TUBE_SIZE || '').trim()
+    if (!tubeRaw) {
+      const mt = rec.title.match(/\b(\d{1,2}(?:\.\d)?)\s*(mm|tube)\b/i)
+      if (mt) specs.tube_size = parseFloat(mt[1])
+    } else if (/^\d{1,2}(?:\.\d)?$/.test(tubeRaw)) {
+      specs.tube_size = parseFloat(tubeRaw)
+    }
+    // Frame material / finish: attempt mapping from common tokens
+    const matTokens = rec.title.toLowerCase().split(/[^a-z]+/)
+    const MATERIALS = ['titanium', 'stainless', 'ss', 'alps', 'forecast']
+    const FINISHES = ['black', 'polished', 'blue', 'chrome', 'ti-chrome']
+    const foundMat = MATERIALS.find(m => matTokens.includes(m))
+    if (foundMat && !specs.frame_material) specs.frame_material = foundMat
+    const foundFinish = FINISHES.find(f => matTokens.includes(f.replace(/[^a-z]/g, '')))
+    if (foundFinish && !specs.finish) specs.finish = foundFinish
+    // Kit detection: presence of 'kit' and multiple sizes in title
+    if (/\bkit\b/i.test(rec.title)) specs.is_kit = true
+  }
+
   return { partType: rec.partType, specs }
 }
 // <!-- END RBP GENERATED: importer-normalize-diff-v1 -->

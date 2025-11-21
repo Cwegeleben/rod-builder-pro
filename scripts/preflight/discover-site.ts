@@ -4,6 +4,7 @@
  * Usage examples:
  *   SITE_ID=batson-rod-blanks SOURCE_URL=https://batsonenterprises.com/rod-blanks pnpm -s tsx scripts/preflight/discover-site.ts
  *   SITE_ID=batson-reel-seats SOURCE_URL=https://batsonenterprises.com/reel-seats pnpm -s tsx scripts/preflight/discover-site.ts
+ *   SITE_ID=batson-guides-tops SOURCE_URL=https://batsonenterprises.com/guides-tip-tops pnpm -s tsx scripts/preflight/discover-site.ts
  */
 import { renderHeadlessHtml } from '../../app/server/headless/renderHeadlessHtml'
 import { getSiteConfigForUrlDiscoverV1, getDiscoverSiteById } from '../../app/server/importer/sites'

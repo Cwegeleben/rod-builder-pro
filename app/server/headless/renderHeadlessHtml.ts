@@ -66,19 +66,14 @@ export async function renderHeadlessHtml(url: string, opts: Options = {}) {
     }
     await page.goto(url, { waitUntil, timeout: timeoutMs })
     if (autoScroll) {
-      await page.evaluate(async () => {
-        await new Promise<void>(resolve => {
-          let y = 0
-          const step = () => {
-            const h = (document.body.scrollHeight || document.documentElement.scrollHeight || 0) as number
-            y = Math.min(y + 800, h)
-            window.scrollTo(0, y)
-            if (y >= h) return resolve()
-            setTimeout(step, 120)
-          }
-          step()
+      for (let i = 0; i < 12; i++) {
+        await page.evaluate(() => {
+          const body = document.body || document.documentElement
+          const scrollHeight = body ? body.scrollHeight : 0
+          window.scrollTo(0, scrollHeight)
         })
-      })
+        await page.waitForTimeout(120)
+      }
     }
     // Wait for attribute grid stabilization: row count stable and at least some price text present
     const deadline = Date.now() + Math.max(afterNavigateDelayMs, 400) + 10_000

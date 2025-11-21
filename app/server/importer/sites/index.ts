@@ -6,6 +6,9 @@ import { BatsonRodBlanksSite } from './batson.rod-blanks'
 // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
 import { BatsonReelSeatsSite } from './batson.reel-seats'
 // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
+// <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
+import { BatsonGuidesTopsSite } from './batson.guides-tops'
+// <!-- END RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
 // <!-- END RBP GENERATED: importer-discover-batson-series-v1 -->
 // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
 export function getDiscoverSiteById(id: string) {
@@ -14,6 +17,9 @@ export function getDiscoverSiteById(id: string) {
     // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
     if (id === 'batson-reel-seats') return BatsonReelSeatsSite
     // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
+    // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
+    if (id === 'batson-guides-tops') return BatsonGuidesTopsSite
+    // <!-- END RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
   } catch {
     /* ignore */
   }
@@ -29,6 +35,10 @@ export function getSiteConfigById(id: string): SiteConfig | null {
       // No dedicated SiteConfig yet; fall back to rod-blanks behavior if needed
       return BatsonRodBlanksConfig
     // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
+    // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
+    case 'batson-guides-tops':
+      return BatsonRodBlanksConfig
+    // <!-- END RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
     default:
       return null
   }
@@ -63,6 +73,9 @@ export { BatsonRodBlanksSite } from './batson.rod-blanks'
 // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
 export { BatsonReelSeatsSite } from './batson.reel-seats'
 // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
+// <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
+export { BatsonGuidesTopsSite } from './batson.guides-tops'
+// <!-- END RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
 
 // Narrow helper used by the v1 discover flow to get a site object that may implement `discover`
 export function getSiteConfigForUrlDiscoverV1(url: string) {
@@ -71,6 +84,9 @@ export function getSiteConfigForUrlDiscoverV1(url: string) {
     // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
     if (BatsonReelSeatsSite.match(url)) return BatsonReelSeatsSite
     // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
+    // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
+    if (BatsonGuidesTopsSite.match(url)) return BatsonGuidesTopsSite
+    // <!-- END RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
   } catch {
     /* ignore */
   }

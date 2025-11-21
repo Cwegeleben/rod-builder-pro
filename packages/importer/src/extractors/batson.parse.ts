@@ -1,6 +1,7 @@
 // <!-- BEGIN RBP GENERATED: batson-extractor-v1 -->
 // <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 -->
 import type { Page } from 'playwright'
+import * as cheerio from 'cheerio'
 import { detectSeriesHeader } from '../lib/headerDetect'
 import { extractJsonLd, mapProductFromJsonLd } from './jsonld'
 import { buildBatsonTitle } from '../lib/titleBuild/batson'
@@ -143,6 +144,67 @@ export async function extractProduct(
 
   const partType = guessPartType(`${title} ${description}`)
   const rawSpecs: Record<string, unknown> = {}
+
+  // Guide & Tip Top attribute-grid / information-attributes parsing (Batson Guides & Tip Tops)
+  try {
+    const $ = cheerio.load(html)
+    const grid = $('.attribute-grid tbody')
+    if (grid.length) {
+      // If attribute-grid present, extract first row's nested information attributes
+      const firstRow = grid.find('> tr').first()
+      const infoAttrs = firstRow.find('.information-attributes .information-attribute')
+      infoAttrs.each((_, li) => {
+        const label = ($(li).find('.information-attribute__label').text() || '').trim().toLowerCase()
+        const value = ($(li).find('.information-attribute__text').text() || '').trim()
+        if (!label) return
+        const key = label
+          .replace(/[:\s]+/g, '_')
+          .replace(/__+/g, '_')
+          .replace(/[^a-z0-9_]/g, '')
+        if (!rawSpecs[key]) rawSpecs[key] = value
+        // Map common guide fields
+        if (/ring/.test(label) && !rawSpecs.ring_size) {
+          const m = value.match(/\d{1,2}(?:\.\d)?/)
+          if (m) rawSpecs.ring_size = parseFloat(m[0])
+        }
+        if (/tube/.test(label) && !rawSpecs.tube_size) {
+          const m = value.match(/\d{1,2}(?:\.\d)?/)
+          if (m) rawSpecs.tube_size = parseFloat(m[0])
+        }
+        if (/frame/.test(label) && !rawSpecs.frame_material) rawSpecs.frame_material = value.toLowerCase()
+        if (/finish|color/.test(label) && !rawSpecs.finish) rawSpecs.finish = value.toLowerCase()
+      })
+    } else {
+      // Fallback: scan generic information-attributes elsewhere on page
+      $('.information-attributes .information-attribute').each((_, li) => {
+        const label = ($(li).find('.information-attribute__label').text() || '').trim().toLowerCase()
+        const value = ($(li).find('.information-attribute__text').text() || '').trim()
+        if (!label) return
+        const key = label
+          .replace(/[:\s]+/g, '_')
+          .replace(/__+/g, '_')
+          .replace(/[^a-z0-9_]/g, '')
+        if (!rawSpecs[key]) rawSpecs[key] = value
+        if (/ring/.test(label) && !rawSpecs.ring_size) {
+          const m = value.match(/\d{1,2}(?:\.\d)?/)
+          if (m) rawSpecs.ring_size = parseFloat(m[0])
+        }
+        if (/tube/.test(label) && !rawSpecs.tube_size) {
+          const m = value.match(/\d{1,2}(?:\.\d)?/)
+          if (m) rawSpecs.tube_size = parseFloat(m[0])
+        }
+        if (/frame/.test(label) && !rawSpecs.frame_material) rawSpecs.frame_material = value.toLowerCase()
+        if (/finish|color/.test(label) && !rawSpecs.finish) rawSpecs.finish = value.toLowerCase()
+      })
+    }
+    // Additional kit detection if not set: look for multiple numeric sizes and 'kit'
+    if (!rawSpecs.is_kit && /\bkit\b/i.test(title + ' ' + description)) {
+      const sizeHits = (title.match(/\b\d{1,2}(?:\.\d)?\b/g) || []).length
+      if (sizeHits >= 4) rawSpecs.is_kit = true
+    }
+  } catch {
+    /* ignore attribute parse errors */
+  }
 
   // If a template is provided, compute usedTemplateKey via applier (extraction is still primarily fallback-based)
   let usedTemplateKey: string | undefined

@@ -44,3 +44,6 @@ app/routes/resources.debug-scopes.ts
 
 # Production snapshots (local-only; large and OS-specific)
 snapshots/
+
+# Fly deploy snapshots
+fly-prod-snapshot-*.tgz
