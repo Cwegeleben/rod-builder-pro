@@ -10,6 +10,12 @@ async function main() {
     .split(/[,\n]/)
     .map(s => s.trim())
     .filter(Boolean)
+  const restrictToGuides = /guides?-tip-?tops?/i.test(supplierSlug)
+  const normalizeCode = (val: string | null | undefined) =>
+    String(val || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9-]+/g, '')
 
   // Resolve supplier.id from slug; default to slug-as-id when absent
   let supplierId = supplierSlug
@@ -66,20 +72,54 @@ async function main() {
   }
   const unique = Array.from(new Set(urls))
 
+  const isBatsonGuidesDetailUrl = (href: string): boolean => {
+    try {
+      const u = new URL(href)
+      const path = u.pathname.replace(/\/+/g, '/').replace(/\/$/, '').toLowerCase()
+      if (!u.hostname.endsWith('batsonenterprises.com')) return false
+      if (!path.startsWith('/guides-tip-tops')) return false
+      if (path === '/guides-tip-tops') return false
+      if (u.searchParams.has('page')) return false
+      return true
+    } catch {
+      return false
+    }
+  }
+
   const isDetailUrl = (href: string): boolean => {
+    if (restrictToGuides) return isBatsonGuidesDetailUrl(href)
     try {
       const u = new URL(href)
       const p = u.pathname.toLowerCase()
       if (/\/(products|product|ecom)\//.test(p)) return true
       if (/\/rod-blanks\//.test(p) && p !== '/rod-blanks') return true
       if (/\/reel-seats\//.test(p) && p !== '/reel-seats') return true
+      // Treat guides-tip-tops nested paths (excluding root and listing pages) as detail pages
+      if (/\/guides-tip-tops\//.test(p) && p !== '/guides-tip-tops' && !/\/products$/.test(p)) return true
+      if (
+        supplierSlug === 'batson-reel-seats' &&
+        u.hostname.toLowerCase().endsWith('batsonenterprises.com') &&
+        /^\/[a-z0-9-]+(?:-[a-z0-9-]+)+$/.test(p)
+      ) {
+        return true
+      }
       return false
     } catch {
       return false
     }
   }
 
-  const picked = detailOnly ? unique.filter(isDetailUrl) : unique
+  const scopeFiltered: string[] = []
+  const baseList = detailOnly ? unique.filter(isDetailUrl) : unique.slice()
+  const picked = baseList.filter(url => {
+    if (!restrictToGuides) return true
+    const ok = isBatsonGuidesDetailUrl(url)
+    if (!ok) scopeFiltered.push(url)
+    return ok
+  })
+  if (restrictToGuides && scopeFiltered.length) {
+    console.log(`[ingestSeeds] scope filtered ${scopeFiltered.length} URL(s) outside guides-tip-tops detail paths`)
+  }
   if (!picked.length) {
     console.log(JSON.stringify({ ok: true, supplierId, attempted: 0, staged: 0, errors: 0, items: [] }, null, 2))
     return
@@ -97,8 +137,16 @@ async function main() {
   let staged = 0
   let errors = 0
   const items: Array<{ url: string; sku?: string; ok: boolean; reason?: string }> = []
+  const allowedGuideClasses = new Set(['guide', 'tip-top', 'guide-kit'])
 
   for (const url of picked) {
+    let targetVariant = ''
+    try {
+      const parsedSeed = new URL(url)
+      targetVariant = normalizeCode(parsedSeed.searchParams.get('variant'))
+    } catch {
+      targetVariant = ''
+    }
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 15000)
     let html = ''
@@ -145,6 +193,124 @@ async function main() {
     try {
       const isReelSeat = /\/reel-seats\//i.test(url)
       const hasGrid = /class=["'][^"']*attribute-grid[^"']*["']/i.test(html)
+      const isGuidesOrTips = /\/(guides|tip-top|tip-tops)\//i.test(url)
+
+      // Guides & Tip Tops series page expansion
+      if (isGuidesOrTips && hasGrid) {
+        const { extractBatsonAttributeGrid } = await import(
+          '../../app/server/importer/preview/parsers/batsonAttributeGrid'
+        )
+        type BatsonRow = {
+          url: string
+          title?: string
+          price?: number | null
+          status?: string | null
+          raw: Record<string, string>
+          specs: Record<string, string | number | null>
+        }
+        const base = (() => {
+          try {
+            const u = new URL(url)
+            return `${u.protocol}//${u.hostname}`
+          } catch {
+            return 'https://batsonenterprises.com'
+          }
+        })()
+        const rows = extractBatsonAttributeGrid(html, base) as BatsonRow[]
+        if (Array.isArray(rows) && rows.length) {
+          let scopedRows = rows
+          if (targetVariant) {
+            const filtered = rows.filter(r => normalizeCode(r?.raw?.Code) === targetVariant)
+            if (filtered.length) scopedRows = filtered
+          }
+          for (const r of scopedRows) {
+            try {
+              let externalId = String(r.raw?.Code || '').trim()
+              if (!externalId) externalId = slugFromPath(r.url || url) || ''
+              if (!externalId) externalId = hashUrl(r.url || url)
+              externalId = externalId.toUpperCase().replace(/[^A-Z0-9-]+/g, '')
+              if (!externalId) continue
+
+              const tLower = String(r.title || '').toLowerCase()
+              const slug = (r.url || url || '').toLowerCase()
+              const isTipTop = /tip\s*-?tops?/.test(slug) || /(^|\W)tip\s*-?top(s)?(\W|$)/.test(tLower)
+              const isKit = /\bkit\b|\bset\b|\bassort/i.test(String(r.title || ''))
+
+              const parseNum = (val?: unknown) => {
+                const s = String(val ?? '').trim()
+                const m = s.match(/\d{1,2}(?:\.\d)?/)
+                return m ? parseFloat(m[0]) : undefined
+              }
+              const rawRing = r.specs['ring_size'] ?? r.specs['ring size'] ?? r.specs['ring']
+              const rawTube = r.specs['tube_size'] ?? r.specs['tube size'] ?? r.specs['tube']
+              const rawFrame = r.specs['frame_material'] ?? r.specs['frame material'] ?? r.specs['frame']
+              const rawFinish = r.specs['finish'] ?? r.specs['color']
+              const ringSize = parseNum(rawRing)
+              const tubeSize = parseNum(rawTube)
+              const frameMaterial = String(rawFrame ?? '').toString() || undefined
+              const finish = String(rawFinish ?? '').toString() || undefined
+
+              const title = (await import('../../app/server/importer/products/titleNormalize')).buildBatsonTitle({
+                code: externalId,
+                series: String(r.raw?.Model || r.title || '').trim() || undefined,
+                size_label: isTipTop
+                  ? tubeSize
+                    ? String(tubeSize)
+                    : undefined
+                  : ringSize
+                    ? String(ringSize)
+                    : undefined,
+                color: (finish || '').toString().trim() || undefined,
+                partType: isTipTop ? 'Tip Top' : isKit ? 'Guide Kit' : 'Guide',
+              })
+
+              const type = isTipTop ? 'Tip Top' : isKit ? 'Guide Kit' : 'Guide'
+              const classification = isTipTop ? 'tip-top' : isKit ? 'guide-kit' : 'guide'
+              if (restrictToGuides && !allowedGuideClasses.has(classification)) {
+                items.push({ url: srcUrl, ok: false, reason: 'skip-non-guide-row' })
+                continue
+              }
+
+              const srcUrl =
+                r.url && /^https?:/i.test(r.url) && !/^https?:\/\/[^/]+\/javascript:/i.test(r.url) ? r.url : url
+
+              await upsertNormalizedProduct({
+                supplier: { id: supplierId },
+                sku: externalId,
+                title,
+                type,
+                description: String(r.title || ''),
+                images: null,
+                rawSpecs: r.raw as unknown as Prisma.InputJsonValue,
+                normSpecs: {
+                  ...(r.specs as Record<string, string | number | null>),
+                  ring_size: ringSize ?? undefined,
+                  tube_size: tubeSize ?? undefined,
+                  frame_material: frameMaterial ? String(frameMaterial).toLowerCase() : undefined,
+                  finish: finish ? String(finish).toLowerCase() : undefined,
+                  classification,
+                } as unknown as Prisma.InputJsonValue,
+                priceMsrp: r.price ?? null,
+                priceWholesale: null,
+                availability: (r.status as string) || null,
+                sources: [{ url: srcUrl, externalId, source: 'discovered' }],
+                fetchedAt: new Date(),
+              })
+              await linkExternalIdForSource(supplierId, srcUrl, externalId, undefined)
+              items.push({ url: srcUrl, sku: externalId, ok: true })
+              staged++
+              await new Promise(res => setTimeout(res, 100))
+            } catch (e) {
+              errors++
+              items.push({ url, ok: false, reason: (e as Error)?.message || 'series-row-failed' })
+            }
+          }
+          // Polite delay after series page before continuing to next seed
+          await new Promise(res => setTimeout(res, 300))
+          continue
+        }
+      }
+
       if (isReelSeat && hasGrid) {
         const { extractBatsonAttributeGrid } = await import(
           '../../app/server/importer/preview/parsers/batsonAttributeGrid'
@@ -358,6 +524,11 @@ async function main() {
       if (!externalId) externalId = hashUrl(url)
       externalId = externalId.toUpperCase().replace(/[^A-Z0-9-]+/g, '')
       if (!externalId) throw new Error('no-external-id')
+      // Skip generic listing pages which resolve to PRODUCTS (no discrete item)
+      if (externalId === 'PRODUCTS') {
+        items.push({ url, ok: false, reason: 'skip-listing-page' })
+        continue
+      }
       const rawSpecs = (jld?.rawSpecs as Record<string, unknown>) || {}
       const rawTitle = ((jld?.title as string) || '').trim()
 
@@ -407,24 +578,108 @@ async function main() {
         return undefined
       })()
 
+      // Determine part type (reel seat already handled elsewhere) and classification for guides / tip tops
+      const isReelSeatSingle = /reel-seats/i.test(url)
+      const isGuidePage = /\/guides\//i.test(url) || /\bguide\b/i.test(rawTitle)
+      const isTipTopPage = /tip-top|tip-tops/i.test(url) || /tip\s*-?top(s)?/i.test(rawTitle)
+      const partTypeDerived = isReelSeatSingle
+        ? 'Reel Seat'
+        : isTipTopPage
+          ? 'Tip Top'
+          : isGuidePage
+            ? 'Guide'
+            : undefined
+
+      // Extract potential ring / tube sizes, frame material and finish from rawSpecs or title
+      const pickNum = (txt: string): number | undefined => {
+        const m = txt.match(/\b\d{1,2}(?:\.\d)?\b/)
+        return m ? parseFloat(m[0]) : undefined
+      }
+      const ringSize = (() => {
+        for (const k of ['ring_size', 'ring size', 'ring']) {
+          const v = (rawSpecs as Record<string, unknown>)[k]
+          if (typeof v === 'number') return v
+          if (typeof v === 'string') {
+            const n = pickNum(v)
+            if (n !== undefined) return n
+          }
+        }
+        if (isGuidePage) return pickNum(rawTitle)
+        return undefined
+      })()
+      const tubeSize = (() => {
+        for (const k of ['tube_size', 'tube size', 'tube']) {
+          const v = (rawSpecs as Record<string, unknown>)[k]
+          if (typeof v === 'number') return v
+          if (typeof v === 'string') {
+            const n = pickNum(v)
+            if (n !== undefined) return n
+          }
+        }
+        if (isTipTopPage) return pickNum(rawTitle)
+        return undefined
+      })()
+      const frameMaterialRaw = (() => {
+        for (const k of ['frame_material', 'frame material', 'frame']) {
+          const v = (rawSpecs as Record<string, unknown>)[k]
+          if (typeof v === 'string' && v.trim()) return v.trim()
+        }
+        return ''
+      })()
+      const finishRaw = (() => {
+        for (const k of ['finish', 'color']) {
+          const v = (rawSpecs as Record<string, unknown>)[k]
+          if (typeof v === 'string' && v.trim()) return v.trim()
+        }
+        return ''
+      })()
+      const normalizeToken = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
+      const frameMaterial = frameMaterialRaw ? normalizeToken(frameMaterialRaw) : undefined
+      const finish = finishRaw ? normalizeToken(finishRaw) : undefined
+      const classification =
+        partTypeDerived === 'Tip Top' ? 'tip-top' : partTypeDerived === 'Guide' ? 'guide' : undefined
+      if (restrictToGuides) {
+        if (!classification || !allowedGuideClasses.has(classification)) {
+          items.push({ url, ok: false, reason: 'skip-non-guide-detail' })
+          continue
+        }
+      }
+
       const title = (await import('../../app/server/importer/products/titleNormalize')).buildBatsonTitle({
         code: externalId,
         model: modelGuess,
         series: seriesGuess,
-        size_label: sizeGuess,
-        color: colorGuess,
-        partType: /reel-seats/i.test(url) ? 'Reel Seat' : undefined,
+        size_label:
+          partTypeDerived === 'Tip Top'
+            ? tubeSize
+              ? String(tubeSize)
+              : undefined
+            : ringSize
+              ? String(ringSize)
+              : sizeGuess,
+        color: colorGuess || finishRaw || undefined,
+        partType: partTypeDerived,
       })
+
+      const normSpecsMerged = partTypeDerived
+        ? {
+            ring_size: ringSize ?? undefined,
+            tube_size: tubeSize ?? undefined,
+            frame_material: frameMaterial,
+            finish: finish,
+            classification,
+          }
+        : null
 
       await upsertNormalizedProduct({
         supplier: { id: supplierId },
         sku: externalId,
         title,
-        type: /reel-seats/i.test(url) ? 'Reel Seat' : undefined,
+        type: partTypeDerived,
         description: (jld?.description as string) || '',
         images: jld?.images as unknown as Prisma.InputJsonValue,
         rawSpecs: rawSpecs as unknown as Prisma.InputJsonValue,
-        normSpecs: null,
+        normSpecs: normSpecsMerged as unknown as Prisma.InputJsonValue,
         priceMsrp: (jld?.priceMsrp as number) || null,
         priceWholesale: null,
         availability: null,

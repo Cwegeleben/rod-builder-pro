@@ -14,10 +14,19 @@ export const BatsonReelSeatsSite = {
   },
   async discover(fetchHtml: (mode: 'static' | 'headless') => Promise<string | null>, baseUrl: string) {
     const notes: string[] = []
-    // Helper: absolute URL normalizer (drop hash, keep query as-is)
+    const baseOrigin = (() => {
+      try {
+        const url = new URL(baseUrl)
+        return url.origin
+      } catch {
+        return baseUrl
+      }
+    })()
+    const isReelPath = (path: string) => /^\/reel-seats(\/|$)/.test(path)
+
     const toAbs = (href: string) => {
       try {
-        const abs = /^https?:/i.test(href) ? href : `${baseUrl}${href.startsWith('/') ? '' : '/'}${href}`
+        const abs = /^https?:/i.test(href) ? href : `${baseOrigin}${href.startsWith('/') ? '' : '/'}${href}`
         const u = new URL(abs)
         u.hash = ''
         return u.toString()
@@ -25,8 +34,21 @@ export const BatsonReelSeatsSite = {
         return href
       }
     }
-    // Helper: fetch an arbitrary URL (static first, then headless with scroll)
-    async function getHtml(url: string): Promise<{ html: string | null; mode: 'static' | 'headless' | 'none' }> {
+
+    const hasListingMarkers = (html: string | null | undefined): boolean => {
+      if (!html) return false
+      return /ListingProducts/i.test(html) || /ProductsTotalCount/i.test(html)
+    }
+
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+    type GetHtmlOpts = { expectListing?: boolean; triedAlt?: boolean }
+
+    async function getHtml(
+      url: string,
+      opts?: GetHtmlOpts,
+    ): Promise<{ html: string | null; mode: 'static' | 'headless' | 'none' }> {
+      const expectListing = Boolean(opts?.expectListing)
       const headers: Record<string, string> = {
         'User-Agent':
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
@@ -35,8 +57,21 @@ export const BatsonReelSeatsSite = {
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache',
       }
-      // Try static
-      {
+      let staticHtml: string | null = null
+      const maxAttempts = expectListing ? 6 : 2
+      const altUrl = (() => {
+        if (opts?.triedAlt) return null
+        try {
+          const parsed = new URL(url)
+          if (/^www\./i.test(parsed.hostname)) return null
+          const clone = new URL(parsed.toString())
+          clone.hostname = `www.${parsed.hostname}`
+          return clone.toString()
+        } catch {
+          return null
+        }
+      })()
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const ctrl = new AbortController()
         const timer = setTimeout(() => ctrl.abort(), 12000)
         try {
@@ -44,32 +79,66 @@ export const BatsonReelSeatsSite = {
           if (r.ok) {
             const t = await r.text()
             clearTimeout(timer)
-            if (t && t.trim()) return { html: t, mode: 'static' }
+            if (t && t.trim()) {
+              staticHtml = t
+              if (!expectListing || hasListingMarkers(t)) {
+                return { html: t, mode: 'static' }
+              }
+            }
+          } else if (r.status === 429) {
+            notes.push(`rate limited (429) fetching ${url}`)
+            if (altUrl) {
+              notes.push(`retrying via alternate host ${altUrl}`)
+              await sleep(600)
+              return getHtml(altUrl, { ...opts, triedAlt: true })
+            }
+          } else if (r.status >= 500) {
+            notes.push(`server error ${r.status} fetching ${url}`)
           }
         } catch {
           /* fall back */
         } finally {
           clearTimeout(timer)
         }
+        if (expectListing) await sleep(400 * (attempt + 1))
       }
-      // Headless fallback with autoScroll
       try {
         const { renderHeadlessHtml } = await import('../../headless/renderHeadlessHtml')
         const t = await renderHeadlessHtml(url, { timeoutMs: 20000, autoScroll: true })
-        return { html: t, mode: 'headless' }
+        if (t && t.trim()) {
+          if (expectListing && staticHtml && !hasListingMarkers(staticHtml) && !hasListingMarkers(t)) {
+            return { html: staticHtml, mode: 'static' }
+          }
+          if (expectListing && staticHtml && !hasListingMarkers(staticHtml) && hasListingMarkers(t)) {
+            notes.push('static fetch lacked listing markers; fell back to headless')
+          }
+          return { html: t, mode: 'headless' }
+        }
+        return { html: staticHtml, mode: staticHtml ? 'static' : 'none' }
       } catch (e) {
         notes.push(`headless error: ${(e as Error).message}`)
+        if (staticHtml) return { html: staticHtml, mode: 'static' }
         return { html: null, mode: 'none' }
       }
     }
 
-    // Load the initial category HTML using provided abstraction first
     let initialHtml = await fetchHtml('static').catch(e => {
       notes.push(`static error: ${(e as Error).message}`)
       return null
     })
     let usedMode: 'static' | 'headless' | 'none' = initialHtml && initialHtml.trim() ? 'static' : 'none'
-    if (!initialHtml || !initialHtml.trim()) {
+    if (!initialHtml || !initialHtml.trim() || !hasListingMarkers(initialHtml)) {
+      const manual = await getHtml(baseUrl, { expectListing: true }).catch(() => ({
+        html: null,
+        mode: 'none' as const,
+      }))
+      if (manual?.html && manual.html.trim() && hasListingMarkers(manual.html)) {
+        initialHtml = manual.html
+        usedMode = manual.mode
+        notes.push('fetched listing via direct HTTP fetch')
+      }
+    }
+    if (!initialHtml || !initialHtml.trim() || !hasListingMarkers(initialHtml)) {
       const h = await fetchHtml('headless').catch(e => {
         notes.push(`headless error: ${(e as Error).message}`)
         return null
@@ -77,16 +146,26 @@ export const BatsonReelSeatsSite = {
       if (h && h.trim()) {
         initialHtml = h
         usedMode = 'headless'
+      } else if (initialHtml && !hasListingMarkers(initialHtml)) {
+        notes.push('static fetch lacked listing markers; headless unavailable or empty')
       }
     }
     if (!initialHtml || !initialHtml.trim()) {
       throw new Error('DiscoveryError: No HTML available for category')
     }
 
-    // Determine starting URL from canonical or default to base + current path
     const $0 = cheerio.load(initialHtml)
-    const canonical = ($0('link[rel="canonical"]').attr('href') || '').trim()
-    const startUrl = canonical || `${baseUrl}/reel-seats`
+    const canonicalRaw = ($0('link[rel="canonical"]').attr('href') || '').trim()
+    const canonical = (() => {
+      if (!canonicalRaw) return null
+      try {
+        const u = new URL(canonicalRaw)
+        return isReelPath(u.pathname) ? u.toString() : null
+      } catch {
+        return null
+      }
+    })()
+    const startUrl = canonical || baseUrl
 
     const productUrls = new Set<string>()
     const pageQueue: string[] = [startUrl]
@@ -96,72 +175,47 @@ export const BatsonReelSeatsSite = {
     let expectedResults: number | null = null
 
     const extractTileLinks = ($: cheerio.CheerioAPI): string[] => {
-      // Broad set of tile containers and link hints
-      const out: string[] = []
-      const TILE_SEL = [
-        '#ListingProducts .ejs-productitem',
-        '.ejs-productitem',
-        '.productgrid .grid__item',
-        '.grid .grid__item',
-        '.product-item',
-        '.product-card',
-        '.card--product',
-        '.card__content:has(a[href])',
+      const urls = new Set<string>()
+      const selector = [
+        '#ListingProducts a.product-title[href]',
+        '#ListingProducts .product-title a[href]',
+        '#ListingProducts .ejs-productitem .product-title a[href]',
+        '#ListingProducts .productbox .product-title a[href]',
       ].join(', ')
-      $(TILE_SEL)
-        .find('a[href], [data-product-url]')
-        .each((_i, el) => {
-          const dataUrl = String($(el).attr('data-product-url') || '').trim()
-          const href = String($(el).attr('href') || '').trim()
-          const candidate = dataUrl || href
-          if (!candidate) return
-          const abs = toAbs(candidate)
-          try {
-            const u = new URL(abs)
-            // Accept only product detail pages under /reel-seats/<slug>
-            if (!u.hostname.endsWith('batsonenterprises.com')) return
-            if (!/^\/reel-seats(\/|$)/.test(u.pathname)) return
-            // Exclude the category root and paginated listing URLs
-            const path = u.pathname.replace(/\/$/, '')
-            if (path === '/reel-seats') return
-            if (u.searchParams.has('page')) return
-            // Exclude known non-product areas
-            if (/\/ecom\//i.test(u.pathname) || /\/collections\//i.test(u.pathname)) return
-            out.push(u.toString())
-          } catch {
-            /* ignore malformed */
-          }
-        })
-      // Fallback: regex scan for common data attributes in the page
-      try {
-        const html = $.html() || ''
-        const reD = /\b(?:href|data-product-url)\s*=\s*"([^"#<>{}]+)"/gi
-        let m: RegExpExecArray | null
-        while ((m = reD.exec(html))) {
-          const abs = toAbs(m[1])
-          try {
-            const u = new URL(abs)
-            if (!u.hostname.endsWith('batsonenterprises.com')) continue
-            if (!/^\/reel-seats(\/|$)/.test(u.pathname)) continue
-            const path = u.pathname.replace(/\/$/, '')
-            if (path === '/reel-seats') continue
-            if (u.searchParams.has('page')) continue
-            if (/\/ecom\//i.test(u.pathname) || /\/collections\//i.test(u.pathname)) continue
-            out.push(u.toString())
-          } catch {
-            /* ignore */
-          }
+      $(selector).each((_i, el) => {
+        const href = String($(el).attr('href') || '').trim()
+        if (!href) return
+        try {
+          const abs = toAbs(href)
+          const u = new URL(abs)
+          if (!u.hostname.endsWith('batsonenterprises.com')) return
+          if (!isReelPath(u.pathname)) return
+          urls.add(u.toString())
+        } catch {
+          /* ignore invalid URLs */
         }
-      } catch {
-        /* ignore */
-      }
-      return Array.from(new Set(out))
+      })
+      return Array.from(urls)
     }
+
+    const getProductsTotalCount = ($: cheerio.CheerioAPI): number | null => {
+      const raw = String($('#ProductsTotalCount').attr('value') || $('[name="ProductsTotalCount"]').attr('value') || '')
+      const n = Number(raw)
+      return Number.isFinite(n) && n > 0 ? n : null
+    }
+
+    const getLastPageNumber = ($: cheerio.CheerioAPI): number | null => {
+      const raw = String($('#LastPageNumber').attr('value') || $('[name="LastPageNumber"]').attr('value') || '')
+      const n = Number(raw)
+      return Number.isFinite(n) && n >= 1 ? n : null
+    }
+
     const collectPagination = ($: cheerio.CheerioAPI): string[] => {
       const links: string[] = []
       const add = (u: string) => {
         try {
           const x = new URL(toAbs(u))
+          if (!isReelPath(x.pathname)) return
           links.push(x.toString())
         } catch {
           /* ignore */
@@ -177,13 +231,13 @@ export const BatsonReelSeatsSite = {
         const cls = String($(a).attr('class') || '').toLowerCase()
         if (!href) return
         const u = toAbs(href)
-        // Heuristics: links that look like page navigation
         if (/\bnext\b/.test(txt) || /page=\d+/.test(u) || /\bpage\b/.test(cls) || /pagination|pager/.test(cls)) {
           add(u)
         }
       })
       return Array.from(new Set(links))
     }
+
     const parseResultsCount = ($: cheerio.CheerioAPI): number | null => {
       const body = $.text() || ''
       const m = body.match(/(\d{1,5})\s+Results/i)
@@ -194,39 +248,61 @@ export const BatsonReelSeatsSite = {
       return null
     }
 
-    // BFS over pagination until tile count stops increasing
     const MAX_PAGES = 120
+    let seededPageQueue = false
     while (pageQueue.length && pagesVisited < MAX_PAGES) {
       const url = pageQueue.shift()!
       if (!url || visited.has(url)) continue
       visited.add(url)
       pagesVisited++
-      const { html, mode } = await getHtml(url)
+      const { html, mode } = await getHtml(url, { expectListing: true })
       if (!html || !html.trim()) continue
       if (mode === 'headless' && usedMode === 'static') usedMode = 'headless'
       const $ = cheerio.load(html)
-      // Expected results from any visited page (first non-null wins)
-      if (expectedResults == null) expectedResults = parseResultsCount($)
+      if (expectedResults == null) {
+        expectedResults = getProductsTotalCount($) ?? parseResultsCount($)
+      }
+      if (!seededPageQueue) {
+        const lastPage = getLastPageNumber($)
+        if (lastPage && lastPage > 1) {
+          const base = new URL(startUrl)
+          for (let page = 2; page <= lastPage && page <= MAX_PAGES; page++) {
+            const u = new URL(base.toString())
+            u.searchParams.set('page', String(page))
+            const nextUrl = u.toString()
+            if (!visited.has(nextUrl)) pageQueue.push(nextUrl)
+          }
+        }
+        seededPageQueue = true
+      }
       const links = extractTileLinks($)
+      if (links.length === 0) {
+        notes.push(`no tiles via ${mode} at ${url}`)
+      }
       for (const u of links) productUrls.add(u)
       const tilesNow = productUrls.size
-      // Enqueue further pages discovered here
       const more = collectPagination($)
       for (const m of more) if (!visited.has(m)) pageQueue.push(m)
-      // Stop if no increase after visiting this page AND queue is empty
       if (tilesNow <= lastTilesTotal && pageQueue.length === 0) break
       lastTilesTotal = tilesNow
+      await sleep(800)
     }
 
-    // If nothing found, raise discovery error
     if (productUrls.size === 0) {
-      throw new Error('DiscoveryError: No product tiles found')
+      const detail = notes.length ? ` Details: ${notes.join(' | ')}` : ''
+      throw new Error(`DiscoveryError: No product tiles found.${detail}`)
     }
 
-    // Validate detail pages by checking for product-title / add-to-cart markers or attribute-grid (series pages)
-    const VALIDATE_MAX = 200
+    if (expectedResults != null && productUrls.size !== expectedResults) {
+      throw new Error(
+        `DiscoveryError: Found ${productUrls.size} URLs but page reports ${expectedResults} Result(s). Adjust selectors.`,
+      )
+    }
+
+    const VALIDATE_MAX = 60
     const candidates = Array.from(productUrls).slice(0, VALIDATE_MAX)
     const valid = new Set<string>()
+    let validated = 0
     for (const u of candidates) {
       try {
         const { html } = await getHtml(u)
@@ -244,13 +320,18 @@ export const BatsonReelSeatsSite = {
         const hasGrid = Boolean($('.attribute-grid tbody').length)
         if (hasTitle || hasCart || hasGrid) valid.add(u)
       } catch {
-        /* ignore individual candidate errors */
+        /* ignore */
       }
+      validated++
+      if (validated % 5 === 0) await sleep(400)
     }
-    // Prefer validated set if it has reasonable size; otherwise keep original
-    const finalList = valid.size >= 5 ? Array.from(new Set(valid)) : Array.from(new Set(productUrls))
+    const validationSample = candidates.length ? `${valid.size}/${candidates.length}` : '0/0'
+    if (candidates.length && valid.size < Math.ceil(candidates.length * 0.4)) {
+      notes.push(`validation confidence low (${validationSample} detail pages passed)`)
+    }
 
-    // Compare to displayed results count
+    const finalList = Array.from(new Set(productUrls))
+
     let warning: string | undefined
     if (expectedResults != null && expectedResults > 0) {
       const diff = Math.abs(finalList.length - expectedResults)
