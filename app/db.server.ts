@@ -115,11 +115,20 @@ if (process.env.NODE_ENV === 'production' && !global.__schemaFixDone) {
       // ProductSource (seeds)
       if (!has('ProductSource')) {
         await prisma.$executeRawUnsafe(
-          'CREATE TABLE IF NOT EXISTS ProductSource (id TEXT PRIMARY KEY NOT NULL, supplierId TEXT NOT NULL, url TEXT NOT NULL, externalId TEXT, source TEXT NOT NULL, notes TEXT, firstSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, lastSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)',
+          'CREATE TABLE IF NOT EXISTS ProductSource (id TEXT PRIMARY KEY NOT NULL, supplierId TEXT NOT NULL, url TEXT NOT NULL, externalId TEXT, source TEXT NOT NULL, notes TEXT, htmlHash TEXT, firstSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, lastSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)',
         )
         await prisma.$executeRawUnsafe(
           'CREATE UNIQUE INDEX IF NOT EXISTS ProductSource_supplier_url_unique ON ProductSource(supplierId, url)',
         )
+      }
+      try {
+        const cols: Array<{ name: string }> = await prisma.$queryRawUnsafe("PRAGMA table_info('ProductSource')")
+        const colNames = new Set(cols.map(c => c.name))
+        if (!colNames.has('htmlHash')) {
+          await prisma.$executeRawUnsafe('ALTER TABLE ProductSource ADD COLUMN htmlHash TEXT')
+        }
+      } catch (e) {
+        console.warn('[startup] ProductSource upgrade check failed (non-fatal):', e)
       }
     } catch (err) {
       console.warn('[startup] schema check failed (non-fatal):', err)

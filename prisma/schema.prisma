@@ -306,6 +306,7 @@ model ProductSource {
   externalId   String?
   source       String   // 'manual' | 'discovered' | 'forced'
   notes        String?
+  htmlHash     String?
   firstSeenAt  DateTime @default(now())
   lastSeenAt   DateTime @default(now())
   // Link to canonical Product when known (after first successful normalization/upsert)

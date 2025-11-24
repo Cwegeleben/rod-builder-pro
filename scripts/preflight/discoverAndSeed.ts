@@ -10,6 +10,8 @@ async function main() {
   const strategyEnv = (process.env.STRATEGY || 'hybrid').toLowerCase()
   const strategy: 'static' | 'headless' | 'hybrid' =
     strategyEnv === 'static' || strategyEnv === 'headless' ? (strategyEnv as 'static' | 'headless') : 'hybrid'
+  const limitEnv = (process.env.LIMIT || '').trim()
+  const limit = limitEnv ? Math.max(0, Number.parseInt(limitEnv, 10) || 0) : 0
 
   if (!sourceUrl) {
     console.log(JSON.stringify({ ok: false, error: 'SOURCE_URL missing' }))
@@ -71,9 +73,10 @@ async function main() {
     return null
   }
 
-  const expandReelSeatSeeds = async (urlsToExpand: string[]): Promise<string[]> => {
+  const expandReelSeatSeeds = async (urlsToExpand: string[], maxSeeds: number): Promise<string[]> => {
     const expanded = new Set<string>()
     for (const detailUrl of urlsToExpand) {
+      if (maxSeeds > 0 && expanded.size >= maxSeeds) break
       const html = await fetchDetailWithRetry(detailUrl)
       if (!html) {
         expanded.add(detailUrl)
@@ -127,6 +130,7 @@ async function main() {
         )}`
         expanded.add(variantUrl)
         perPageCount++
+        if (maxSeeds > 0 && expanded.size >= maxSeeds) break
       }
       if (perPageCount > 0 && expanded.size < 20) {
         console.log('[expandReelSeatSeeds] expanded', detailUrl, '->', perPageCount)
@@ -194,12 +198,17 @@ async function main() {
   const urls = Array.from(
     new Set((Array.isArray(res.seeds) ? res.seeds.map((s: { url: string }) => s.url) : []) as string[]),
   )
-  const expandedUrls = siteId === 'batson-reel-seats' && urls.length ? await expandReelSeatSeeds(urls) : urls
+  const baseForExpansion = limit > 0 ? urls.slice(0, limit) : urls
+  const expandedUrls =
+    siteId === 'batson-reel-seats' && baseForExpansion.length
+      ? await expandReelSeatSeeds(baseForExpansion, limit)
+      : baseForExpansion
   const finalUrls = Array.from(new Set(expandedUrls))
+  const limitedUrls = limit > 0 ? finalUrls.slice(0, limit) : finalUrls
 
   // Persist seeds best-effort under supplierId=siteId
   let persisted = 0
-  for (const u of finalUrls) {
+  for (const u of limitedUrls) {
     try {
       await upsertProductSource(siteId, u, 'discovered', 'discover:category', undefined)
       persisted++
@@ -219,12 +228,19 @@ async function main() {
     strategyUsed: dbgRes?.strategyUsed || 'n/a',
     totalFound: typeof dbgRes?.totalFound === 'number' ? dbgRes.totalFound : finalUrls.length,
     deduped: typeof dbgRes?.deduped === 'number' ? dbgRes.deduped : finalUrls.length,
-    sample: finalUrls.slice(0, 8),
+    limited: limit > 0 ? limitedUrls.length : undefined,
+    sample: limitedUrls.slice(0, 8),
     contentLength: (staticHtml || headlessHtml || '').length,
     textLength: (staticHtml || headlessHtml || '').replace(/<[^>]+>/g, '').length,
   }
 
-  console.log(JSON.stringify({ ok: true, siteId, urlsCount: finalUrls.length, persisted, debug }, null, 2))
+  console.log(
+    JSON.stringify(
+      { ok: true, siteId, urlsCount: finalUrls.length, persisted, limitApplied: limit > 0 ? limit : undefined, debug },
+      null,
+      2,
+    ),
+  )
 }
 
 main().catch(err => {

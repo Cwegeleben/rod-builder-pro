@@ -8,6 +8,9 @@ import { BatsonReelSeatsSite } from './batson.reel-seats'
 // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
 // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
 import { BatsonGuidesTopsSite } from './batson.guides-tops'
+import { BatsonGripsSite } from './batson.grips'
+import { BatsonEndCapsGimbalsSite } from './batson.end-caps-gimbals'
+import { BatsonTrimPiecesSite } from './batson.trim-pieces'
 // <!-- END RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
 // <!-- END RBP GENERATED: importer-discover-batson-series-v1 -->
 // <!-- BEGIN RBP GENERATED: importer-known-targets-v1 -->
@@ -19,6 +22,9 @@ export function getDiscoverSiteById(id: string) {
     // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
     // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
     if (id === 'batson-guides-tops') return BatsonGuidesTopsSite
+    if (id === 'batson-grips') return BatsonGripsSite
+    if (id === 'batson-end-caps-gimbals') return BatsonEndCapsGimbalsSite
+    if (id === 'batson-trim-pieces') return BatsonTrimPiecesSite
     // <!-- END RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
   } catch {
     /* ignore */
@@ -37,6 +43,12 @@ export function getSiteConfigById(id: string): SiteConfig | null {
     // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
     // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
     case 'batson-guides-tops':
+      return BatsonRodBlanksConfig
+    case 'batson-grips':
+      return BatsonRodBlanksConfig
+    case 'batson-end-caps-gimbals':
+      return BatsonRodBlanksConfig
+    case 'batson-trim-pieces':
       return BatsonRodBlanksConfig
     // <!-- END RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
     default:
@@ -70,6 +82,9 @@ export const SITE_CONFIGS = ALL
 
 // <!-- BEGIN RBP GENERATED: importer-discover-batson-series-v1 -->
 export { BatsonRodBlanksSite } from './batson.rod-blanks'
+export { BatsonGripsSite } from './batson.grips'
+export { BatsonEndCapsGimbalsSite } from './batson.end-caps-gimbals'
+export { BatsonTrimPiecesSite } from './batson.trim-pieces'
 // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 -->
 export { BatsonReelSeatsSite } from './batson.reel-seats'
 // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
@@ -86,6 +101,9 @@ export function getSiteConfigForUrlDiscoverV1(url: string) {
     // <!-- END RBP GENERATED: importer-discover-unified-v1 -->
     // <!-- BEGIN RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
     if (BatsonGuidesTopsSite.match(url)) return BatsonGuidesTopsSite
+    if (BatsonGripsSite.match(url)) return BatsonGripsSite
+    if (BatsonEndCapsGimbalsSite.match(url)) return BatsonEndCapsGimbalsSite
+    if (BatsonTrimPiecesSite.match(url)) return BatsonTrimPiecesSite
     // <!-- END RBP GENERATED: importer-discover-unified-v1 (guides-tops) -->
   } catch {
     /* ignore */

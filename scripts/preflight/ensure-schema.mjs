@@ -59,6 +59,7 @@ export async function ensure() {
     await ensureImportTemplatePreparingRunId()
     await ensureImportRunProgressColumn()
     await ensureProductSourceTable()
+    await ensureProductSourceHtmlHashColumn()
     await ensurePartStagingPublishColumns()
     await ensurePublishTelemetryTable()
     await ensureImportTelemetryTable()
@@ -88,6 +89,7 @@ async function ensureProductSourceTable() {
       "externalId" TEXT,
       "source" TEXT NOT NULL,
       "notes" TEXT,
+      "htmlHash" TEXT,
       "firstSeenAt" DATETIME NOT NULL DEFAULT (datetime('now')),
       "lastSeenAt" DATETIME NOT NULL DEFAULT (datetime('now'))
     )
@@ -99,6 +101,14 @@ async function ensureProductSourceTable() {
   } catch {
     // ignore
   }
+}
+
+async function ensureProductSourceHtmlHashColumn() {
+  const hasTable = await tableExists('ProductSource')
+  if (!hasTable) return
+  const hasCol = await columnExists('ProductSource', 'htmlHash')
+  if (hasCol) return
+  await prisma.$executeRawUnsafe(`ALTER TABLE "ProductSource" ADD COLUMN "htmlHash" TEXT`)
 }
 
 // Ensure PublishTelemetry table exists (SQLite only)

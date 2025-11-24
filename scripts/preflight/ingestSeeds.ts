@@ -1,5 +1,122 @@
 import { prisma } from '../../app/db.server'
 import type { Prisma } from '@prisma/client'
+import { createHash } from 'node:crypto'
+import * as path from 'node:path'
+import { promises as fs } from 'node:fs'
+
+const DEFAULT_CONCURRENCY = 4
+const MAX_CONCURRENCY = 10
+const SNAPSHOT_ROOT = path.join(process.cwd(), 'snapshots', 'batson-html')
+const SKIPPED_DETAILS_LOG = path.join(process.cwd(), 'logs', 'skipped-details.jsonl')
+
+function getConcurrencyFromEnv(): number {
+  const raw = (process.env.CONCURRENCY || '').trim()
+  const parsed = Number(raw)
+  if (!raw || !Number.isFinite(parsed) || parsed <= 0) return DEFAULT_CONCURRENCY
+  return Math.min(parsed, MAX_CONCURRENCY)
+}
+
+async function mapWithConcurrency<T>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<void>) {
+  if (!items.length) return
+  const workerCount = Math.max(1, Math.min(concurrency || 1, items.length))
+  let cursor = 0
+  const worker = async () => {
+    while (true) {
+      const current = cursor++
+      if (current >= items.length) break
+      try {
+        await fn(items[current], current)
+      } catch (err) {
+        const detail = (err as Error)?.message || String(err)
+        console.warn('[mapWithConcurrency] worker error', { index: current, error: detail })
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+}
+
+function computeHtmlHash(html: string): string {
+  return createHash('sha1').update(html, 'utf8').digest('hex')
+}
+
+function urlToSafeFilename(url: string): string {
+  const clean = url
+    .replace(/^https?:\/\//i, '')
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+  const hash = computeHtmlHash(url).slice(0, 10)
+  const stem = clean.slice(0, 80) || 'detail'
+  return `${stem}-${hash}.html`
+}
+
+async function ensureSnapshotForUrl(url: string, html: string) {
+  try {
+    await fs.mkdir(SNAPSHOT_ROOT, { recursive: true })
+    const target = path.join(SNAPSHOT_ROOT, urlToSafeFilename(url))
+    try {
+      await fs.access(target)
+      return
+    } catch {
+      await fs.writeFile(target, html, 'utf8')
+      console.log('[detail-expansion] wrote HTML snapshot for skipped URL:', url)
+    }
+  } catch (err) {
+    console.warn('[detail-expansion] snapshot write failed (non-fatal):', err)
+  }
+}
+
+async function logSkippedDetail(entry: { url: string; error: string }) {
+  try {
+    await fs.mkdir(path.dirname(SKIPPED_DETAILS_LOG), { recursive: true })
+    const line = JSON.stringify({ ...entry, timestamp: new Date().toISOString() }) + '\n'
+    await fs.appendFile(SKIPPED_DETAILS_LOG, line, 'utf8')
+  } catch (err) {
+    console.warn('[detail-expansion] failed to log skipped detail (non-fatal):', err)
+  }
+}
+
+async function loadExistingHtmlHashes(urls: string[], supplierIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  if (!urls.length) return map
+  try {
+    const params: unknown[] = []
+    const urlPlaceholders = urls.map(() => '?').join(',')
+    params.push(...urls)
+    let supplierClause = ''
+    if (supplierIds.length) {
+      supplierClause = ` AND supplierId IN (${supplierIds.map(() => '?').join(',')})`
+      params.push(...supplierIds)
+    }
+    const sql = `SELECT url, htmlHash FROM ProductSource WHERE url IN (${urlPlaceholders})${supplierClause}`
+    const rows = await prisma.$queryRawUnsafe<Array<{ url: string; htmlHash: string | null }>>(sql, ...params)
+    for (const row of rows) {
+      const u = String(row?.url || '').trim()
+      if (!u) continue
+      const h = row?.htmlHash ? String(row.htmlHash) : ''
+      if (h) map.set(u, h)
+    }
+  } catch (err) {
+    console.warn('[ingestSeeds] failed to load html hashes (non-fatal):', err)
+  }
+  return map
+}
+
+async function persistHtmlHash(url: string, htmlHash: string, supplierIds: string[]) {
+  if (!url || !htmlHash) return
+  try {
+    const params: unknown[] = [htmlHash, url]
+    let supplierClause = ''
+    if (supplierIds.length) {
+      supplierClause = ` AND supplierId IN (${supplierIds.map(() => '?').join(',')})`
+      params.push(...supplierIds)
+    }
+    const sql = `UPDATE ProductSource SET htmlHash = ?, lastSeenAt = CURRENT_TIMESTAMP WHERE url = ?${supplierClause}`
+    await prisma.$executeRawUnsafe(sql, ...params)
+  } catch (err) {
+    console.warn('[ingestSeeds] failed to persist htmlHash (non-fatal):', err)
+  }
+}
 
 async function main() {
   const supplierSlug = process.env.SUPPLIER_ID || 'batson-reel-seats'
@@ -11,6 +128,11 @@ async function main() {
     .map(s => s.trim())
     .filter(Boolean)
   const restrictToGuides = /guides?-tip-?tops?/i.test(supplierSlug)
+  const slugPathMatchers: Record<string, RegExp[]> = {
+    'batson-grips': [/^\/handle-kits\/.+/i, /^\/grips\/.+/i],
+    'batson-end-caps-gimbals': [/^\/end-caps-gimbals\/.+/i],
+    'batson-trim-pieces': [/^\/trim-pieces\/.+/i],
+  }
   const normalizeCode = (val: string | null | undefined) =>
     String(val || '')
       .trim()
@@ -28,6 +150,7 @@ async function main() {
   } catch {
     /* ignore */
   }
+  const supplierIdsForHash = Array.from(new Set([supplierId, supplierSlug])).filter(Boolean)
 
   // 1) If URLs are provided via env, prefer those (bypass ProductSource)
   let urls: string[] = []
@@ -103,6 +226,8 @@ async function main() {
       ) {
         return true
       }
+      const extraMatchers = slugPathMatchers[supplierSlug] || []
+      if (extraMatchers.some(rx => rx.test(p))) return true
       return false
     } catch {
       return false
@@ -139,7 +264,11 @@ async function main() {
   const items: Array<{ url: string; sku?: string; ok: boolean; reason?: string }> = []
   const allowedGuideClasses = new Set(['guide', 'tip-top', 'guide-kit'])
 
-  for (const url of picked) {
+  const htmlHashCache = await loadExistingHtmlHashes(picked, supplierIdsForHash)
+  const concurrency = getConcurrencyFromEnv()
+  console.log('[discoverAndSeed] detail expansion concurrency:', concurrency)
+
+  const processDetailUrl = async (url: string, _index: number) => {
     let targetVariant = ''
     try {
       const parsedSeed = new URL(url)
@@ -178,15 +307,39 @@ async function main() {
         await browser.close()
       } catch (e) {
         errors++
-        items.push({
-          url,
-          ok: false,
-          reason: `fetch-failed: ${fetchErr || 'error'}; headless-fallback: ${(e as Error)?.message || 'error'}`,
-        })
+        const reason = `fetch-failed: ${fetchErr || 'error'}; headless-fallback: ${(e as Error)?.message || 'error'}`
+        items.push({ url, ok: false, reason })
+        await logSkippedDetail({ url, error: reason })
         // brief backoff between attempts
         await new Promise(res => setTimeout(res, 500))
-        continue
+        return
       }
+    }
+
+    if (!html) {
+      errors++
+      const reason = `fetch-failed: ${fetchErr || 'unknown-error'}`
+      items.push({ url, ok: false, reason })
+      await logSkippedDetail({ url, error: reason })
+      return
+    }
+
+    const htmlHash = computeHtmlHash(html)
+    const previousHash = htmlHashCache.get(url) || ''
+    if (previousHash && previousHash === htmlHash) {
+      console.log('[detail-expansion] unchanged HTML, skipping parse/upsert:', url)
+      await ensureSnapshotForUrl(url, html)
+      await persistHtmlHash(url, htmlHash, supplierIdsForHash)
+      htmlHashCache.set(url, htmlHash)
+      items.push({ url, ok: true, reason: 'unchanged-skip' })
+      return
+    }
+    let hashCommitted = false
+    const commitHash = async () => {
+      if (hashCommitted) return
+      await persistHtmlHash(url, htmlHash, supplierIdsForHash)
+      htmlHashCache.set(url, htmlHash)
+      hashCommitted = true
     }
 
     // If this is a Batson series page (attribute-grid), expand into per-model rows
@@ -266,13 +419,12 @@ async function main() {
 
               const type = isTipTop ? 'Tip Top' : isKit ? 'Guide Kit' : 'Guide'
               const classification = isTipTop ? 'tip-top' : isKit ? 'guide-kit' : 'guide'
+              const srcUrl =
+                r.url && /^https?:/i.test(r.url) && !/^https?:\/\/[^/]+\/javascript:/i.test(r.url) ? r.url : url
               if (restrictToGuides && !allowedGuideClasses.has(classification)) {
                 items.push({ url: srcUrl, ok: false, reason: 'skip-non-guide-row' })
                 continue
               }
-
-              const srcUrl =
-                r.url && /^https?:/i.test(r.url) && !/^https?:\/\/[^/]+\/javascript:/i.test(r.url) ? r.url : url
 
               await upsertNormalizedProduct({
                 supplier: { id: supplierId },
@@ -307,7 +459,8 @@ async function main() {
           }
           // Polite delay after series page before continuing to next seed
           await new Promise(res => setTimeout(res, 300))
-          continue
+          await commitHash()
+          return
         }
       }
 
@@ -509,7 +662,8 @@ async function main() {
           }
           // Polite delay after series page before continuing to next seed
           await new Promise(res => setTimeout(res, 300))
-          continue
+          await commitHash()
+          return
         }
       }
     } catch {
@@ -527,7 +681,8 @@ async function main() {
       // Skip generic listing pages which resolve to PRODUCTS (no discrete item)
       if (externalId === 'PRODUCTS') {
         items.push({ url, ok: false, reason: 'skip-listing-page' })
-        continue
+        await logSkippedDetail({ url, error: 'skip-listing-page' })
+        return
       }
       const rawSpecs = (jld?.rawSpecs as Record<string, unknown>) || {}
       const rawTitle = ((jld?.title as string) || '').trim()
@@ -641,7 +796,8 @@ async function main() {
       if (restrictToGuides) {
         if (!classification || !allowedGuideClasses.has(classification)) {
           items.push({ url, ok: false, reason: 'skip-non-guide-detail' })
-          continue
+          await logSkippedDetail({ url, error: 'skip-non-guide-detail' })
+          return
         }
       }
 
@@ -687,15 +843,19 @@ async function main() {
         fetchedAt: new Date(),
       })
       await linkExternalIdForSource(supplierId, url, externalId, undefined)
+      await commitHash()
       items.push({ url, sku: externalId, ok: true })
       staged++
     } catch (e) {
       items.push({ url, ok: false, reason: (e as Error)?.message || 'failed' })
       errors++
+      await logSkippedDetail({ url, error: (e as Error)?.message || 'failed' })
     }
     // polite delay between items
     await new Promise(res => setTimeout(res, 300))
   }
+
+  await mapWithConcurrency(picked, concurrency, processDetailUrl)
 
   console.log(
     JSON.stringify(
