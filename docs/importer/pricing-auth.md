@@ -28,3 +28,10 @@ Notes:
 
 - Cookie will be attached only to batsonenterprises.com requests.
 - If the cookie expires, wholesale fields may drop to null; refresh the value.
+
+## Fallback when not authenticated
+
+- Batson detail pages still expose MSRP (e.g., `MSRP: USD $47.92 /Each`) and inventory text (`In Stock`).
+- `scripts/preflight/ingestSeeds.ts` parses those fields even without a cookie, so `priceMsrp` and `availability` stay populated.
+- The availability popover copy (`PLEASE NOTE: ... wholesale pricing visible when signed in`) is stored in `normSpecs.availability_note` and surfaces in diagnostics.
+- `priceWholesale` remains `null` until a valid `BATSON_AUTH_COOKIE` is provided.

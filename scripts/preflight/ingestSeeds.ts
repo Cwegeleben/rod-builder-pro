@@ -1,8 +1,11 @@
 import { prisma } from '../../app/db.server'
 import type { Prisma } from '@prisma/client'
+import type { BatsonDetailMeta } from '../../app/server/importer/preview/parsers/batsonAttributeGrid'
+import { extractPricePairFromRow } from '../../app/server/importer/preview/parsers/batsonAttributeGrid'
 import { createHash } from 'node:crypto'
 import * as path from 'node:path'
 import { promises as fs } from 'node:fs'
+import { extractProductCodeFromHtml } from '../../app/server/importer/preview/batsonDetailHelpers'
 
 const DEFAULT_CONCURRENCY = 4
 const MAX_CONCURRENCY = 10
@@ -118,11 +121,29 @@ async function persistHtmlHash(url: string, htmlHash: string, supplierIds: strin
   }
 }
 
+function rewriteBatsonDetailUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase()
+    if (!host.endsWith('batsonenterprises.com')) return null
+    const normalizedPath = parsed.pathname.replace(/\/+/g, '/').replace(/\/$/, '')
+    const reelSeatMatch = normalizedPath.match(/^\/reel-seats\/(.+)/i)
+    if (reelSeatMatch) {
+      parsed.pathname = `/${reelSeatMatch[1]}`
+      return parsed.toString()
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 async function main() {
   const supplierSlug = process.env.SUPPLIER_ID || 'batson-reel-seats'
   const limit = Math.max(1, Math.min(500, Number(process.env.LIMIT || '50')))
   const detailOnly = String(process.env.DETAIL_ONLY || '1') === '1'
   const sourceFilter = (process.env.SOURCE || 'discovered').toLowerCase() // all|forced|discovered
+  const bypassHtmlHash = String(process.env.BYPASS_HTML_HASH || '').trim() === '1'
   const urlsEnv = (process.env.URLS || '')
     .split(/[,\n]/)
     .map(s => s.trim())
@@ -258,6 +279,8 @@ async function main() {
 
   const userAgent =
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15'
+  const detailAcceptHeader = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+  const batsonAuthCookie = (process.env.BATSON_AUTH_COOKIE || '').trim()
 
   let staged = 0
   let errors = 0
@@ -276,59 +299,105 @@ async function main() {
     } catch {
       targetVariant = ''
     }
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 15000)
-    let html = ''
-    let fetchErr: string | undefined
-    try {
-      const r = await fetch(url, {
-        headers: { 'User-Agent': userAgent, Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
-        signal: ctrl.signal,
-      })
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      html = await r.text()
-    } catch (e) {
-      fetchErr = (e as Error)?.message || 'error'
-    } finally {
-      clearTimeout(timer)
-    }
-
-    // Headless fallback when blocked or non-OK
-    if (!html) {
+    const loadDetailHtml = async (targetUrl: string): Promise<{ html: string; resolvedUrl: string }> => {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 15000)
+      let html = ''
+      let fetchErr: string | undefined
+      let resolvedUrl = targetUrl
       try {
-        const { chromium } = await import('playwright')
-        const browser = await chromium.launch()
-        const context = await browser.newContext({ userAgent })
-        const page = await context.newPage()
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
-        html = await page.content()
-        await context.close()
-        await browser.close()
+        const headers: Record<string, string> = { 'User-Agent': userAgent, Accept: detailAcceptHeader }
+        if (batsonAuthCookie) headers.Cookie = batsonAuthCookie
+        const r = await fetch(targetUrl, { headers, signal: ctrl.signal, redirect: 'follow' })
+        resolvedUrl = r.url || targetUrl
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        html = await r.text()
       } catch (e) {
-        errors++
-        const reason = `fetch-failed: ${fetchErr || 'error'}; headless-fallback: ${(e as Error)?.message || 'error'}`
-        items.push({ url, ok: false, reason })
-        await logSkippedDetail({ url, error: reason })
-        // brief backoff between attempts
-        await new Promise(res => setTimeout(res, 500))
-        return
+        fetchErr = (e as Error)?.message || 'error'
+      } finally {
+        clearTimeout(timer)
       }
+
+      if (!html) {
+        try {
+          const { chromium } = await import('playwright')
+          const browser = await chromium.launch()
+          const context = await browser.newContext({
+            userAgent,
+            extraHTTPHeaders: batsonAuthCookie
+              ? { Cookie: batsonAuthCookie, Accept: detailAcceptHeader }
+              : { Accept: detailAcceptHeader },
+          })
+          const page = await context.newPage()
+          await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+          await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
+          html = await page.content()
+          resolvedUrl = page.url() || targetUrl
+          await context.close()
+          await browser.close()
+        } catch (e) {
+          const reason = `fetch-failed: ${fetchErr || 'error'}; headless-fallback: ${(e as Error)?.message || 'error'}`
+          throw new Error(reason)
+        }
+      }
+
+      if (!html) {
+        const reason = `fetch-failed: ${fetchErr || 'unknown-error'}`
+        throw new Error(reason)
+      }
+
+      return { html, resolvedUrl }
     }
 
-    if (!html) {
+    let htmlResult: { html: string; resolvedUrl: string }
+    try {
+      htmlResult = await loadDetailHtml(url)
+    } catch (err) {
       errors++
-      const reason = `fetch-failed: ${fetchErr || 'unknown-error'}`
+      const reason = (err as Error)?.message || 'fetch-failed'
       items.push({ url, ok: false, reason })
       await logSkippedDetail({ url, error: reason })
       return
     }
 
+    let html = htmlResult.html
+    let activeDetailUrl = htmlResult.resolvedUrl || url
+
+    const visitedDetailUrls = new Set<string>([activeDetailUrl])
+    const tryRewriteAndReload = async () => {
+      const rewritten = rewriteBatsonDetailUrl(activeDetailUrl) || rewriteBatsonDetailUrl(url)
+      if (!rewritten || visitedDetailUrls.has(rewritten)) return false
+      visitedDetailUrls.add(rewritten)
+      console.log('[detail-expansion] rewriting Batson URL', { from: activeDetailUrl, to: rewritten })
+      try {
+        htmlResult = await loadDetailHtml(rewritten)
+        html = htmlResult.html
+        activeDetailUrl = htmlResult.resolvedUrl || rewritten
+        return true
+      } catch (err) {
+        const reason = (err as Error)?.message || 'fetch-failed'
+        errors++
+        items.push({ url: rewritten, ok: false, reason })
+        await logSkippedDetail({ url: rewritten, error: reason })
+        return false
+      }
+    }
+
+    let isPageNotFound = /page\s+not\s+found/i.test(html) || /error\s+404/i.test(html)
+    if (isPageNotFound) {
+      const rewrote = await tryRewriteAndReload()
+      if (rewrote) {
+        isPageNotFound = /page\s+not\s+found/i.test(html) || /error\s+404/i.test(html)
+      }
+    }
+
+    const detailUrlForContent = activeDetailUrl || url
+
     const htmlHash = computeHtmlHash(html)
     const previousHash = htmlHashCache.get(url) || ''
-    if (previousHash && previousHash === htmlHash) {
+    if (!bypassHtmlHash && previousHash && previousHash === htmlHash) {
       console.log('[detail-expansion] unchanged HTML, skipping parse/upsert:', url)
-      await ensureSnapshotForUrl(url, html)
+      await ensureSnapshotForUrl(detailUrlForContent, html)
       await persistHtmlHash(url, htmlHash, supplierIdsForHash)
       htmlHashCache.set(url, htmlHash)
       items.push({ url, ok: true, reason: 'unchanged-skip' })
@@ -342,28 +411,42 @@ async function main() {
       hashCommitted = true
     }
 
+    let detailMetaCache: BatsonDetailMeta | null | undefined
+    const ensureDetailMeta = async (): Promise<BatsonDetailMeta | null> => {
+      if (detailMetaCache !== undefined) return detailMetaCache
+      const { extractBatsonDetailMeta } = await import('../../app/server/importer/preview/parsers/batsonAttributeGrid')
+      detailMetaCache = extractBatsonDetailMeta(html)
+      return detailMetaCache
+    }
+
+    const isReelSeat = /\/reel-seats\//i.test(detailUrlForContent)
+    const hasGrid = /class=["'][^"']*attribute-grid[^"']*["']/i.test(html)
+    const isGuidesOrTips = /\/(guides|tip-top|tip-tops)\//i.test(detailUrlForContent)
+    const isRodBlank = /\/rod-blanks\//i.test(detailUrlForContent)
+    const isGripPath = /\/(handle-kits|grips)\//i.test(detailUrlForContent)
+    const isEndCapPath = /\/(end-caps-gimbals|end-caps|gimbals)\//i.test(detailUrlForContent)
+    const isTrimPath = /\/trim-pieces\//i.test(detailUrlForContent)
+
     // If this is a Batson series page (attribute-grid), expand into per-model rows
     try {
-      const isReelSeat = /\/reel-seats\//i.test(url)
-      const hasGrid = /class=["'][^"']*attribute-grid[^"']*["']/i.test(html)
-      const isGuidesOrTips = /\/(guides|tip-top|tip-tops)\//i.test(url)
-
       // Guides & Tip Tops series page expansion
       if (isGuidesOrTips && hasGrid) {
-        const { extractBatsonAttributeGrid } = await import(
+        const { extractBatsonAttributeGrid, resolveBatsonRowPrices } = await import(
           '../../app/server/importer/preview/parsers/batsonAttributeGrid'
         )
         type BatsonRow = {
           url: string
           title?: string
           price?: number | null
+          priceMsrp?: number | null
+          priceWholesale?: number | null
           status?: string | null
           raw: Record<string, string>
           specs: Record<string, string | number | null>
         }
         const base = (() => {
           try {
-            const u = new URL(url)
+            const u = new URL(detailUrlForContent)
             return `${u.protocol}//${u.hostname}`
           } catch {
             return 'https://batsonenterprises.com'
@@ -379,13 +462,13 @@ async function main() {
           for (const r of scopedRows) {
             try {
               let externalId = String(r.raw?.Code || '').trim()
-              if (!externalId) externalId = slugFromPath(r.url || url) || ''
-              if (!externalId) externalId = hashUrl(r.url || url)
+              if (!externalId) externalId = slugFromPath(r.url || detailUrlForContent) || ''
+              if (!externalId) externalId = hashUrl(r.url || detailUrlForContent)
               externalId = externalId.toUpperCase().replace(/[^A-Z0-9-]+/g, '')
               if (!externalId) continue
 
               const tLower = String(r.title || '').toLowerCase()
-              const slug = (r.url || url || '').toLowerCase()
+              const slug = (r.url || detailUrlForContent || '').toLowerCase()
               const isTipTop = /tip\s*-?tops?/.test(slug) || /(^|\W)tip\s*-?top(s)?(\W|$)/.test(tLower)
               const isKit = /\bkit\b|\bset\b|\bassort/i.test(String(r.title || ''))
 
@@ -420,11 +503,18 @@ async function main() {
               const type = isTipTop ? 'Tip Top' : isKit ? 'Guide Kit' : 'Guide'
               const classification = isTipTop ? 'tip-top' : isKit ? 'guide-kit' : 'guide'
               const srcUrl =
-                r.url && /^https?:/i.test(r.url) && !/^https?:\/\/[^/]+\/javascript:/i.test(r.url) ? r.url : url
+                r.url && /^https?:/i.test(r.url) && !/^https?:\/\/[^/]+\/javascript:/i.test(r.url)
+                  ? r.url
+                  : detailUrlForContent
               if (restrictToGuides && !allowedGuideClasses.has(classification)) {
                 items.push({ url: srcUrl, ok: false, reason: 'skip-non-guide-row' })
                 continue
               }
+
+              const shouldFetchDetailFallback =
+                typeof r.price !== 'number' && typeof r.priceMsrp !== 'number' && typeof r.priceWholesale !== 'number'
+              const detailMetaForRow = shouldFetchDetailFallback ? await ensureDetailMeta() : null
+              const { priceMsrp: rowMsrp, priceWholesale: rowWholesale } = resolveBatsonRowPrices(r, detailMetaForRow)
 
               await upsertNormalizedProduct({
                 supplier: { id: supplierId },
@@ -442,8 +532,8 @@ async function main() {
                   finish: finish ? String(finish).toLowerCase() : undefined,
                   classification,
                 } as unknown as Prisma.InputJsonValue,
-                priceMsrp: r.price ?? null,
-                priceWholesale: null,
+                priceMsrp: rowMsrp,
+                priceWholesale: rowWholesale,
                 availability: (r.status as string) || null,
                 sources: [{ url: srcUrl, externalId, source: 'discovered' }],
                 fetchedAt: new Date(),
@@ -465,20 +555,22 @@ async function main() {
       }
 
       if (isReelSeat && hasGrid) {
-        const { extractBatsonAttributeGrid } = await import(
+        const { extractBatsonAttributeGrid, resolveBatsonRowPrices } = await import(
           '../../app/server/importer/preview/parsers/batsonAttributeGrid'
         )
         type BatsonRow = {
           url: string
           title?: string
           price?: number | null
+          priceMsrp?: number | null
+          priceWholesale?: number | null
           status?: string | null
           raw: Record<string, string>
           specs: Record<string, string | number | null>
         }
         const base = (() => {
           try {
-            const u = new URL(url)
+            const u = new URL(detailUrlForContent)
             return `${u.protocol}//${u.hostname}`
           } catch {
             return 'https://batsonenterprises.com'
@@ -489,8 +581,8 @@ async function main() {
           for (const r of rows) {
             try {
               let externalId = String(r.raw?.Code || '').trim()
-              if (!externalId) externalId = slugFromPath(r.url || url) || ''
-              if (!externalId) externalId = hashUrl(r.url || url)
+              if (!externalId) externalId = slugFromPath(r.url || detailUrlForContent) || ''
+              if (!externalId) externalId = hashUrl(r.url || detailUrlForContent)
               externalId = externalId.toUpperCase().replace(/[^A-Z0-9-]+/g, '')
               if (!externalId) continue
 
@@ -514,7 +606,7 @@ async function main() {
               })()
 
               // Heuristics from slug/series for brand, style, material, hardware, etc.
-              const slug = (r.url || url || '').toLowerCase()
+              const slug = (r.url || detailUrlForContent || '').toLowerCase()
               const brandRaw = /\/alps[-/]/.test(slug) ? 'Alps' : /\/forecast[-/]/.test(slug) ? 'Forecast' : undefined
               const seatStyle =
                 /dual\s*trigger/i.test(String(seriesGuess)) || /dual-trigger/.test(slug)
@@ -574,7 +666,7 @@ async function main() {
               const famRes = inferReelSeatFamily({
                 brand,
                 code: externalId,
-                slug: r.url || url,
+                slug: r.url || detailUrlForContent,
                 series: seriesGuess,
                 pageTitle: r.title || '',
               })
@@ -591,7 +683,7 @@ async function main() {
                 insertMaterial: undefined,
                 isInsertOnly,
                 specsRaw: undefined,
-                slug: r.url || url,
+                slug: r.url || detailUrlForContent,
                 series: seriesGuess,
                 hardwareKind,
               })
@@ -621,7 +713,14 @@ async function main() {
                 brand && familyForKey && sizeForKey ? `${brand}|${familyForKey}|${sizeForKey}`.toLowerCase() : undefined
 
               const srcUrl =
-                r.url && /^https?:/i.test(r.url) && !/^https?:\/\/[^/]+\/javascript:/i.test(r.url) ? r.url : url
+                r.url && /^https?:/i.test(r.url) && !/^https?:\/\/[^/]+\/javascript:/i.test(r.url)
+                  ? r.url
+                  : detailUrlForContent
+
+              const shouldFetchDetailFallback =
+                typeof r.price !== 'number' && typeof r.priceMsrp !== 'number' && typeof r.priceWholesale !== 'number'
+              const detailMetaForRow = shouldFetchDetailFallback ? await ensureDetailMeta() : null
+              const { priceMsrp: rowMsrp, priceWholesale: rowWholesale } = resolveBatsonRowPrices(r, detailMetaForRow)
 
               await upsertNormalizedProduct({
                 supplier: { id: supplierId },
@@ -645,8 +744,8 @@ async function main() {
                   requiredCompanionKind,
                   interfaceKey,
                 } as unknown as Prisma.InputJsonValue,
-                priceMsrp: r.price ?? null,
-                priceWholesale: null,
+                priceMsrp: rowMsrp,
+                priceWholesale: rowWholesale,
                 availability: null,
                 sources: [{ url: srcUrl, externalId, source: 'discovered' }],
                 fetchedAt: new Date(),
@@ -673,9 +772,9 @@ async function main() {
     try {
       const jldAll = extractJsonLd(html)
       const jld = mapProductFromJsonLd(jldAll) as Record<string, unknown> | null
-      let externalId = (jld?.externalId as string | undefined)?.toString()?.trim() || ''
-      if (!externalId) externalId = slugFromPath(url) || ''
-      if (!externalId) externalId = hashUrl(url)
+      let externalId = (jld?.externalId as string | undefined)?.toString()?.trim() || extractProductCodeFromHtml(html)
+      if (!externalId) externalId = slugFromPath(detailUrlForContent) || ''
+      if (!externalId) externalId = hashUrl(detailUrlForContent)
       externalId = externalId.toUpperCase().replace(/[^A-Z0-9-]+/g, '')
       if (!externalId) throw new Error('no-external-id')
       // Skip generic listing pages which resolve to PRODUCTS (no discrete item)
@@ -684,7 +783,23 @@ async function main() {
         await logSkippedDetail({ url, error: 'skip-listing-page' })
         return
       }
-      const rawSpecs = (jld?.rawSpecs as Record<string, unknown>) || {}
+      const { extractBatsonInfoAttributes } = await import(
+        '../../app/server/importer/preview/parsers/batsonAttributeGrid'
+      )
+      const detailAttrs = extractBatsonInfoAttributes(html)
+      const detailMeta: BatsonDetailMeta = (await ensureDetailMeta()) ?? {
+        msrp: null,
+        priceWholesale: null,
+        availability: null,
+        availabilityNote: null,
+      }
+      const rawSpecs = {
+        ...(detailAttrs.raw as Record<string, unknown>),
+        ...(detailMeta.availability ? { Availability: detailMeta.availability } : {}),
+        ...(detailMeta.availabilityNote ? { AvailabilityNote: detailMeta.availabilityNote } : {}),
+        ...((jld?.rawSpecs as Record<string, unknown>) || {}),
+      }
+      const normSpecsFromDetail = { ...(detailAttrs.specs as Record<string, string | number | null>) }
       const rawTitle = ((jld?.title as string) || '').trim()
 
       let seriesGuess = ((): string | undefined => {
@@ -734,16 +849,24 @@ async function main() {
       })()
 
       // Determine part type (reel seat already handled elsewhere) and classification for guides / tip tops
-      const isReelSeatSingle = /reel-seats/i.test(url)
-      const isGuidePage = /\/guides\//i.test(url) || /\bguide\b/i.test(rawTitle)
-      const isTipTopPage = /tip-top|tip-tops/i.test(url) || /tip\s*-?top(s)?/i.test(rawTitle)
+      const isReelSeatSingle = /reel-seats/i.test(detailUrlForContent)
+      const isGuidePage = /\/guides\//i.test(detailUrlForContent) || /\bguide\b/i.test(rawTitle)
+      const isTipTopPage = /tip-top|tip-tops/i.test(detailUrlForContent) || /tip\s*-?top(s)?/i.test(rawTitle)
       const partTypeDerived = isReelSeatSingle
         ? 'Reel Seat'
         : isTipTopPage
           ? 'Tip Top'
           : isGuidePage
             ? 'Guide'
-            : undefined
+            : isRodBlank
+              ? 'Rod Blank'
+              : isGripPath
+                ? 'Grip'
+                : isEndCapPath
+                  ? 'End Cap'
+                  : isTrimPath
+                    ? 'Trim Piece'
+                    : undefined
 
       // Extract potential ring / tube sizes, frame material and finish from rawSpecs or title
       const pickNum = (txt: string): number | undefined => {
@@ -801,6 +924,35 @@ async function main() {
         }
       }
 
+      if (isPageNotFound) {
+        if (supplierIdsForHash.length) {
+          const placeholders = supplierIdsForHash.map(() => '?').join(',')
+          const params = [...supplierIdsForHash, externalId]
+          try {
+            const rows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+              `SELECT id FROM Product WHERE supplierId IN (${placeholders}) AND sku = ? LIMIT 1`,
+              ...params,
+            )
+            if (rows.length) {
+              await prisma.$executeRawUnsafe(
+                'UPDATE Product SET status = ?, title = ?, type = COALESCE(?, type), updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+                'READY',
+                `${externalId} (unavailable at source)`,
+                partTypeDerived ?? (isReelSeatSingle ? 'Reel Seat' : null),
+                rows[0].id,
+              )
+            }
+          } catch (err) {
+            console.warn('[ingestSeeds] failed to mark dead product', { sku: externalId, err })
+          }
+        }
+        await commitHash()
+        items.push({ url, sku: externalId, ok: false, reason: 'page-not-found' })
+        await logSkippedDetail({ url, error: 'page-not-found' })
+        return
+      }
+
+      const jldRecord = jld as Record<string, unknown> | null
       const title = (await import('../../app/server/importer/products/titleNormalize')).buildBatsonTitle({
         code: externalId,
         model: modelGuess,
@@ -817,15 +969,46 @@ async function main() {
         partType: partTypeDerived,
       })
 
-      const normSpecsMerged = partTypeDerived
-        ? {
-            ring_size: ringSize ?? undefined,
-            tube_size: tubeSize ?? undefined,
-            frame_material: frameMaterial,
-            finish: finish,
-            classification,
-          }
-        : null
+      const normSpecsMerged = (() => {
+        const specBundle: Record<string, string | number | null> = { ...normSpecsFromDetail }
+        const applyIfMissing = (key: string, value: string | number | null | undefined) => {
+          if (value === undefined || value === null) return
+          if (specBundle[key] !== undefined && specBundle[key] !== null) return
+          specBundle[key] = value
+        }
+        applyIfMissing('ring_size', ringSize ?? undefined)
+        applyIfMissing('tube_size', tubeSize ?? undefined)
+        applyIfMissing('frame_material', frameMaterial)
+        applyIfMissing('finish', finish)
+        if (classification) specBundle.classification = classification
+        if (detailMeta.availabilityNote) specBundle.availability_note = detailMeta.availabilityNote
+        const hasSpecs = Object.values(specBundle).some(v => v !== undefined && v !== null && v !== '')
+        if (!hasSpecs) return null
+        return specBundle
+      })()
+      const coerceNumber = (value: unknown): number | null => {
+        if (typeof value === 'number') return Number.isFinite(value) ? value : null
+        if (typeof value === 'string') {
+          const match = value.match(/\d+(?:[\d,]*)(?:\.\d+)?/)
+          if (!match) return null
+          const parsed = Number(match[0].replace(/,/g, ''))
+          return Number.isFinite(parsed) ? parsed : null
+        }
+        return null
+      }
+      const coerceString = (value: unknown): string | null => {
+        if (typeof value !== 'string') return null
+        const trimmed = value.trim()
+        return trimmed ? trimmed : null
+      }
+      const resolvedPrices = extractPricePairFromRow({
+        msrpValue: detailMeta.msrp ?? coerceNumber(jld?.priceMsrp),
+        priceValue:
+          detailMeta.priceWholesale ??
+          coerceNumber(jld?.priceWholesale) ??
+          coerceNumber((jldRecord?.price as string | number | undefined) ?? null),
+      })
+      const resolvedAvailability = detailMeta.availability ?? coerceString(jld?.availability)
 
       await upsertNormalizedProduct({
         supplier: { id: supplierId },
@@ -836,9 +1019,9 @@ async function main() {
         images: jld?.images as unknown as Prisma.InputJsonValue,
         rawSpecs: rawSpecs as unknown as Prisma.InputJsonValue,
         normSpecs: normSpecsMerged as unknown as Prisma.InputJsonValue,
-        priceMsrp: (jld?.priceMsrp as number) || null,
-        priceWholesale: null,
-        availability: null,
+        priceMsrp: resolvedPrices.priceMsrp,
+        priceWholesale: resolvedPrices.priceWholesale,
+        availability: isPageNotFound ? 'Unavailable' : resolvedAvailability,
         sources: [{ url, externalId, source: 'discovered' }],
         fetchedAt: new Date(),
       })

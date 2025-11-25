@@ -1,8 +1,13 @@
 // <!-- BEGIN RBP GENERATED: importer-v2-3-batson-series-v1 -->
 import * as cheerio from 'cheerio'
 
-const toAbs = (href: string, base: string) =>
-  /^https?:\/\//i.test(href) ? href : `${base}${href.startsWith('/') ? '' : '/'}${href}`
+const toAbs = (href: string, base: string) => {
+  try {
+    return new URL(href, base).toString()
+  } catch {
+    return href
+  }
+}
 
 // Extract series/listing links from Batson category/listing pages like /rod-blanks
 export function crawlBatsonRodBlanksListing(html: string, base: string): string[] {
