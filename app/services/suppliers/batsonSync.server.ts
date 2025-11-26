@@ -247,7 +247,7 @@ async function runIngestForSlug(slug: string, cookie: string) {
     SUPPLIER_ID: slug,
   }
   try {
-    const result = await execa('pnpm', ['-s', 'tsx', 'scripts/preflight/ingestSeeds.ts', `--site-id=${slug}`], {
+    const result = await execa('npx', ['tsx', 'scripts/preflight/ingestSeeds.ts', `--site-id=${slug}`], {
       cwd: process.cwd(),
       env: { ...env, SITE_ID: slug },
     })
