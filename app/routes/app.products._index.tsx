@@ -12,11 +12,15 @@ import {
   IndexFilters,
   ChoiceList,
   IndexFiltersMode,
+  Modal,
+  Badge,
+  TextField,
 } from '@shopify/polaris'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { authenticate } from '../shopify.server'
 import { prisma } from '../db.server'
 import { isHqShop } from '../lib/access.server'
+import { getBatsonSyncState, type BatsonSyncSnapshot } from '../services/suppliers/batsonSync.server'
 // <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
 import { TEST_IDS } from '../../src/config/testIds'
 // <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
@@ -34,6 +38,14 @@ type ProductRow = {
   supplierId?: string
   sku?: string
   latestVersionId?: string | null
+}
+
+type BatsonSyncActionResponse = {
+  ok?: boolean
+  error?: string
+  message?: string
+  state?: BatsonSyncSnapshot
+  jobId?: string
 }
 
 // HQ detection centralized
@@ -338,6 +350,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const hq = await isHqShop(request)
+  const batsonSyncState = hq ? await getBatsonSyncState() : null
   return json({
     items,
     q,
@@ -355,6 +368,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     adminTagQuery,
     canonical: useCanonical,
     totalCount: totalCountOut,
+    batsonSyncState,
   })
 }
 
@@ -374,6 +388,7 @@ export default function ProductsIndex() {
     adminTagQuery,
     canonical,
     totalCount,
+    batsonSyncState,
   } = useLoaderData<typeof loader>() as {
     items: ProductRow[]
     q: string
@@ -389,9 +404,86 @@ export default function ProductsIndex() {
     adminTagQuery?: string
     canonical?: boolean
     totalCount?: number
+    batsonSyncState: BatsonSyncSnapshot | null
   }
   const [params, setParams] = useSearchParams()
   const location = useLocation()
+  const [batsonModalOpen, setBatsonModalOpen] = useState(false)
+  const [batsonState, setBatsonState] = useState<BatsonSyncSnapshot | null>(batsonSyncState)
+  const [batsonCookieInput, setBatsonCookieInput] = useState('')
+  const batsonCookieFetcher = useFetcher<BatsonSyncActionResponse>()
+  const batsonSyncFetcher = useFetcher<BatsonSyncActionResponse>()
+  const batsonCookieIntentRef = useRef('')
+  const toast = useMemo(
+    () => ({
+      success: (m: string) => {
+        try {
+          const w = window as unknown as { shopifyToast?: { success?: (msg: string) => void } }
+          w.shopifyToast?.success?.(m)
+        } catch {
+          /* ignore */
+        }
+      },
+      error: (m: string) => {
+        try {
+          const w = window as unknown as { shopifyToast?: { error?: (msg: string) => void } }
+          w.shopifyToast?.error?.(m)
+        } catch {
+          /* ignore */
+        }
+      },
+    }),
+    [],
+  )
+  const applyBatsonState = useCallback((payload?: BatsonSyncActionResponse) => {
+    if (payload?.state) setBatsonState(payload.state)
+  }, [])
+
+  useEffect(() => {
+    setBatsonState(batsonSyncState)
+  }, [batsonSyncState])
+
+  useEffect(() => {
+    if (batsonCookieFetcher.state === 'submitting') {
+      batsonCookieIntentRef.current = String(batsonCookieFetcher.formData?.get('intent') || '')
+    }
+  }, [batsonCookieFetcher.state, batsonCookieFetcher.formData])
+
+  useEffect(() => {
+    if (batsonCookieFetcher.state === 'idle' && batsonCookieFetcher.data) {
+      applyBatsonState(batsonCookieFetcher.data)
+      if (batsonCookieFetcher.data.ok) {
+        const intent = batsonCookieIntentRef.current
+        const fallback = intent === 'batson-cookie:validate' ? 'Cookie validated' : 'Cookie saved'
+        toast.success(batsonCookieFetcher.data.message || fallback)
+        if (intent === 'batson-cookie:save') {
+          setBatsonCookieInput('')
+        }
+      } else {
+        toast.error(batsonCookieFetcher.data.error || batsonCookieFetcher.data.message || 'Cookie update failed')
+      }
+      batsonCookieIntentRef.current = ''
+    }
+  }, [batsonCookieFetcher.state, batsonCookieFetcher.data, applyBatsonState, toast])
+
+  useEffect(() => {
+    if (batsonSyncFetcher.state === 'idle' && batsonSyncFetcher.data) {
+      applyBatsonState(batsonSyncFetcher.data)
+      if (batsonSyncFetcher.data.ok) {
+        const suffix = batsonSyncFetcher.data.jobId ? ` (#${batsonSyncFetcher.data.jobId.slice(0, 8)})` : ''
+        toast.success(`Batson sync queued${suffix}`)
+      } else {
+        toast.error(batsonSyncFetcher.data.error || 'Failed to start sync')
+      }
+    }
+  }, [batsonSyncFetcher.state, batsonSyncFetcher.data, applyBatsonState, toast])
+
+  const batsonSummary = useMemo<BatsonSummarySnapshot | null>(
+    () => normalizeSyncSummary(batsonState?.lastSyncSummary ?? null),
+    [batsonState?.lastSyncSummary],
+  )
+  const batsonCookieBusy = batsonCookieFetcher.state !== 'idle'
+  const batsonSyncBusy = batsonSyncFetcher.state !== 'idle'
   const [mode, setMode] = useState<IndexFiltersMode>(IndexFiltersMode.Default)
   const tabs = useMemo(
     () => [
@@ -457,362 +549,481 @@ export default function ProductsIndex() {
   })) as unknown as [{ title: string }, ...{ title: string }[]]
 
   return (
-    <Card data-testid="page-products">
-      <BlockStack gap="400">
-        {/* <!-- BEGIN RBP GENERATED: importer-publish-shopify-v1 --> */}
-        {banner === 'publishOk' ? (
-          <Card>
-            <div className="p-m">
-              <InlineStack align="space-between">
-                <Text as="p">
-                  Published {created} created, {updated} updated, {skipped} skipped{failed ? `, ${failed} failed` : ''}.
-                </Text>
-                {adminTagQuery ? (
-                  <Button
-                    url={`https://admin.shopify.com/store/dev/products?query=${encodeURIComponent(adminTagQuery ?? '')}`}
-                    variant="plain"
-                  >
-                    View in Shopify Admin
-                  </Button>
-                ) : null}
-              </InlineStack>
-            </div>
-          </Card>
-        ) : null}
-        {/* <!-- END RBP GENERATED: importer-publish-shopify-v1 --> */}
-        <InlineStack align="space-between">
-          <Text as="h2" variant="headingLg" data-testid={TEST_IDS.headingProducts}>
-            {canonical ? 'Canonical Products' : 'Products'}
-          </Text>
-          <InlineStack gap="200">
-            {canonical ? (
-              <Button url="/app/admin/publish/telemetry" variant="secondary">
-                Telemetry
-              </Button>
-            ) : null}
-            {/* Sole importer entry: Import button links to new Imports hub */}
-            {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
-            {/* Direct link to Imports hub from Products; preserve current params */}
-            {hq && (
-              // <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
-              <Button url={`/app/imports${location.search}`} data-testid={TEST_IDS.btnProductsImport}>
-                Import
-              </Button>
-              // <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
-            )}
-            {/* END RBP GENERATED: admin-link-integrity-v1 */}
-          </InlineStack>
-        </InlineStack>
-
-        <IndexFilters
-          queryValue={q}
-          queryPlaceholder="Filter products"
-          onQueryChange={onQueryChange}
-          onQueryClear={() => onQueryChange('')}
-          tabs={tabs}
-          selected={selectedTab}
-          onSelect={index => {
-            const next = new URLSearchParams(params)
-            const tab = tabs[index]
-            next.set('view', tab.id)
-            next.delete('status')
-            if (tab.id !== 'all') next.append('status', tab.id)
-            // Apply product type filter for Rod Blanks tab in canonical view
-            if (tab.id === 'rod-blanks') next.set('type', 'Rod Blank')
-            else next.delete('type')
-            // Reset cursor when switching tabs
-            next.delete('after')
-            setParams(next)
-          }}
-          mode={mode}
-          setMode={setMode}
-          onClearAll={() => {
-            const next = new URLSearchParams(params)
-            next.delete('q')
-            next.delete('status')
-            next.delete('columns')
-            setParams(next)
-          }}
-          filters={[
-            {
-              key: 'status',
-              label: 'Status',
-              filter: (
-                <ChoiceList
-                  title="Status"
-                  titleHidden
-                  choices={[
-                    { label: 'Active', value: 'active' },
-                    { label: 'Draft', value: 'draft' },
-                    { label: 'Archived', value: 'archived' },
-                  ]}
-                  selected={status}
-                  onChange={values => {
-                    const next = new URLSearchParams(params)
-                    next.delete('status')
-                    values.forEach(v => next.append('status', v))
-                    setParams(next)
-                  }}
-                />
-              ),
-            },
-            {
-              key: 'columns',
-              label: 'Columns',
-              filter: (
-                <ChoiceList
-                  title="Columns"
-                  titleHidden
-                  choices={allColumns.map(c => ({ label: c.label, value: c.key }))}
-                  selected={selectedColumnKeys}
-                  allowMultiple
-                  onChange={values => {
-                    const next = new URLSearchParams(params)
-                    next.delete('columns')
-                    values.forEach(v => next.append('columns', v))
-                    setParams(next)
-                  }}
-                />
-              ),
-            },
-          ]}
-          sortOptions={[
-            { label: 'Updated', value: 'updatedAt desc', directionLabel: 'Newest first' },
-            { label: 'Updated', value: 'updatedAt asc', directionLabel: 'Oldest first' },
-            { label: 'Title', value: 'title asc', directionLabel: 'A-Z' },
-            { label: 'Title', value: 'title desc', directionLabel: 'Z-A' },
-          ]}
-          sortSelected={[sort]}
-          onSort={onSortChange}
-        />
-
-        {canonical ? (
-          <Text as="p" tone="subdued">
-            {typeof (totalCount as number | undefined) === 'number'
-              ? `Showing ${items.length} of ${totalCount} product(s)`
-              : `Showing canonical product_db rows (${items.length}).`}
-          </Text>
-        ) : null}
-        {empty ? (
-          <Card>
-            <div className="p-m space-y-m">
-              <Text as="p" tone="subdued">
-                No products yet.
-              </Text>
-              <InlineStack gap="200">
-                {hq && (
-                  // Direct importer entry in empty state → Imports hub
-                  <Button
-                    variant="primary"
-                    disabled={false}
-                    url={`/app/imports${location.search}`}
-                    id="btn-import-products-empty"
-                    data-testid={TEST_IDS.btnProductsImport}
-                  >
-                    Import from Supplier
-                  </Button>
-                )}
-              </InlineStack>
-            </div>
-          </Card>
-        ) : (
-          <BlockStack gap="300">
-            <InlineStack gap="200" align="space-between">
-              <Text as="p" tone="subdued">
-                {selectedResources.length} selected
-              </Text>
-              <InlineStack gap="200">
-                {canonical ? (
-                  <>
+    <>
+      <Card data-testid="page-products">
+        <BlockStack gap="400">
+          {/* <!-- BEGIN RBP GENERATED: importer-publish-shopify-v1 --> */}
+          {banner === 'publishOk' ? (
+            <Card>
+              <div className="p-m">
+                <InlineStack align="space-between">
+                  <Text as="p">
+                    Published {created} created, {updated} updated, {skipped} skipped
+                    {failed ? `, ${failed} failed` : ''}.
+                  </Text>
+                  {adminTagQuery ? (
                     <Button
-                      variant="secondary"
-                      disabled={selectedResources.length === 0}
-                      onClick={async () => {
-                        const ids = selectedResources.map(String)
-                        try {
-                          const resp = await fetch('/api/products/publish-bulk', {
-                            method: 'POST',
-                            headers: { 'content-type': 'application/json' },
-                            body: JSON.stringify({ ids, dryRun: true }),
-                          })
-                          const data = (await resp.json()) as {
-                            ok?: boolean
-                            created?: number
-                            updated?: number
-                            skipped?: number
-                            failed?: number
-                          }
-                          if (data?.ok) {
-                            const p = new URLSearchParams(params)
-                            p.set('banner', 'publishOk')
-                            p.set('created', String(data.created || 0))
-                            p.set('updated', String(data.updated || 0))
-                            p.set('skipped', String(data.skipped || 0))
-                            p.set('failed', String(data.failed || 0))
-                            window.location.search = p.toString()
-                          } else {
-                            const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
-                            w.shopifyToast?.error?.('Dry-run failed')
-                          }
-                        } catch {
-                          const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
-                          w.shopifyToast?.error?.('Dry-run failed')
-                        } finally {
-                          clearSelection()
-                        }
-                      }}
+                      url={`https://admin.shopify.com/store/dev/products?query=${encodeURIComponent(adminTagQuery ?? '')}`}
+                      variant="plain"
                     >
-                      Dry-run publish
+                      View in Shopify Admin
                     </Button>
-                    <Button
-                      variant="primary"
-                      disabled={selectedResources.length === 0}
-                      onClick={async () => {
-                        if (!confirm(`Publish ${selectedResources.length} product(s) to Shopify?`)) return
-                        const ids = selectedResources.map(String)
-                        try {
-                          const resp = await fetch('/api/products/publish-bulk', {
-                            method: 'POST',
-                            headers: { 'content-type': 'application/json' },
-                            body: JSON.stringify({ ids, dryRun: false }),
-                          })
-                          const data = (await resp.json()) as {
-                            ok?: boolean
-                            created?: number
-                            updated?: number
-                            skipped?: number
-                            failed?: number
-                          }
-                          if (data?.ok) {
-                            const p = new URLSearchParams(params)
-                            p.set('banner', 'publishOk')
-                            p.set('created', String(data.created || 0))
-                            p.set('updated', String(data.updated || 0))
-                            p.set('skipped', String(data.skipped || 0))
-                            p.set('failed', String(data.failed || 0))
-                            window.location.search = p.toString()
-                          } else {
-                            const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
-                            w.shopifyToast?.error?.('Publish failed')
-                          }
-                        } catch {
-                          const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
-                          w.shopifyToast?.error?.('Publish failed')
-                        } finally {
-                          clearSelection()
-                        }
-                      }}
-                    >
-                      Publish to Shopify
-                    </Button>
-                  </>
-                ) : null}
-                <Button
-                  disabled={selectedResources.length === 0 || fetcher.state === 'submitting'}
-                  onClick={() => {
-                    const form = new FormData()
-                    form.append('_action', 'setStatus')
-                    form.append('status', 'ACTIVE')
-                    selectedResources.forEach(id => form.append('ids', String(id)))
-                    fetcher.submit(form, { method: 'post', action: '/app/resources/products' })
-                    clearSelection()
-                  }}
-                >
-                  Set active
-                </Button>
-                <Button
-                  disabled={selectedResources.length === 0 || fetcher.state === 'submitting'}
-                  onClick={() => {
-                    const form = new FormData()
-                    form.append('_action', 'setStatus')
-                    form.append('status', 'DRAFT')
-                    selectedResources.forEach(id => form.append('ids', String(id)))
-                    fetcher.submit(form, { method: 'post', action: '/app/resources/products' })
-                    clearSelection()
-                  }}
-                >
-                  Set draft
-                </Button>
-                <Button
-                  tone="critical"
-                  disabled={selectedResources.length === 0 || fetcher.state === 'submitting'}
-                  onClick={() => {
-                    const form = new FormData()
-                    form.append('_action', 'setStatus')
-                    form.append('status', 'ARCHIVED')
-                    selectedResources.forEach(id => form.append('ids', String(id)))
-                    fetcher.submit(form, { method: 'post', action: '/app/resources/products' })
-                    clearSelection()
-                  }}
-                >
-                  Archive
-                </Button>
-              </InlineStack>
-            </InlineStack>
-            <IndexTable
-              resourceName={{ singular: 'product', plural: 'products' }}
-              itemCount={items.length}
-              selectedItemsCount={allResourcesSelected ? 'All' : selectedResources.length}
-              onSelectionChange={handleSelectionChange}
-              headings={headings}
-            >
-              {items.map((item, index) => (
-                <IndexTable.Row
-                  id={item.id}
-                  key={item.id}
-                  position={index}
-                  selected={selectedResources.includes(item.id)}
-                >
-                  {selectedColumnKeys.map(key => (
-                    <IndexTable.Cell key={key}>
-                      {key === 'title' ? (
-                        <Link to={`/app/products/${item.id}`}>{item.title}</Link>
-                      ) : key === 'status' ? (
-                        <Text as="span">{item.status.toLowerCase()}</Text>
-                      ) : key === 'vendor' ? (
-                        <Text as="span">{item.vendor || '-'}</Text>
-                      ) : key === 'productType' ? (
-                        <Text as="span">{item.productType || '-'}</Text>
-                      ) : key === 'updatedAt' ? (
-                        <Text as="span">{item.updatedAt || '-'}</Text>
-                      ) : null}
-                    </IndexTable.Cell>
-                  ))}
-                </IndexTable.Row>
-              ))}
-            </IndexTable>
-            <InlineStack align="end" gap="200">
-              {params.get('after') ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    const next = new URLSearchParams(params)
-                    next.delete('after')
-                    setParams(next)
-                  }}
-                >
-                  Reset
+                  ) : null}
+                </InlineStack>
+              </div>
+            </Card>
+          ) : null}
+          {/* <!-- END RBP GENERATED: importer-publish-shopify-v1 --> */}
+          <InlineStack align="space-between">
+            <Text as="h2" variant="headingLg" data-testid={TEST_IDS.headingProducts}>
+              {canonical ? 'Canonical Products' : 'Products'}
+            </Text>
+            <InlineStack gap="200">
+              {canonical ? (
+                <Button url="/app/admin/publish/telemetry" variant="secondary">
+                  Telemetry
                 </Button>
               ) : null}
-              <Button
-                disabled={!nextCursor}
-                onClick={() => {
-                  if (!nextCursor) return
-                  const next = new URLSearchParams(params)
-                  next.set('after', nextCursor)
-                  setParams(next)
-                }}
-              >
-                Next
-              </Button>
+              {hq && batsonState ? (
+                <Button variant="secondary" onClick={() => setBatsonModalOpen(true)}>
+                  Sync Batson Products
+                </Button>
+              ) : null}
+              {/* Sole importer entry: Import button links to new Imports hub */}
+              {/* BEGIN RBP GENERATED: admin-link-integrity-v1 */}
+              {/* Direct link to Imports hub from Products; preserve current params */}
+              {hq && (
+                // <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
+                <Button url={`/app/imports${location.search}`} data-testid={TEST_IDS.btnProductsImport}>
+                  Import
+                </Button>
+                // <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
+              )}
+              {/* END RBP GENERATED: admin-link-integrity-v1 */}
             </InlineStack>
-          </BlockStack>
-        )}
-      </BlockStack>
-      {/* <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (hook) --> */}
-      <ImportWiring fetcher={fetcher} />
-      {/* <!-- END RBP GENERATED: hq-products-import-wire-v1 (hook) --> */}
-    </Card>
+          </InlineStack>
+
+          <IndexFilters
+            queryValue={q}
+            queryPlaceholder="Filter products"
+            onQueryChange={onQueryChange}
+            onQueryClear={() => onQueryChange('')}
+            tabs={tabs}
+            selected={selectedTab}
+            onSelect={index => {
+              const next = new URLSearchParams(params)
+              const tab = tabs[index]
+              next.set('view', tab.id)
+              next.delete('status')
+              if (tab.id !== 'all') next.append('status', tab.id)
+              // Apply product type filter for Rod Blanks tab in canonical view
+              if (tab.id === 'rod-blanks') next.set('type', 'Rod Blank')
+              else next.delete('type')
+              // Reset cursor when switching tabs
+              next.delete('after')
+              setParams(next)
+            }}
+            mode={mode}
+            setMode={setMode}
+            onClearAll={() => {
+              const next = new URLSearchParams(params)
+              next.delete('q')
+              next.delete('status')
+              next.delete('columns')
+              setParams(next)
+            }}
+            filters={[
+              {
+                key: 'status',
+                label: 'Status',
+                filter: (
+                  <ChoiceList
+                    title="Status"
+                    titleHidden
+                    choices={[
+                      { label: 'Active', value: 'active' },
+                      { label: 'Draft', value: 'draft' },
+                      { label: 'Archived', value: 'archived' },
+                    ]}
+                    selected={status}
+                    onChange={values => {
+                      const next = new URLSearchParams(params)
+                      next.delete('status')
+                      values.forEach(v => next.append('status', v))
+                      setParams(next)
+                    }}
+                  />
+                ),
+              },
+              {
+                key: 'columns',
+                label: 'Columns',
+                filter: (
+                  <ChoiceList
+                    title="Columns"
+                    titleHidden
+                    choices={allColumns.map(c => ({ label: c.label, value: c.key }))}
+                    selected={selectedColumnKeys}
+                    allowMultiple
+                    onChange={values => {
+                      const next = new URLSearchParams(params)
+                      next.delete('columns')
+                      values.forEach(v => next.append('columns', v))
+                      setParams(next)
+                    }}
+                  />
+                ),
+              },
+            ]}
+            sortOptions={[
+              { label: 'Updated', value: 'updatedAt desc', directionLabel: 'Newest first' },
+              { label: 'Updated', value: 'updatedAt asc', directionLabel: 'Oldest first' },
+              { label: 'Title', value: 'title asc', directionLabel: 'A-Z' },
+              { label: 'Title', value: 'title desc', directionLabel: 'Z-A' },
+            ]}
+            sortSelected={[sort]}
+            onSort={onSortChange}
+          />
+
+          {canonical ? (
+            <Text as="p" tone="subdued">
+              {typeof (totalCount as number | undefined) === 'number'
+                ? `Showing ${items.length} of ${totalCount} product(s)`
+                : `Showing canonical product_db rows (${items.length}).`}
+            </Text>
+          ) : null}
+          {empty ? (
+            <Card>
+              <div className="p-m space-y-m">
+                <Text as="p" tone="subdued">
+                  No products yet.
+                </Text>
+                <InlineStack gap="200">
+                  {hq && (
+                    // Direct importer entry in empty state → Imports hub
+                    <Button
+                      variant="primary"
+                      disabled={false}
+                      url={`/app/imports${location.search}`}
+                      id="btn-import-products-empty"
+                      data-testid={TEST_IDS.btnProductsImport}
+                    >
+                      Import from Supplier
+                    </Button>
+                  )}
+                </InlineStack>
+              </div>
+            </Card>
+          ) : (
+            <BlockStack gap="300">
+              <InlineStack gap="200" align="space-between">
+                <Text as="p" tone="subdued">
+                  {selectedResources.length} selected
+                </Text>
+                <InlineStack gap="200">
+                  {canonical ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        disabled={selectedResources.length === 0}
+                        onClick={async () => {
+                          const ids = selectedResources.map(String)
+                          try {
+                            const resp = await fetch('/api/products/publish-bulk', {
+                              method: 'POST',
+                              headers: { 'content-type': 'application/json' },
+                              body: JSON.stringify({ ids, dryRun: true }),
+                            })
+                            const data = (await resp.json()) as {
+                              ok?: boolean
+                              created?: number
+                              updated?: number
+                              skipped?: number
+                              failed?: number
+                            }
+                            if (data?.ok) {
+                              const p = new URLSearchParams(params)
+                              p.set('banner', 'publishOk')
+                              p.set('created', String(data.created || 0))
+                              p.set('updated', String(data.updated || 0))
+                              p.set('skipped', String(data.skipped || 0))
+                              p.set('failed', String(data.failed || 0))
+                              window.location.search = p.toString()
+                            } else {
+                              const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+                              w.shopifyToast?.error?.('Dry-run failed')
+                            }
+                          } catch {
+                            const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+                            w.shopifyToast?.error?.('Dry-run failed')
+                          } finally {
+                            clearSelection()
+                          }
+                        }}
+                      >
+                        Dry-run publish
+                      </Button>
+                      <Button
+                        variant="primary"
+                        disabled={selectedResources.length === 0}
+                        onClick={async () => {
+                          if (!confirm(`Publish ${selectedResources.length} product(s) to Shopify?`)) return
+                          const ids = selectedResources.map(String)
+                          try {
+                            const resp = await fetch('/api/products/publish-bulk', {
+                              method: 'POST',
+                              headers: { 'content-type': 'application/json' },
+                              body: JSON.stringify({ ids, dryRun: false }),
+                            })
+                            const data = (await resp.json()) as {
+                              ok?: boolean
+                              created?: number
+                              updated?: number
+                              skipped?: number
+                              failed?: number
+                            }
+                            if (data?.ok) {
+                              const p = new URLSearchParams(params)
+                              p.set('banner', 'publishOk')
+                              p.set('created', String(data.created || 0))
+                              p.set('updated', String(data.updated || 0))
+                              p.set('skipped', String(data.skipped || 0))
+                              p.set('failed', String(data.failed || 0))
+                              window.location.search = p.toString()
+                            } else {
+                              const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+                              w.shopifyToast?.error?.('Publish failed')
+                            }
+                          } catch {
+                            const w = window as unknown as { shopifyToast?: { error?: (m: string) => void } }
+                            w.shopifyToast?.error?.('Publish failed')
+                          } finally {
+                            clearSelection()
+                          }
+                        }}
+                      >
+                        Publish to Shopify
+                      </Button>
+                    </>
+                  ) : null}
+                  <Button
+                    disabled={selectedResources.length === 0 || fetcher.state === 'submitting'}
+                    onClick={() => {
+                      const form = new FormData()
+                      form.append('_action', 'setStatus')
+                      form.append('status', 'ACTIVE')
+                      selectedResources.forEach(id => form.append('ids', String(id)))
+                      fetcher.submit(form, { method: 'post', action: '/app/resources/products' })
+                      clearSelection()
+                    }}
+                  >
+                    Set active
+                  </Button>
+                  <Button
+                    disabled={selectedResources.length === 0 || fetcher.state === 'submitting'}
+                    onClick={() => {
+                      const form = new FormData()
+                      form.append('_action', 'setStatus')
+                      form.append('status', 'DRAFT')
+                      selectedResources.forEach(id => form.append('ids', String(id)))
+                      fetcher.submit(form, { method: 'post', action: '/app/resources/products' })
+                      clearSelection()
+                    }}
+                  >
+                    Set draft
+                  </Button>
+                  <Button
+                    tone="critical"
+                    disabled={selectedResources.length === 0 || fetcher.state === 'submitting'}
+                    onClick={() => {
+                      const form = new FormData()
+                      form.append('_action', 'setStatus')
+                      form.append('status', 'ARCHIVED')
+                      selectedResources.forEach(id => form.append('ids', String(id)))
+                      fetcher.submit(form, { method: 'post', action: '/app/resources/products' })
+                      clearSelection()
+                    }}
+                  >
+                    Archive
+                  </Button>
+                </InlineStack>
+              </InlineStack>
+              <IndexTable
+                resourceName={{ singular: 'product', plural: 'products' }}
+                itemCount={items.length}
+                selectedItemsCount={allResourcesSelected ? 'All' : selectedResources.length}
+                onSelectionChange={handleSelectionChange}
+                headings={headings}
+              >
+                {items.map((item, index) => (
+                  <IndexTable.Row
+                    id={item.id}
+                    key={item.id}
+                    position={index}
+                    selected={selectedResources.includes(item.id)}
+                  >
+                    {selectedColumnKeys.map(key => (
+                      <IndexTable.Cell key={key}>
+                        {key === 'title' ? (
+                          <Link to={`/app/products/${item.id}`}>{item.title}</Link>
+                        ) : key === 'status' ? (
+                          <Text as="span">{item.status.toLowerCase()}</Text>
+                        ) : key === 'vendor' ? (
+                          <Text as="span">{item.vendor || '-'}</Text>
+                        ) : key === 'productType' ? (
+                          <Text as="span">{item.productType || '-'}</Text>
+                        ) : key === 'updatedAt' ? (
+                          <Text as="span">{item.updatedAt || '-'}</Text>
+                        ) : null}
+                      </IndexTable.Cell>
+                    ))}
+                  </IndexTable.Row>
+                ))}
+              </IndexTable>
+              <InlineStack align="end" gap="200">
+                {params.get('after') ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      const next = new URLSearchParams(params)
+                      next.delete('after')
+                      setParams(next)
+                    }}
+                  >
+                    Reset
+                  </Button>
+                ) : null}
+                <Button
+                  disabled={!nextCursor}
+                  onClick={() => {
+                    if (!nextCursor) return
+                    const next = new URLSearchParams(params)
+                    next.set('after', nextCursor)
+                    setParams(next)
+                  }}
+                >
+                  Next
+                </Button>
+              </InlineStack>
+            </BlockStack>
+          )}
+        </BlockStack>
+        {/* <!-- BEGIN RBP GENERATED: hq-products-import-wire-v1 (hook) --> */}
+        <ImportWiring fetcher={fetcher} />
+        {/* <!-- END RBP GENERATED: hq-products-import-wire-v1 (hook) --> */}
+      </Card>
+      {hq && batsonState ? (
+        <Modal open={batsonModalOpen} onClose={() => setBatsonModalOpen(false)} title="Sync Batson Products">
+          <Modal.Section>
+            <BlockStack gap="400">
+              <BlockStack gap="200">
+                <InlineStack gap="200" blockAlign="center">
+                  <Badge tone={badgeToneForAuth(batsonState.authStatus)}>
+                    {formatStatusLabel(batsonState.authStatus)}
+                  </Badge>
+                  <Text as="p" tone="subdued">
+                    {batsonState.authMessage || 'Upload a wholesale session cookie to enable sync runs.'}
+                  </Text>
+                </InlineStack>
+                <InlineStack gap="300" align="start">
+                  <BatsonStat label="Cookie set" value={formatDateTime(batsonState.authCookieSetAt)} />
+                  <BatsonStat label="Validated" value={formatDateTime(batsonState.authCookieValidatedAt)} />
+                  <BatsonStat label="Last sync" value={formatDateTime(batsonState.lastSyncAt)} />
+                  <div style={{ minWidth: 180 }}>
+                    <Text as="p" tone="subdued">
+                      Sync status
+                    </Text>
+                    <Badge tone={badgeToneForSync(batsonState.lastSyncStatus)}>
+                      {formatStatusLabel(batsonState.lastSyncStatus)}
+                    </Badge>
+                  </div>
+                </InlineStack>
+                {batsonState.lastSyncError ? (
+                  <Text as="p" tone="critical">
+                    Last error: {batsonState.lastSyncError}
+                  </Text>
+                ) : null}
+              </BlockStack>
+
+              <BlockStack gap="150">
+                <Text as="h3" variant="headingSm">
+                  Recent sync
+                </Text>
+                {batsonSummary ? (
+                  <BlockStack gap="150">
+                    <Text as="p" tone="subdued">
+                      Job {batsonSummary.jobId || '—'} · Started {formatDateTime(batsonSummary.startedAt)}
+                      {batsonSummary.finishedAt ? ` · Finished ${formatDateTime(batsonSummary.finishedAt)}` : ''}
+                    </Text>
+                    {batsonSummary.suppliers.length ? (
+                      <BlockStack gap="100">
+                        {batsonSummary.suppliers.map(row => (
+                          <InlineStack key={row.slug} align="space-between" blockAlign="center">
+                            <Text as="p">{formatSupplierLabel(row.slug)}</Text>
+                            <InlineStack gap="150" blockAlign="center">
+                              <Badge tone={row.ok === false ? 'critical' : 'success'}>
+                                {row.ok === false ? 'Failed' : 'Success'}
+                              </Badge>
+                              <Text as="p" tone="subdued">
+                                {row.status || (row.ok === false ? row.error || 'Error' : 'Completed')}
+                                {row.durationMs ? ` · ${(row.durationMs / 1000).toFixed(1)}s` : ''}
+                              </Text>
+                            </InlineStack>
+                          </InlineStack>
+                        ))}
+                      </BlockStack>
+                    ) : (
+                      <Text as="p" tone="subdued">
+                        Suppliers queued but no status recorded yet.
+                      </Text>
+                    )}
+                  </BlockStack>
+                ) : (
+                  <Text as="p" tone="subdued">
+                    No sync run recorded yet.
+                  </Text>
+                )}
+              </BlockStack>
+
+              <batsonCookieFetcher.Form method="post" action="/app/admin/import/settings">
+                <input type="hidden" name="intent" value="batson-cookie:save" />
+                <input type="hidden" name="cookie" value={batsonCookieInput} />
+                <TextField
+                  label="Batson Cookie header"
+                  value={batsonCookieInput}
+                  onChange={setBatsonCookieInput}
+                  autoComplete="off"
+                  multiline
+                  helpText="Paste the wholesale Cookie header from batsonenterprises.com (e.g., ASP.NET_SessionId=...; .ASPXAUTH=...)."
+                />
+                <InlineStack gap="200" align="start">
+                  <Button submit disabled={!batsonCookieInput || batsonCookieBusy}>
+                    Validate Cookie
+                  </Button>
+                  <Button onClick={() => setBatsonCookieInput('')} disabled={!batsonCookieInput || batsonCookieBusy}>
+                    Clear
+                  </Button>
+                </InlineStack>
+              </batsonCookieFetcher.Form>
+              <InlineStack gap="200">
+                <batsonCookieFetcher.Form method="post" action="/app/admin/import/settings">
+                  <input type="hidden" name="intent" value="batson-cookie:validate" />
+                  <Button submit variant="tertiary" disabled={batsonCookieBusy}>
+                    Re-check stored cookie
+                  </Button>
+                </batsonCookieFetcher.Form>
+                <batsonSyncFetcher.Form method="post" action="/app/admin/import/settings">
+                  <input type="hidden" name="intent" value="batson-sync:start" />
+                  <Button submit variant="primary" disabled={batsonState.authStatus !== 'valid' || batsonSyncBusy}>
+                    {batsonSyncBusy ? 'Starting…' : 'Run Sync'}
+                  </Button>
+                </batsonSyncFetcher.Form>
+              </InlineStack>
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
+      ) : null}
+    </>
   )
 }
 
@@ -846,3 +1057,112 @@ function ImportWiring({ fetcher }: { fetcher: StartRunFetcher }) {
   return null
 }
 // <!-- END RBP GENERATED: hq-products-import-wire-v1 (component) -->
+
+type BatsonSupplierSummaryRow = {
+  slug: string
+  ok?: boolean
+  status?: string
+  durationMs?: number
+  error?: string | null
+}
+
+type BatsonSummarySnapshot = {
+  jobId?: string
+  startedAt?: string
+  finishedAt?: string
+  suppliers: BatsonSupplierSummaryRow[]
+}
+
+type UnknownSummary = Record<string, unknown> & { suppliers?: unknown }
+
+function normalizeSyncSummary(summary: BatsonSyncSnapshot['lastSyncSummary']): BatsonSummarySnapshot | null {
+  if (!summary || typeof summary !== 'object') return null
+  const base = summary as UnknownSummary
+  const suppliersRaw = Array.isArray(base.suppliers) ? base.suppliers : []
+  const suppliers: BatsonSupplierSummaryRow[] = suppliersRaw
+    .filter(item => item && typeof item === 'object')
+    .map(item => {
+      const row = item as Record<string, unknown>
+      return {
+        slug: typeof row.slug === 'string' ? row.slug : 'unknown',
+        ok: typeof row.ok === 'boolean' ? row.ok : undefined,
+        status: typeof row.status === 'string' ? row.status : undefined,
+        durationMs: typeof row.durationMs === 'number' ? row.durationMs : undefined,
+        error: typeof row.error === 'string' ? row.error : null,
+      }
+    })
+  return {
+    jobId: typeof base.jobId === 'string' ? base.jobId : undefined,
+    startedAt: typeof base.startedAt === 'string' ? base.startedAt : undefined,
+    finishedAt: typeof base.finishedAt === 'string' ? base.finishedAt : undefined,
+    suppliers,
+  }
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function formatStatusLabel(status?: string | null) {
+  if (!status) return 'Unknown'
+  return status
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function badgeToneForAuth(
+  status?: string | null,
+): 'success' | 'critical' | 'warning' | 'attention' | 'info' | undefined {
+  switch ((status || '').toLowerCase()) {
+    case 'valid':
+      return 'success'
+    case 'pending':
+      return 'attention'
+    case 'expired':
+      return 'warning'
+    case 'invalid':
+      return 'critical'
+    case 'missing':
+      return 'info'
+    default:
+      return undefined
+  }
+}
+
+function badgeToneForSync(status?: string | null): 'success' | 'critical' | 'warning' | 'info' | undefined {
+  switch ((status || '').toLowerCase()) {
+    case 'success':
+      return 'success'
+    case 'running':
+      return 'info'
+    case 'error':
+      return 'critical'
+    default:
+      return undefined
+  }
+}
+
+function formatSupplierLabel(slug?: string) {
+  if (!slug) return 'Supplier'
+  return slug
+    .replace(/^batson-/, '')
+    .split('-')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function BatsonStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ minWidth: 180 }}>
+      <Text as="p" tone="subdued">
+        {label}
+      </Text>
+      <Text as="p">{value}</Text>
+    </div>
+  )
+}
