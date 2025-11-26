@@ -1,4 +1,2 @@
--- Add status column to SpecTemplate (SQLite)
-PRAGMA foreign_keys=OFF;
-ALTER TABLE "SpecTemplate" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'ACTIVE';
-PRAGMA foreign_keys=ON;
+-- No-op: status column was added in migration 20251022130000_templates_status.
+-- This migration intentionally left blank for SQLite compatibility.

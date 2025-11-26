@@ -81,6 +81,5 @@ CREATE UNIQUE INDEX "PartStaging_supplierId_externalId_key" ON "PartStaging"("su
 DROP INDEX IF EXISTS "SpecField_templateId_key_unique";
 CREATE UNIQUE INDEX "SpecField_templateId_key_key" ON "SpecField"("templateId", "key");
 
--- RedefineIndex
-DROP INDEX IF EXISTS "sqlite_autoindex_SpecTemplate_2";
-CREATE UNIQUE INDEX "SpecTemplate_name_key" ON "SpecTemplate"("name");
+-- RedefineIndex (skip dropping SQLite autoindex, just ensure named index exists)
+CREATE UNIQUE INDEX IF NOT EXISTS "SpecTemplate_name_key" ON "SpecTemplate"("name");

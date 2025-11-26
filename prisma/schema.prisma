@@ -365,6 +365,8 @@ model SupplierSyncState {
   lastSyncStatus        String?
   lastSyncSummary       Json?
   lastSyncError         String?
+  currentSyncRun        Json?
+  lastSyncRun           Json?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 }

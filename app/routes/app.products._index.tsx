@@ -482,8 +482,13 @@ export default function ProductsIndex() {
     () => normalizeSyncSummary(batsonState?.lastSyncSummary ?? null),
     [batsonState?.lastSyncSummary],
   )
+  const currentRunLabel = useMemo(() => describeCurrentRun(batsonState?.currentRun), [batsonState?.currentRun])
+  const lastRunLabel = useMemo(() => describeLastRun(batsonState?.lastRun), [batsonState?.lastRun])
   const batsonCookieBusy = batsonCookieFetcher.state !== 'idle'
   const batsonSyncBusy = batsonSyncFetcher.state !== 'idle'
+  const handleBatsonCookieChange = useCallback((value: string) => {
+    setBatsonCookieInput(extractCookieHeaderValue(value))
+  }, [])
   const [mode, setMode] = useState<IndexFiltersMode>(IndexFiltersMode.Default)
   const tabs = useMemo(
     () => [
@@ -929,6 +934,8 @@ export default function ProductsIndex() {
                   <BatsonStat label="Cookie set" value={formatDateTime(batsonState.authCookieSetAt)} />
                   <BatsonStat label="Validated" value={formatDateTime(batsonState.authCookieValidatedAt)} />
                   <BatsonStat label="Last sync" value={formatDateTime(batsonState.lastSyncAt)} />
+                  <BatsonStat label="Current run" value={currentRunLabel} />
+                  <BatsonStat label="Last run" value={lastRunLabel} />
                   <div style={{ minWidth: 180 }}>
                     <Text as="p" tone="subdued">
                       Sync status
@@ -991,7 +998,7 @@ export default function ProductsIndex() {
                 <TextField
                   label="Batson Cookie header"
                   value={batsonCookieInput}
-                  onChange={setBatsonCookieInput}
+                  onChange={handleBatsonCookieChange}
                   autoComplete="off"
                   multiline
                   helpText="Paste the wholesale Cookie header from batsonenterprises.com (e.g., ASP.NET_SessionId=...; .ASPXAUTH=...)."
@@ -1072,6 +1079,9 @@ type BatsonSummarySnapshot = {
   finishedAt?: string
   suppliers: BatsonSupplierSummaryRow[]
 }
+
+type BatsonCurrentRunState = BatsonSyncSnapshot['currentRun'] | undefined
+type BatsonLastRunState = BatsonSyncSnapshot['lastRun'] | undefined
 
 type UnknownSummary = Record<string, unknown> & { suppliers?: unknown }
 
@@ -1157,12 +1167,72 @@ function formatSupplierLabel(slug?: string) {
 }
 
 function BatsonStat({ label, value }: { label: string; value: string }) {
+  const display = value && value.trim() ? value : '—'
   return (
     <div style={{ minWidth: 180 }}>
       <Text as="p" tone="subdued">
         {label}
       </Text>
-      <Text as="p">{value}</Text>
+      <Text as="p">{display}</Text>
     </div>
   )
+}
+
+function extractCookieHeaderValue(input: string): string {
+  if (!input) return ''
+  const trimmed = input.trim()
+  if (!trimmed) return ''
+  const lines = trimmed.split(/\r?\n+/)
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    const match = line.match(/^cookie\s*:\s*(.+)$/i)
+    if (match) return match[1].trim()
+  }
+  const inline = trimmed.match(/cookie\s*:\s*(.+)/i)
+  if (inline) return inline[1].trim()
+  return trimmed
+}
+
+function describeCurrentRun(run: BatsonCurrentRunState): string {
+  if (!run) return 'Idle'
+  if (run.status === 'running' && run.startedAt) {
+    return `Running for ${formatElapsedSince(run.startedAt)}`
+  }
+  const label = formatStatusLabel(run.status) || 'Idle'
+  if (run.finishedAt) return `${label} · Finished ${formatDateTime(run.finishedAt)}`
+  if (run.startedAt) return `${label} · Started ${formatDateTime(run.startedAt)}`
+  return label
+}
+
+function describeLastRun(run: BatsonLastRunState): string {
+  if (!run) return '—'
+  const durationLabel = formatDurationMs(run.durationMs)
+  if (durationLabel && run.finishedAt) {
+    return `${durationLabel} · Finished ${formatDateTime(run.finishedAt)}`
+  }
+  if (durationLabel) return durationLabel
+  if (run.startedAt) return `Started ${formatDateTime(run.startedAt)}`
+  return '—'
+}
+
+function formatElapsedSince(startedAt?: string | null): string {
+  if (!startedAt) return '0s'
+  const started = Date.parse(startedAt)
+  if (Number.isNaN(started)) return '0s'
+  const diff = Date.now() - started
+  if (diff <= 0) return '0s'
+  return formatDurationMs(diff) || '0s'
+}
+
+function formatDurationMs(ms?: number | null): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return ''
+  const totalSeconds = Math.floor(ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  const parts: string[] = []
+  if (hours) parts.push(`${hours}h`)
+  if (minutes || hours) parts.push(`${minutes}m`)
+  parts.push(`${seconds}s`)
+  return parts.join(' ')
 }
