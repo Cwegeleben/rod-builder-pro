@@ -174,7 +174,9 @@ export function extractBatsonAttributeGrid(html: string, base: string) {
   const $tbody = $table.find('tbody').first()
   if ($tbody.length === 0) return out
   const headerLabels: string[] = []
-  $table.find('thead th').each((_, th) => headerLabels.push(cleanText($(th).text())))
+  $table.find('thead th').each((_, th) => {
+    headerLabels.push(cleanText($(th).text()))
+  })
 
   $tbody.find('> tr').each((_, tr) => {
     const $tr = $(tr)

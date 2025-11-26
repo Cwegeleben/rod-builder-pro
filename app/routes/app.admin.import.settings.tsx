@@ -13,6 +13,13 @@ import {
   setSchedule,
   saveCredentials,
 } from '../services/importer/settings.server'
+import {
+  BatsonSyncError,
+  enqueueBatsonSync,
+  getBatsonSyncState,
+  saveBatsonAuthCookie,
+  validateBatsonAuthCookie,
+} from '../services/suppliers/batsonSync.server'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireHQAccess(request)
@@ -26,6 +33,38 @@ export async function action({ request }: ActionFunctionArgs) {
   const supplierId = 'batson'
   const fd = await request.formData()
   const intent = String(fd.get('intent') || '')
+  if (intent === 'batson-cookie:save') {
+    const cookie = String(fd.get('cookie') || '')
+    if (!cookie) {
+      return json({ ok: false, error: 'Cookie header required' }, { status: 400 })
+    }
+    try {
+      const result = await saveBatsonAuthCookie(cookie, 'hq-user')
+      return json({ ok: result.ok, message: result.message, state: result.state })
+    } catch (error) {
+      const { message, status } = normalizeSyncError(error, 'Failed to save cookie')
+      return json({ ok: false, error: message }, { status })
+    }
+  }
+  if (intent === 'batson-cookie:validate') {
+    try {
+      const result = await validateBatsonAuthCookie()
+      return json({ ok: result.ok, message: result.message, state: result.state })
+    } catch (error) {
+      const { message, status } = normalizeSyncError(error, 'Failed to validate cookie')
+      return json({ ok: false, error: message }, { status })
+    }
+  }
+  if (intent === 'batson-sync:start') {
+    try {
+      const { jobId } = await enqueueBatsonSync('hq-user')
+      const state = await getBatsonSyncState()
+      return json({ ok: true, jobId, state })
+    } catch (error) {
+      const { message, status } = normalizeSyncError(error, 'Failed to start sync')
+      return json({ ok: false, error: message }, { status })
+    }
+  }
   if (intent === 'creds:verify') {
     const username = String(fd.get('username') || '')
     const password = String(fd.get('password') || '')
@@ -104,5 +143,13 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function ImportSettingsPage() {
   // Render nested routes (e.g., settings index UI)
   return <Outlet />
+}
+
+function normalizeSyncError(error: unknown, fallback: string): { message: string; status: number } {
+  if (error instanceof BatsonSyncError) {
+    return { message: error.message, status: 400 }
+  }
+  const message = error instanceof Error ? error.message : fallback
+  return { message: message || fallback, status: 500 }
 }
 // <!-- END RBP GENERATED: hq-import-settings-v1 -->

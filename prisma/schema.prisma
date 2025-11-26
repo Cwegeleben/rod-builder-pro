@@ -351,6 +351,24 @@ model SupplierCookieJar {
 }
 // <!-- END RBP GENERATED: importer-price-avail-job-v1 -->
 
+model SupplierSyncState {
+  id                    String   @id @default(cuid())
+  supplierSlug          String   @unique
+  authCookieEnc         String?
+  authCookieSetAt       DateTime?
+  authCookieSetBy       String?
+  authCookieValidatedAt DateTime?
+  authStatus            String?
+  authMessage           String?
+  lastSyncJobId         String?
+  lastSyncAt            DateTime?
+  lastSyncStatus        String?
+  lastSyncSummary       Json?
+  lastSyncError         String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 model ImportTemplate {
   id            String   @id
