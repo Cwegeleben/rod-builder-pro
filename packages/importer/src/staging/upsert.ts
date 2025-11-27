@@ -1,6 +1,7 @@
 // <!-- BEGIN RBP GENERATED: staging-upsert-v1 -->
 import crypto from 'crypto'
 import { prisma } from '../../../../app/db.server'
+import { deriveDesignStudioAnnotations } from '../../../../app/lib/designStudio/annotations.server'
 
 export async function upsertStaging(
   supplierId: string,
@@ -48,6 +49,13 @@ export async function upsertStaging(
       ]),
     )
     .digest('hex')
+  const designStudio = deriveDesignStudioAnnotations({
+    supplierKey: supplierId,
+    partType: rec.partType,
+    title: rec.title,
+    rawSpecs: rec.rawSpecs,
+    normSpecs: rec.normSpecs,
+  })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const client: any = prisma
   // Use named composite unique (supplierId, templateId, externalId)
@@ -71,6 +79,14 @@ export async function upsertStaging(
       priceWh: priceWh ?? undefined,
       hashContent: hash,
       fetchedAt: new Date(),
+      designStudioReady: designStudio.ready,
+      designStudioFamily: designStudio.family || null,
+      designStudioSeries: designStudio.series || null,
+      designStudioRole: designStudio.role,
+      designStudioCompatibility: designStudio.compatibility,
+      designStudioCoverageNotes: designStudio.coverageNotes || null,
+      designStudioSourceQuality: designStudio.sourceQuality || null,
+      designStudioHash: designStudio.hash,
     },
     create: {
       supplierId,
@@ -85,6 +101,14 @@ export async function upsertStaging(
       priceMsrp: priceMsrp ?? undefined,
       priceWh: priceWh ?? undefined,
       hashContent: hash,
+      designStudioReady: designStudio.ready,
+      designStudioFamily: designStudio.family || null,
+      designStudioSeries: designStudio.series || null,
+      designStudioRole: designStudio.role,
+      designStudioCompatibility: designStudio.compatibility,
+      designStudioCoverageNotes: designStudio.coverageNotes || null,
+      designStudioSourceQuality: designStudio.sourceQuality || null,
+      designStudioHash: designStudio.hash,
     },
   })
 }

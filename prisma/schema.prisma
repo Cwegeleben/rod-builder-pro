@@ -240,6 +240,14 @@ model PartStaging {
   priceWh     Decimal?
   hashContent String   @default("")
   fetchedAt   DateTime @default(now())
+  designStudioReady Boolean   @default(false)
+  designStudioFamily String?
+  designStudioSeries String?
+  designStudioRole  String?
+  designStudioCompatibility Json?
+  designStudioCoverageNotes String?
+  designStudioSourceQuality String?
+  designStudioHash   String   @default("")
 
   // Back-writes from publish pipeline
   shopifyProductId String?
@@ -423,6 +431,11 @@ model Product {
   // Full version history (many) relation name distinct from latestVersion pointer
   versions        ProductVersion[] @relation("ProductVersions")
   sources         ProductSource[]  @relation("ProductSources")
+  designStudioReady Boolean        @default(false)
+  designStudioFamily String?
+  designStudioLastTouchedAt DateTime?
+  designStudioCoverageNotes String?
+  annotationAudits DesignStudioAnnotationAudit[]
 
   @@unique([supplierId, sku], name: "product_supplier_sku_unique")
   @@index([supplierId])
@@ -432,6 +445,39 @@ enum ProductStatus {
   DRAFT
   READY
   PUBLISHED
+}
+
+enum DesignBuildStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  SCHEDULED
+  IN_PROGRESS
+  FULFILLED
+  ARCHIVED
+  BLOCKED
+}
+
+enum DesignFulfillmentMode {
+  RBP_BUILD
+  SUPPLIER_BUILD
+}
+
+enum DesignBuildEventType {
+  NOTE
+  STATUS_CHANGE
+  CUSTOMER_UPDATE
+  FULFILLMENT_UPDATE
+  SLA_BREACH
+  FILE_ATTACHED
+  EXPORT
+}
+
+enum DesignStudioTier {
+  STARTER
+  CORE
+  PLUS
+  ENTERPRISE
 }
 
 /// ProductVersion: immutable snapshot of normalized content
@@ -453,11 +499,109 @@ model ProductVersion {
   sourceSnapshot Json?
   fetchedAt     DateTime @default(now())
   createdAt     DateTime @default(now())
+  designStudioRole String?
+  designStudioSeries String?
+  designStudioCompatibility Json?
+  designStudioSourceQuality String?
+  designStudioHash  String   @default("")
+  annotationAudits DesignStudioAnnotationAudit[] @relation("ProductVersionAnnotationAudits")
 
   @@unique([productId, contentHash], name: "product_version_hash_unique")
   @@index([productId])
 }
+
+model DesignStudioAnnotationAudit {
+  id                String         @id @default(cuid())
+  productId         String
+  product           Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVersionId  String?
+  productVersion    ProductVersion? @relation("ProductVersionAnnotationAudits", fields: [productVersionId], references: [id], onDelete: SetNull)
+  designStudioHash  String
+  ready             Boolean
+  family            String?
+  series            String?
+  role              String?
+  coverageNotes     String?
+  sourceQuality     String?
+  compatibility     Json?
+  recordedAt        DateTime       @default(now())
+  source            String         @default("importer")
+
+  @@index([productId, recordedAt])
+  @@index([designStudioHash])
+}
 // END product_db canonical models (phase 1)
+
+model DesignBuild {
+  id               String                @id @default(cuid())
+  reference        String                @unique
+  shopDomain       String
+  tier             DesignStudioTier      @default(STARTER)
+  status           DesignBuildStatus     @default(DRAFT)
+  fulfillmentMode  DesignFulfillmentMode @default(RBP_BUILD)
+  customerName     String?
+  customerEmail    String?
+  customerPhone    String?
+  useCase          String?
+  experienceLevel  String?
+  blankSku         String?
+  blankTitle       String?
+  componentSummary Json?
+  bomHash          String?
+  promisedShipWeek DateTime?
+  assignedBuilder  String?
+  budgetCeiling    Decimal?
+  notesJson        Json?
+  metadata         Json?
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  scheduledAt      DateTime?
+  fulfilledAt      DateTime?
+  blockedReason    String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  events           DesignBuildEvent[]
+  attachments      DesignBuildAttachment[]
+
+  @@index([shopDomain, status])
+  @@index([tier])
+}
+
+model DesignBuildEvent {
+  id          String              @id @default(cuid())
+  buildId     String
+  build       DesignBuild         @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  eventType   DesignBuildEventType
+  payload     Json?
+  performedBy String?
+  createdAt   DateTime            @default(now())
+
+  @@index([buildId, createdAt])
+}
+
+model DesignBuildAttachment {
+  id        String      @id @default(cuid())
+  buildId   String
+  build     DesignBuild @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  label     String?
+  url       String
+  type      String?
+  metadata  Json?
+  createdAt DateTime    @default(now())
+
+  @@index([buildId])
+}
+
+model TenantSettings {
+  id                  String           @id @default(cuid())
+  shopDomain          String           @unique
+  designStudioEnabled Boolean          @default(false)
+  designStudioTier    DesignStudioTier @default(STARTER)
+  designStudioConfig  Json?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+}
 
 model ImportLog {
   id          String   @id @default(cuid())

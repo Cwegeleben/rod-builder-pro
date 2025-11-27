@@ -1,6 +1,8 @@
 import crypto from 'node:crypto'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../db.server'
+import { deriveDesignStudioAnnotations, type DesignStudioAnnotation } from '../lib/designStudio/annotations.server'
+import { recordDesignStudioAudit } from '../lib/designStudio/audit.server'
 
 export interface NormalizedProductInput {
   supplier: { id?: string; slug?: string; name?: string; urlRoot?: string }
@@ -16,6 +18,7 @@ export interface NormalizedProductInput {
   availability?: string | null
   sources?: Array<{ url: string; externalId?: string | null; source?: string | null; notes?: string | null }> | null
   fetchedAt?: Date | string
+  designStudio?: DesignStudioAnnotation
 }
 
 export type UpsertResult = {
@@ -45,7 +48,46 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value, replacer)
 }
 
+function jsonValueToRecord(value: Prisma.InputJsonValue | null | undefined): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  if (Array.isArray(value)) return undefined
+  return value as Record<string, unknown>
+}
+
+function resolvePartTypeFromInput(
+  input: NormalizedProductInput,
+  raw: Record<string, unknown> | undefined,
+  norm: Record<string, unknown> | undefined,
+): string | undefined {
+  const candidate =
+    (norm?.partType as string | undefined) ??
+    (norm?.part_type as string | undefined) ??
+    (raw?.partType as string | undefined) ??
+    (raw?.part_type as string | undefined) ??
+    input.type ??
+    undefined
+  return typeof candidate === 'string' ? candidate : undefined
+}
+
+function withDesignStudio(
+  input: NormalizedProductInput,
+): NormalizedProductInput & { designStudio: DesignStudioAnnotation } {
+  if (input.designStudio) return input as NormalizedProductInput & { designStudio: DesignStudioAnnotation }
+  const raw = jsonValueToRecord(input.rawSpecs)
+  const norm = jsonValueToRecord(input.normSpecs)
+  const partType = resolvePartTypeFromInput(input, raw, norm)
+  const designStudio = deriveDesignStudioAnnotations({
+    supplierKey: input.supplier.slug || input.supplier.id || input.supplier.name || input.sku,
+    partType,
+    title: input.title,
+    rawSpecs: raw,
+    normSpecs: norm,
+  })
+  return { ...input, designStudio }
+}
+
 export function computeContentHash(input: NormalizedProductInput): string {
+  const enriched = withDesignStudio(input)
   const payload = {
     title: input.title,
     type: input.type ?? null,
@@ -55,14 +97,17 @@ export function computeContentHash(input: NormalizedProductInput): string {
     priceMsrp: input.priceMsrp ?? null,
     priceWholesale: input.priceWholesale ?? null,
     availability: input.availability ?? null,
+    designStudio: enriched.designStudio,
   }
   const str = stableStringify(payload)
   return crypto.createHash('sha256').update(str).digest('hex')
 }
 
 export async function upsertNormalizedProduct(input: NormalizedProductInput): Promise<UpsertResult> {
-  const supplierId = await ensureSupplier(input.supplier)
-  const contentHash = computeContentHash(input)
+  const enrichedInput = withDesignStudio(input)
+  const supplierId = await ensureSupplier(enrichedInput.supplier)
+  const contentHash = computeContentHash(enrichedInput)
+  const ds = enrichedInput.designStudio
 
   // Find product by (supplierId, sku)
   const prodRows = await prisma.$queryRawUnsafe<Array<{ id: string; latestVersionId: string | null }>>(
@@ -78,9 +123,20 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
     // Update title/type best-effort
     try {
       await prisma.$executeRawUnsafe(
-        'UPDATE Product SET title = ?, type = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+        `UPDATE Product
+         SET title = ?,
+             type = ?,
+             designStudioReady = ?,
+             designStudioFamily = ?,
+             designStudioCoverageNotes = ?,
+             designStudioLastTouchedAt = CURRENT_TIMESTAMP,
+             updatedAt = CURRENT_TIMESTAMP
+         WHERE id = ?`,
         input.title,
         input.type ?? null,
+        ds.ready ? 1 : 0,
+        ds.family ?? null,
+        ds.coverageNotes ?? null,
         productId,
       )
     } catch {
@@ -90,13 +146,20 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
     createdProduct = true
     productId = crypto.randomUUID()
     await prisma.$executeRawUnsafe(
-      'INSERT INTO Product (id, supplierId, sku, title, type, status, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
+      `INSERT INTO Product (
+         id, supplierId, sku, title, type, status,
+         designStudioReady, designStudioFamily, designStudioLastTouchedAt, designStudioCoverageNotes,
+         createdAt, updatedAt
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       productId,
       supplierId,
       input.sku,
       input.title,
       input.type ?? null,
       'READY',
+      ds.ready ? 1 : 0,
+      ds.family ?? null,
+      ds.coverageNotes ?? null,
     )
   }
 
@@ -109,6 +172,7 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
   if (verExisting && verExisting.length) {
     const versionId = verExisting[0].id
     await upsertSourcesLinks(supplierId, productId, input.sources)
+    await recordDesignStudioAudit({ productId, productVersionId: versionId, ds })
     return {
       supplierId,
       productId,
@@ -126,8 +190,9 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
   await prisma.$executeRawUnsafe(
     `INSERT INTO ProductVersion (
         id, productId, contentHash, rawSpecs, normSpecs, description, images,
-        priceMsrp, priceWholesale, availability, sourceSnapshot, fetchedAt, createdAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        priceMsrp, priceWholesale, availability, sourceSnapshot, fetchedAt, createdAt,
+        designStudioRole, designStudioSeries, designStudioCompatibility, designStudioSourceQuality, designStudioHash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)`,
     versionId,
     productId,
     contentHash,
@@ -140,6 +205,11 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
     input.availability ?? null,
     toJson(input.sources ?? null),
     fetchedAt.toISOString(),
+    ds.role ?? null,
+    ds.series ?? null,
+    toJson(ds.compatibility),
+    ds.sourceQuality ?? null,
+    ds.hash,
   )
 
   // Point product.latestVersionId to the new version
@@ -154,6 +224,7 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
   }
 
   await upsertSourcesLinks(supplierId, productId, input.sources)
+  await recordDesignStudioAudit({ productId, productVersionId: versionId, ds })
   return { supplierId, productId, versionId, createdProduct, createdVersion: true, contentHash }
 }
 

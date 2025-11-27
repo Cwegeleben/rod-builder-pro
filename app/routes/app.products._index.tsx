@@ -15,11 +15,15 @@ import {
   Modal,
   Badge,
   TextField,
+  Tooltip,
+  Icon,
 } from '@shopify/polaris'
+import { AlertCircleIcon } from '@shopify/polaris-icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { authenticate } from '../shopify.server'
 import { prisma } from '../db.server'
 import { isHqShop } from '../lib/access.server'
+import { getDesignStudioAccess } from '../lib/designStudio/access.server'
 import { getBatsonSyncState, type BatsonSyncSnapshot } from '../services/suppliers/batsonSync.server'
 // <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
 import { TEST_IDS } from '../../src/config/testIds'
@@ -38,6 +42,10 @@ type ProductRow = {
   supplierId?: string
   sku?: string
   latestVersionId?: string | null
+  designStudioReady?: boolean | null
+  designStudioFamily?: string | null
+  designStudioLastTouchedAt?: string | null
+  designStudioCoverageNotes?: string | null
 }
 
 type BatsonSyncActionResponse = {
@@ -49,6 +57,24 @@ type BatsonSyncActionResponse = {
 }
 
 // HQ detection centralized
+
+const formatUtcDateTime = (value: Date | string | null | undefined): string | null => {
+  if (!value) return null
+  try {
+    const d = value instanceof Date ? value : new Date(value)
+    if (Number.isNaN(d.getTime())) return null
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const YYYY = d.getUTCFullYear()
+    const MM = pad(d.getUTCMonth() + 1)
+    const DD = pad(d.getUTCDate())
+    const hh = pad(d.getUTCHours())
+    const mm = pad(d.getUTCMinutes())
+    const ss = pad(d.getUTCSeconds())
+    return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss} UTC`
+  } catch {
+    return null
+  }
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Defer Shopify admin authentication unless we need legacy Shopify products.
@@ -76,6 +102,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const typeFilter = url.searchParams.get('type') || ''
   const statusParams = url.searchParams.getAll('status')
   const sortParam = url.searchParams.get('sort') || 'updatedAt desc'
+  const dsReadyParamsRaw = url.searchParams.getAll('dsReady')
+  const dsFamilyParamRaw = url.searchParams.get('dsFamily') || ''
   // Increase max page size and support cursor pagination for canonical view as well
   const first = Math.max(1, Math.min(250, parseInt(url.searchParams.get('first') || '50', 10)))
   const after = url.searchParams.get('after') || undefined
@@ -119,6 +147,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let items: ProductRow[] = []
   let nextCursor: string | null = null
   const useCanonical = process.env.PRODUCT_DB_ENABLED === '1'
+  const designStudioAccess = await getDesignStudioAccess(request)
+  const dsFiltersActive = useCanonical && designStudioAccess.enabled
+  const dsReadyParams = dsFiltersActive ? dsReadyParamsRaw : []
+  const dsFamilyParam = dsFiltersActive ? dsFamilyParamRaw : ''
   if (!useCanonical) {
     try {
       const auth = await authenticate.admin(request)
@@ -141,6 +173,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         failed,
         adminTagQuery,
         canonical: false,
+        designStudioAccess,
       })
     }
   }
@@ -169,6 +202,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           failed,
           adminTagQuery,
           canonical: true,
+          designStudioAccess,
         })
       }
     } catch {
@@ -189,6 +223,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         failed,
         adminTagQuery,
         canonical: true,
+        designStudioAccess,
       })
     }
     // Build filters for SQL (canonical path): q matches sku OR title; optional type match
@@ -202,6 +237,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       status: 'DRAFT' | 'READY' | 'PUBLISHED'
       updatedAt: Date
       latestVersionId: string | null
+      designStudioReady: number | boolean
+      designStudioFamily: string | null
+      designStudioLastTouchedAt: Date | string | null
+      designStudioCoverageNotes: string | null
     }
     // Access product table via prisma.$queryRawUnsafe (runtime guard path in db.server.ts may have skipped generation)
     let rows: CanonicalProduct[] = []
@@ -234,6 +273,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         condsNoCursor.push(cond)
         paramsNoCursor.push(`%${qRaw}%`, `%${qRaw}%`, `%${qNorm}%`, `%${qNorm}%`)
       }
+      const dsReadyValues = Array.from(
+        new Set(
+          dsReadyParams
+            .map(v => {
+              if (v === 'ready') return 1
+              if (v === 'not-ready') return 0
+              return null
+            })
+            .filter((v): v is 0 | 1 => v !== null),
+        ),
+      )
+      if (dsReadyValues.length === 1) {
+        const clause = 'designStudioReady = ?'
+        conds.push(clause)
+        condParams.push(dsReadyValues[0])
+        condsNoCursor.push(clause)
+        paramsNoCursor.push(dsReadyValues[0])
+      }
+      const dsFamilyQuery = dsFamilyParam.trim().toLowerCase()
+      if (dsFamilyQuery) {
+        const clause = 'designStudioFamily IS NOT NULL AND lower(designStudioFamily) LIKE ?'
+        const likeValue = `%${dsFamilyQuery}%`
+        conds.push(clause)
+        condParams.push(likeValue)
+        condsNoCursor.push(clause)
+        paramsNoCursor.push(likeValue)
+      }
       if (after) {
         try {
           const decoded = Buffer.from(after, 'base64').toString('utf8')
@@ -250,7 +316,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
       const whereNoCursor = condsNoCursor.length ? `WHERE ${condsNoCursor.join(' AND ')}` : ''
       const limit = first + 1
-      const sql = `SELECT id, supplierId, sku, title, type, status, updatedAt, latestVersionId FROM Product ${where} ORDER BY updatedAt DESC, id DESC LIMIT ?`
+      const sql = `SELECT id, supplierId, sku, title, type, status, updatedAt, latestVersionId, designStudioReady, designStudioFamily, designStudioLastTouchedAt, designStudioCoverageNotes FROM Product ${where} ORDER BY updatedAt DESC, id DESC LIMIT ?`
       rows = (await prisma.$queryRawUnsafe<CanonicalProduct[]>(sql, ...condParams, limit)) as CanonicalProduct[]
       const sqlCount = `SELECT COUNT(1) as c FROM Product ${whereNoCursor}`
       // COUNT() may come back as BigInt in newer Node/Prisma versions; coerce safely for JSON serialization
@@ -277,25 +343,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       status: p.status === 'PUBLISHED' ? 'ACTIVE' : p.status === 'READY' ? 'DRAFT' : 'DRAFT',
       vendor: null,
       productType: p.type || null,
-      updatedAt: (() => {
-        try {
-          const d = new Date(p.updatedAt)
-          const pad = (n: number) => String(n).padStart(2, '0')
-          const YYYY = d.getUTCFullYear()
-          const MM = pad(d.getUTCMonth() + 1)
-          const DD = pad(d.getUTCDate())
-          const hh = pad(d.getUTCHours())
-          const mm = pad(d.getUTCMinutes())
-          const ss = pad(d.getUTCSeconds())
-          return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss} UTC`
-        } catch {
-          return null
-        }
-      })(),
+      updatedAt: formatUtcDateTime(p.updatedAt),
       canonical: true,
       supplierId: p.supplierId,
       sku: p.sku,
       latestVersionId: p.latestVersionId,
+      designStudioReady: typeof p.designStudioReady === 'boolean' ? p.designStudioReady : p.designStudioReady === 1,
+      designStudioFamily: p.designStudioFamily ?? null,
+      designStudioLastTouchedAt: formatUtcDateTime(p.designStudioLastTouchedAt),
+      designStudioCoverageNotes: p.designStudioCoverageNotes ?? null,
     }))
     nextCursor = (() => {
       if (!hasMore || items.length === 0) return null
@@ -328,23 +384,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       status: e.node.status,
       vendor: e.node.vendor,
       productType: e.node.productType,
-      updatedAt: e.node.updatedAt
-        ? (() => {
-            try {
-              const d = new Date(e.node.updatedAt)
-              const pad = (n: number) => String(n).padStart(2, '0')
-              const YYYY = d.getUTCFullYear()
-              const MM = pad(d.getUTCMonth() + 1)
-              const DD = pad(d.getUTCDate())
-              const hh = pad(d.getUTCHours())
-              const mm = pad(d.getUTCMinutes())
-              const ss = pad(d.getUTCSeconds())
-              return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss} UTC`
-            } catch {
-              return e.node.updatedAt
-            }
-          })()
-        : null,
+      updatedAt: formatUtcDateTime(e.node.updatedAt),
     }))
     nextCursor = edges.length > 0 ? edges[edges.length - 1].cursor : null
   }
@@ -369,6 +409,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     canonical: useCanonical,
     totalCount: totalCountOut,
     batsonSyncState,
+    designStudioAccess,
   })
 }
 
@@ -389,6 +430,7 @@ export default function ProductsIndex() {
     canonical,
     totalCount,
     batsonSyncState,
+    designStudioAccess,
   } = useLoaderData<typeof loader>() as {
     items: ProductRow[]
     q: string
@@ -405,6 +447,7 @@ export default function ProductsIndex() {
     canonical?: boolean
     totalCount?: number
     batsonSyncState: BatsonSyncSnapshot | null
+    designStudioAccess: Awaited<ReturnType<typeof getDesignStudioAccess>>
   }
   const [params, setParams] = useSearchParams()
   const location = useLocation()
@@ -534,24 +577,35 @@ export default function ProductsIndex() {
   )
 
   const empty = items.length === 0
+  const dsFeatureEnabled = Boolean(canonical && designStudioAccess?.enabled)
+  const dsReadySelected = dsFeatureEnabled ? params.getAll('dsReady') : []
+  const dsFamilyValue = dsFeatureEnabled ? params.get('dsFamily') || '' : ''
 
-  // Columns chooser via URL param `columns`; fallback to defaults
-  const allColumns = [
+  const baseColumns = [
     { key: 'title', label: 'Title' },
     { key: 'status', label: 'Status' },
     { key: 'vendor', label: 'Vendor' },
     { key: 'productType', label: 'Type' },
     { key: 'updatedAt', label: 'Updated' },
   ] as const
-  const defaultColumnKeys = ['title', 'status', 'vendor', 'productType', 'updatedAt'] as const
-  const selectedColumnKeys = (() => {
-    const values = params.getAll('columns')
-    if (values.length === 0) return defaultColumnKeys as unknown as string[]
-    return values
-  })()
-  const headings = selectedColumnKeys.map(key => ({
-    title: allColumns.find(c => c.key === key)?.label || key,
-  })) as unknown as [{ title: string }, ...{ title: string }[]]
+  const dsColumns = dsFeatureEnabled
+    ? ([
+        { key: 'designStudioReady', label: 'DS Ready' },
+        { key: 'designStudioFamily', label: 'Family' },
+        { key: 'designStudioLastTouchedAt', label: 'Last DS touch' },
+      ] as const)
+    : ([] as const)
+  const allColumns = [...baseColumns, ...dsColumns]
+  const defaultColumnKeys = allColumns.map(c => c.key)
+  const selectedColumnKeysRaw = params.getAll('columns')
+  const selectedColumnKeys = (selectedColumnKeysRaw.length ? selectedColumnKeysRaw : defaultColumnKeys).filter(key =>
+    allColumns.some(c => c.key === key),
+  )
+  const activeColumnKeys = selectedColumnKeys.length ? selectedColumnKeys : defaultColumnKeys
+  const headings = activeColumnKeys.map(key => ({ title: allColumns.find(c => c.key === key)?.label || key })) as [
+    { title: string },
+    ...{ title: string }[],
+  ]
 
   return (
     <>
@@ -635,6 +689,8 @@ export default function ProductsIndex() {
               next.delete('q')
               next.delete('status')
               next.delete('columns')
+              next.delete('dsReady')
+              next.delete('dsFamily')
               setParams(next)
             }}
             filters={[
@@ -679,6 +735,50 @@ export default function ProductsIndex() {
                   />
                 ),
               },
+              ...(dsFeatureEnabled
+                ? [
+                    {
+                      key: 'dsReady',
+                      label: 'DS Ready',
+                      filter: (
+                        <ChoiceList
+                          title="Design Studio readiness"
+                          titleHidden
+                          choices={[
+                            { label: 'Ready', value: 'ready' },
+                            { label: 'Needs review', value: 'not-ready' },
+                          ]}
+                          selected={dsReadySelected}
+                          onChange={values => {
+                            const next = new URLSearchParams(params)
+                            next.delete('dsReady')
+                            const selectedValue = values?.[0]
+                            if (selectedValue) next.append('dsReady', selectedValue)
+                            setParams(next)
+                          }}
+                        />
+                      ),
+                    },
+                    {
+                      key: 'dsFamily',
+                      label: 'Family contains',
+                      filter: (
+                        <TextField
+                          label="Family contains"
+                          labelHidden
+                          autoComplete="off"
+                          value={dsFamilyValue}
+                          onChange={value => {
+                            const next = new URLSearchParams(params)
+                            if (value) next.set('dsFamily', value)
+                            else next.delete('dsFamily')
+                            setParams(next)
+                          }}
+                        />
+                      ),
+                    },
+                  ]
+                : []),
             ]}
             sortOptions={[
               { label: 'Updated', value: 'updatedAt desc', directionLabel: 'Newest first' },
@@ -867,7 +967,7 @@ export default function ProductsIndex() {
                     position={index}
                     selected={selectedResources.includes(item.id)}
                   >
-                    {selectedColumnKeys.map(key => (
+                    {activeColumnKeys.map(key => (
                       <IndexTable.Cell key={key}>
                         {key === 'title' ? (
                           <Link to={`/app/products/${item.id}`}>{item.title}</Link>
@@ -879,6 +979,25 @@ export default function ProductsIndex() {
                           <Text as="span">{item.productType || '-'}</Text>
                         ) : key === 'updatedAt' ? (
                           <Text as="span">{item.updatedAt || '-'}</Text>
+                        ) : key === 'designStudioReady' ? (
+                          canonical ? (
+                            <InlineStack gap="100" blockAlign="center">
+                              <Badge tone={item.designStudioReady ? 'success' : 'critical'}>
+                                {item.designStudioReady ? 'Ready' : 'Needs review'}
+                              </Badge>
+                              {!item.designStudioReady && item.designStudioCoverageNotes ? (
+                                <Tooltip content={item.designStudioCoverageNotes} preferredPosition="above">
+                                  <Icon source={AlertCircleIcon} tone="critical" />
+                                </Tooltip>
+                              ) : null}
+                            </InlineStack>
+                          ) : (
+                            <Text as="span">-</Text>
+                          )
+                        ) : key === 'designStudioFamily' ? (
+                          <Text as="span">{item.designStudioFamily || '-'}</Text>
+                        ) : key === 'designStudioLastTouchedAt' ? (
+                          <Text as="span">{item.designStudioLastTouchedAt || '-'}</Text>
                         ) : null}
                       </IndexTable.Cell>
                     ))}

@@ -1,0 +1,1 @@
+-- No-op migration: adding EXPORT to DesignBuildEventType enum (TEXT column) requires no schema change in SQLite.
