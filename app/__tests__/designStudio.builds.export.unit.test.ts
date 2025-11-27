@@ -3,9 +3,11 @@ import type { DesignBuildDetail } from '../lib/designStudio/types'
 import { exportDesignBuildPacket } from '../services/designStudio/exportBuild.server'
 import { DesignBuildActionError } from '../lib/designStudio/builds.server'
 
-const mockLoadDetail = vi.fn()
-const mockUpload = vi.fn()
-const mockCreateEvent = vi.fn()
+const { mockLoadDetail, mockUpload, mockCreateEvent } = vi.hoisted(() => ({
+  mockLoadDetail: vi.fn(),
+  mockUpload: vi.fn(),
+  mockCreateEvent: vi.fn(),
+}))
 
 vi.mock('../lib/designStudio/builds.server', async () => {
   const actual = await vi.importActual<typeof import('../lib/designStudio/builds.server')>(

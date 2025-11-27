@@ -32,6 +32,7 @@ export default defineConfig({
           'SHOPIFY_API_KEY=dev',
           'SHOPIFY_API_SECRET=dev',
           'SCOPES=read_products',
+          'DESIGN_STUDIO_V1=1',
           // Build Remix assets
           'npm run -s build',
           '&&',
@@ -52,7 +53,7 @@ export default defineConfig({
               ]),
           '&&',
           `DATABASE_URL=${E2E_DB}`,
-          'ALLOW_HQ_OVERRIDE=1 SHOPIFY_APP_URL=http://127.0.0.1:3000 SHOPIFY_API_KEY=dev SHOPIFY_API_SECRET=dev SCOPES=read_products npm run -s start',
+          'ALLOW_HQ_OVERRIDE=1 SHOPIFY_APP_URL=http://127.0.0.1:3000 SHOPIFY_API_KEY=dev SHOPIFY_API_SECRET=dev SCOPES=read_products DESIGN_STUDIO_V1=1 npm run -s start',
         ].join(' '),
         url: 'http://127.0.0.1:3000',
         reuseExistingServer: !process.env.CI,

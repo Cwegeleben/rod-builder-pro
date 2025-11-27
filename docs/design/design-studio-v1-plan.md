@@ -1,6 +1,6 @@
 # Design Studio v1.0 Plan
 
-_Last updated: 2025-11-26_
+_Last updated: 2025-11-27_
 
 ## 1. Goals
 
@@ -62,6 +62,15 @@ _Last updated: 2025-11-26_
 
 ## 7. Storefront UX (App Proxy)
 
+### Phase 2.0 storefront shell (2025-11-27)
+
+- `/apps/proxy/design` now renders the mocked wizard shell behind `DESIGN_STUDIO_V1` + tenant gating. Loader lives in `app/routes/apps.proxy.design.tsx` and reuses `getDesignStudioAccess` so tenants without DS enabled still see the lock screen.
+- Mock config + component inventory are centralized in `app/lib/designStudio/storefront.mock.ts`, with React hooks (`app/hooks/useDesignStorefront.ts`) standing in for the future `/api/design-studio/config` + `/api/design-studio/options` endpoints.
+- Selector UI ships with Polaris primitives only (no Frame) plus Tailwind utility wrappers so it is proxy-safe. Build drawer supports desktop (side card) and mobile (bottom sheet) layouts; selections auto-open the drawer.
+- Smoke coverage now lives in `tests/e2e/design.storefront.proxy.inline.spec.ts`, and the Remix loader is covered by `app/__tests__/apps.proxy.design.loader.test.ts` to ensure flag/tenant logic stays intact.
+
+### Wizard steps
+
 - Single wizard split into four steps:
   1. **Baseline**: choose use case + experience level; map to recommended families.
   2. **Blank Selection**: surface curated blanks with compatibility badges; disable SKUs flagged non-ready.
@@ -98,8 +107,9 @@ _Last updated: 2025-11-26_
 
 ## 12. Immediate Next Steps
 
-1. Draft the Phase 0 Prisma migration (models + enums) and confirm with a `prisma migrate dev` dry run.
-2. Extend the importer normalization pipeline (packages/importer + shared libraries) to emit the new `designStudio.*` fields and hashes.
-3. Backfill Batson SKU metadata using the importer snapshot tooling, capturing before/after metrics in `docs/importer/`.
-4. Add the `/app/products` table columns + filters so sourcing can validate importer output quickly.
-5. Stand up the `designStudio.v1` feature flag + tenant tier setting to safely gate downstream UI work.
+1. Wire `/apps/proxy/design` to real config + options APIs (replace the mock hooks once `/api/design-studio/config` + `/api/design-studio/options` land) and persist build drafts server-side.
+2. Draft the Phase 0 Prisma migration (models + enums) and confirm with a `prisma migrate dev` dry run.
+3. Extend the importer normalization pipeline (packages/importer + shared libraries) to emit the new `designStudio.*` fields and hashes.
+4. Backfill Batson SKU metadata using the importer snapshot tooling, capturing before/after metrics in `docs/importer/`.
+5. Add the `/app/products` table columns + filters so sourcing can validate importer output quickly.
+6. Stand up the `designStudio.v1` feature flag + tenant tier setting to safely gate downstream UI work (flag exists; need rollout checklist per tenant).
