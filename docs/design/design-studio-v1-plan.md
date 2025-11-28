@@ -69,6 +69,15 @@ _Last updated: 2025-11-27_
 - Selector UI ships with Polaris primitives only (no Frame) plus Tailwind utility wrappers so it is proxy-safe. Build drawer supports desktop (side card) and mobile (bottom sheet) layouts; selections auto-open the drawer.
 - Smoke coverage now lives in `tests/e2e/design.storefront.proxy.inline.spec.ts`, and the Remix loader is covered by `app/__tests__/apps.proxy.design.loader.test.ts` to ensure flag/tenant logic stays intact.
 
+### Theme App Extension rollout (Theme Editor)
+
+- Ship a Theme App Extension under `extensions/design-studio` with an app block such as `blocks/rbp-design-studio.liquid` that renders an iframe pointing to `/apps/proxy/design?shop={{ shop.domain }}`. Block schema exposes merchant-facing settings (title copy, iframe height, optional background styles) so it drops cleanly into any theme section.
+- Document merchant install + testing steps in `docs/design/design-studio-theme-extension.md` so onboarding can link a single guide.
+- Update `shopify.app.*.toml` to register the extension and wire deployments through our existing Shopify CLI workflow. Bundle any required assets (lightweight CSS/JS for sizing) with the extension so merchants do not need to edit theme code manually.
+- Harden the proxy route for theme loads: accept the Theme Editor’s signed query, validate HMAC or JWT to resolve shop context without an Admin session, and reuse tenant gating plus curated config. Issue a short-lived JWT per request so the iframe can call DS APIs securely.
+- During OAuth install capture each shop’s Storefront API credentials, persist them, and update the wizard/server APIs to fetch products, variants, and build carts via that shop’s Storefront API token. Cart or checkout creation should return URLs scoped to the merchant’s domain so shoppers stay onsite.
+- Document the end-to-end flow (install → add “Rod Design Studio” section → publish) and add automated tests covering theme iframe loads plus Storefront API fallbacks for shops missing tokens.
+
 ### Wizard steps
 
 - Single wizard split into four steps:

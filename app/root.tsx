@@ -1,7 +1,22 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteError, isRouteErrorResponse } from '@remix-run/react'
-import type { LinksFunction } from '@remix-run/node'
+import {
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+  useRouteError,
+  isRouteErrorResponse,
+  useLoaderData,
+  useRouteLoaderData,
+} from '@remix-run/react'
+import { json, type LinksFunction } from '@remix-run/node'
 import './styles/globals.css'
 import './styles/theme.css'
+
+export const loader = () => {
+  const assetBaseUrl = process.env.SHOPIFY_APP_URL ?? ''
+  return json({ assetBaseUrl })
+}
 
 export const links: LinksFunction = () => [
   { rel: 'preconnect', href: 'https://cdn.shopify.com/' },
@@ -9,10 +24,12 @@ export const links: LinksFunction = () => [
 ]
 
 export default function App() {
+  const { assetBaseUrl } = useLoaderData<typeof loader>()
   return (
     <html>
       <head>
         <meta charSet="utf-8" />
+        {assetBaseUrl ? <base href={assetBaseUrl} /> : null}
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <Meta />
         <Links />
@@ -37,6 +54,8 @@ function hasStatus(err: unknown): err is { status?: number; message?: string } {
   return typeof err === 'object' && err !== null && 'status' in (err as Record<string, unknown>)
 }
 export function ErrorBoundary() {
+  const rootData = useRouteLoaderData<typeof loader>('root')
+  const assetBaseUrl = rootData?.assetBaseUrl ?? ''
   const error = useRouteError()
   let status = 500
   let message = 'An unexpected error occurred.'
@@ -94,6 +113,7 @@ export function ErrorBoundary() {
   return (
     <html>
       <head>
+        {assetBaseUrl ? <base href={assetBaseUrl} /> : null}
         <Meta />
         <Links />
         <title>{message}</title>

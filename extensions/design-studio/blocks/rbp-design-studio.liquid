@@ -1,0 +1,115 @@
+{% liquid
+  assign settings = block.settings
+  assign heading = settings.heading
+  assign subheading = settings.subheading
+  assign height = settings.iframe_height | default: 900
+  assign proxy_path = settings.proxy_path | default: '/apps/proxy/design'
+  assign show_border = settings.show_border
+  assign background = settings.background | default: 'surface'
+  assign query_params = shop.permanent_domain | prepend: 'shop='
+  assign query_params = query_params | append: '&rbp_theme=1'
+  assign block_token = block.id | url_encode
+  assign query_params = query_params | append: '&rbp_theme_section=' | append: block_token
+  if settings.append_preview_flag and request.design_mode
+    assign query_params = query_params | append: '&preview=1'
+  endif
+  if request.design_mode
+    if request.preview_theme_id
+      assign query_params = query_params | append: '&preview_theme_id=' | append: request.preview_theme_id
+    endif
+    assign query_params = query_params | append: '&_fd=0&pb=0'
+  endif
+  assign iframe_url = proxy_path | append: '?' | append: query_params
+%}
+
+<link rel='stylesheet' href='{{ 'rbp-design-studio.css' | asset_url }}' media='all'>
+
+<div
+  class='rbp-design-studio rbp-design-studio--background-{{ background }}{% if show_border %} rbp-design-studio--border{% endif %}'
+  style='--rbp-design-studio-height: {{ height }}px;'
+>
+  <div class='rbp-design-studio__inner'>
+    {% if heading != blank or subheading != blank %}
+      <div class='rbp-design-studio__header'>
+        {% if heading != blank %}
+          <h2 class='rbp-design-studio__title'>{{ heading | escape }}</h2>
+        {% endif %}
+        {% if subheading != blank %}
+          <p class='rbp-design-studio__subheading'>{{ subheading | escape }}</p>
+        {% endif %}
+      </div>
+    {% endif %}
+    <div class='rbp-design-studio__frame'>
+      <iframe
+        src='{{ iframe_url }}'
+        title='{{ 'blocks.rbp-design-studio.iframe_title' | t }}'
+        allow='clipboard-write; fullscreen'
+        allowfullscreen
+        loading='lazy'
+        scrolling='yes'
+        width='100%'
+        height='{{ height }}'
+      ></iframe>
+    </div>
+  </div>
+</div>
+
+{% schema %}
+{
+  "name": "Rod Design Studio",
+  "target": "section",
+  "settings": [
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Rod Design Studio"
+    },
+    {
+      "type": "textarea",
+      "id": "subheading",
+      "label": "Subheading",
+      "default": "Guide shoppers through curated blank, handle, and guide selections."
+    },
+    {
+      "type": "range",
+      "id": "iframe_height",
+      "label": "Wizard height (px)",
+      "min": 600,
+      "max": 1600,
+      "step": 50,
+      "default": 900
+    },
+    {
+      "type": "radio",
+      "id": "background",
+      "label": "Background",
+      "default": "surface",
+      "options": [
+        { "value": "surface", "label": "Theme default" },
+        { "value": "muted", "label": "Muted" },
+        { "value": "contrast", "label": "Contrast" }
+      ]
+    },
+    {
+      "type": "checkbox",
+      "id": "show_border",
+      "label": "Show border",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "append_preview_flag",
+      "label": "Append preview flag in Theme Editor",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "proxy_path",
+      "label": "Proxy path",
+      "default": "/apps/proxy/design",
+      "info": "Override only if your proxy route lives at a different path."
+    }
+  ]
+}
+{% endschema %}

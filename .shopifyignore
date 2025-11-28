@@ -1,0 +1,2 @@
+# Ignore deployment snapshots so Shopify CLI only sees active config files
+snapshots/

@@ -1,8 +1,9 @@
-import type { LoaderFunctionArgs } from '@remix-run/node'
+import type { LoaderFunctionArgs, LinksFunction } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { useFetcher, useLoaderData } from '@remix-run/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  AppProvider as PolarisAppProvider,
   Badge,
   BlockStack,
   Button,
@@ -14,6 +15,8 @@ import {
   Tabs,
   Text,
 } from '@shopify/polaris'
+import polarisStyles from '@shopify/polaris/build/esm/styles.css?url'
+import polarisTranslations from '@shopify/polaris/locales/en.json'
 import { ClipboardCheckIcon, CartIcon } from '@shopify/polaris-icons'
 import { getDesignStudioAccess } from '../lib/designStudio/access.server'
 import { summarizeSelections } from '../lib/designStudio/storefront.summary'
@@ -35,10 +38,43 @@ type SaveFeedback = {
   message?: string
 }
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const designStudioAccess = await getDesignStudioAccess(request)
-  return json({ designStudioAccess })
+type DesignStudioRequestContext = {
+  source: 'theme-extension' | 'app-proxy'
+  themeSectionId?: string | null
 }
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url)
+  const isThemeRequest = url.searchParams.get('rbp_theme') === '1'
+  const shopParam = url.searchParams.get('shop')
+  if (isThemeRequest && !shopParam) {
+    throw new Response('Shop parameter required for theme loads', { status: 400 })
+  }
+  const designStudioAccess = await getDesignStudioAccess(request)
+  const requestContext: DesignStudioRequestContext = {
+    source: isThemeRequest ? 'theme-extension' : 'app-proxy',
+    themeSectionId: url.searchParams.get('rbp_theme_section'),
+  }
+  const frameAncestors = buildFrameAncestors(designStudioAccess.shopDomain)
+  return json(
+    { designStudioAccess, requestContext },
+    {
+      headers: {
+        'Content-Security-Policy': `frame-ancestors ${frameAncestors.join(' ')};`,
+      },
+    },
+  )
+}
+
+function buildFrameAncestors(shopDomain: string | null): string[] {
+  const ancestors = new Set<string>(['https://admin.shopify.com', 'https://*.myshopify.com', 'https://*.spin.dev'])
+  if (shopDomain) {
+    ancestors.add(`https://${shopDomain}`)
+  }
+  return Array.from(ancestors)
+}
+
+export const links: LinksFunction = () => [{ rel: 'stylesheet', href: polarisStyles }]
 
 export default function DesignStudioStorefrontRoute() {
   const { designStudioAccess } = useLoaderData<typeof loader>()
@@ -138,23 +174,22 @@ export default function DesignStudioStorefrontRoute() {
   )
 
   const selectionSnapshots = useMemo<StorefrontSelectionSnapshot[]>(() => {
-    return Object.entries(selections)
-      .map(([role, option]) => {
-        if (!option) return null
-        return {
-          role: role as DesignStorefrontPartRole,
-          option: {
-            id: option.id,
-            title: option.title,
-            price: option.price,
-            sku: option.sku ?? null,
-            vendor: option.vendor ?? null,
-            notes: option.notes ?? null,
-            badge: option.badge ?? null,
-          },
-        }
+    return Object.entries(selections).reduce<StorefrontSelectionSnapshot[]>((acc, [role, option]) => {
+      if (!option) return acc
+      acc.push({
+        role: role as DesignStorefrontPartRole,
+        option: {
+          id: option.id,
+          title: option.title,
+          price: option.price,
+          sku: option.sku ?? undefined,
+          vendor: option.vendor ?? undefined,
+          notes: option.notes ?? undefined,
+          badge: option.badge ?? undefined,
+        },
       })
-      .filter((entry): entry is StorefrontSelectionSnapshot => entry !== null)
+      return acc
+    }, [])
   }, [selections])
 
   const stepSnapshots = useMemo<StorefrontStepSnapshot[]>(
@@ -175,7 +210,10 @@ export default function DesignStudioStorefrontRoute() {
     }
     const payload: StorefrontBuildPayload = {
       selections: selectionSnapshots,
-      summary,
+      summary: {
+        ...summary,
+        basePrice: config.basePrice ?? 0,
+      },
       steps: stepSnapshots,
       hero: config.hero,
       featureFlags: config.featureFlags,
@@ -197,78 +235,82 @@ export default function DesignStudioStorefrontRoute() {
 
   if (!designStudioAccess.enabled) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-12">
-        <BlockStack gap="400">
-          <BlockStack gap="050">
-            <Text as="h1" variant="headingLg">
-              Design Studio unavailable
-            </Text>
-            <Text as="p" tone="subdued">
-              This shop is not enrolled in Design Studio yet. Reach out to your RBP partner manager to enable the
-              storefront builder preview.
-            </Text>
+      <PolarisAppProvider i18n={polarisTranslations}>
+        <div className="mx-auto max-w-3xl px-4 py-12">
+          <BlockStack gap="400">
+            <BlockStack gap="050">
+              <Text as="h1" variant="headingLg">
+                Design Studio unavailable
+              </Text>
+              <Text as="p" tone="subdued">
+                This shop is not enrolled in Design Studio yet. Reach out to your RBP partner manager to enable the
+                storefront builder preview.
+              </Text>
+            </BlockStack>
           </BlockStack>
-        </BlockStack>
-      </div>
+        </div>
+      </PolarisAppProvider>
     )
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-6xl px-4 py-8">
-        <BlockStack gap="400">
-          <Header configLoading={configLoading} hero={config?.hero} tier={config?.tier ?? designStudioAccess.tier} />
-          <InlineStack align="end">
-            <Button icon={CartIcon} onClick={() => setDrawerOpen(true)} accessibilityLabel="Open build list">
-              {`Build (${summary.selectedParts}/${summary.totalParts} parts - ${formatCurrency(summary.subtotal)})`}
-            </Button>
-          </InlineStack>
-          <div className="flex flex-col gap-6 md:flex-row">
-            <div className="flex-1">
-              <ComponentSelector
-                loading={configLoading || !activeStep}
-                steps={steps}
-                activeStep={activeStep}
-                activeRole={activeRole}
-                onStepChange={index => setActiveStepId(steps[index]?.id ?? null)}
-                onRoleChange={setActiveRole}
-                options={options}
-                optionsLoading={optionsLoading}
-                selections={selections}
-                onSelect={handleSelectOption}
-                formatCurrency={formatCurrency}
-              />
+    <PolarisAppProvider i18n={polarisTranslations}>
+      <div className="min-h-screen bg-slate-50">
+        <div className="mx-auto max-w-6xl px-4 py-8">
+          <BlockStack gap="400">
+            <Header configLoading={configLoading} hero={config?.hero} tier={config?.tier ?? designStudioAccess.tier} />
+            <InlineStack align="end">
+              <Button icon={CartIcon} onClick={() => setDrawerOpen(true)} accessibilityLabel="Open build list">
+                {`Build (${summary.selectedParts}/${summary.totalParts} parts - ${formatCurrency(summary.subtotal)})`}
+              </Button>
+            </InlineStack>
+            <div className="flex flex-col gap-6 md:flex-row">
+              <div className="flex-1">
+                <ComponentSelector
+                  loading={configLoading || !activeStep}
+                  steps={steps}
+                  activeStep={activeStep}
+                  activeRole={activeRole}
+                  onStepChange={index => setActiveStepId(steps[index]?.id ?? null)}
+                  onRoleChange={setActiveRole}
+                  options={options}
+                  optionsLoading={optionsLoading}
+                  selections={selections}
+                  onSelect={handleSelectOption}
+                  formatCurrency={formatCurrency}
+                />
+              </div>
+              <div className="hidden w-full max-w-sm md:block">
+                <BuildDrawer
+                  steps={steps}
+                  selections={selections}
+                  summary={summary}
+                  formatCurrency={formatCurrency}
+                  onJumpToRole={handleJumpToRole}
+                  onSave={handleSaveBuild}
+                  saving={saveFetcher.state !== 'idle'}
+                  canSave={canSaveBuild}
+                  saveResult={saveFeedback}
+                />
+              </div>
             </div>
-            <div className="hidden w-full max-w-sm md:block">
-              <BuildDrawer
-                steps={steps}
-                selections={selections}
-                summary={summary}
-                formatCurrency={formatCurrency}
-                onJumpToRole={handleJumpToRole}
-                onSave={handleSaveBuild}
-                saving={saveFetcher.state !== 'idle'}
-                canSave={canSaveBuild}
-                saveResult={saveFeedback}
-              />
-            </div>
-          </div>
-        </BlockStack>
+          </BlockStack>
+        </div>
+        <MobileDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          steps={steps}
+          selections={selections}
+          summary={summary}
+          formatCurrency={formatCurrency}
+          onJumpToRole={handleJumpToRole}
+          onSave={handleSaveBuild}
+          saving={saveFetcher.state !== 'idle'}
+          canSave={canSaveBuild}
+          saveResult={saveFeedback}
+        />
       </div>
-      <MobileDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        steps={steps}
-        selections={selections}
-        summary={summary}
-        formatCurrency={formatCurrency}
-        onJumpToRole={handleJumpToRole}
-        onSave={handleSaveBuild}
-        saving={saveFetcher.state !== 'idle'}
-        canSave={canSaveBuild}
-        saveResult={saveFeedback}
-      />
-    </div>
+    </PolarisAppProvider>
   )
 }
 

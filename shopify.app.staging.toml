@@ -7,6 +7,11 @@ embedded = true
 name = "rbp-app-staging"
 handle = "rbp-app-staging"
 
+[app_proxy]
+  prefix = "apps"
+  subpath = "proxy"
+  url = "https://rbp-app-staging.fly.dev/apps/proxy"
+
 [build]
 automatically_update_urls_on_dev = false
 

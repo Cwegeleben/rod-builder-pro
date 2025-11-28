@@ -39,7 +39,12 @@ describe('apps.proxy.design loader', () => {
 
     const response = await runLoader()
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({ designStudioAccess: enabledAccess })
+    await expect(response.json()).resolves.toEqual({
+      designStudioAccess: enabledAccess,
+      requestContext: { source: 'app-proxy', themeSectionId: null },
+    })
+    expect(response.headers.get('Content-Security-Policy')).toContain('https://*.myshopify.com')
+    expect(response.headers.get('Content-Security-Policy')).toContain('https://admin.shopify.com')
     expect(mockAccess).toHaveBeenCalledWith(expect.any(Request))
   })
 
@@ -55,6 +60,24 @@ describe('apps.proxy.design loader', () => {
 
     const response = await runLoader({ request: createRequest('https://example.com/apps/proxy/design') })
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({ designStudioAccess: disabled })
+    await expect(response.json()).resolves.toEqual({
+      designStudioAccess: disabled,
+      requestContext: { source: 'app-proxy', themeSectionId: null },
+    })
+    expect(response.headers.get('Content-Security-Policy')).toContain('https://*.myshopify.com')
+  })
+
+  it('requires shop param for theme requests', async () => {
+    mockAccess.mockResolvedValue({
+      enabled: true,
+      tier: TIER_PLUS,
+      config: null,
+      shopDomain: 'example.myshopify.com',
+      reason: 'enabled',
+    })
+
+    await expect(
+      runLoader({ request: createRequest('https://example.com/apps/proxy/design?rbp_theme=1') }),
+    ).rejects.toMatchObject({ status: 400 })
   })
 })

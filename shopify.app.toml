@@ -8,6 +8,11 @@ embedded = true
 handle = "rbp-app"
 application_url = "https://rbp-app.fly.dev"
 
+[app_proxy]
+  prefix = "apps"
+  subpath = "proxy"
+  url = "https://rbp-app.fly.dev/apps/proxy"
+
 [build]
 automatically_update_urls_on_dev = false
 

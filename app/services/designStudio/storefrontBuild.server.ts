@@ -108,9 +108,12 @@ export async function createDesignStorefrontBuild({
     blankTitle: blankSelection?.option.title ?? null,
     componentSummary: componentSummary as Prisma.InputJsonValue,
     metadata: metadata as Prisma.InputJsonValue,
-    notesJson: normalized.notes ?? null,
     bomHash: hashSelections(normalized.selections),
     submittedAt: now,
+  }
+
+  if (normalized.notes != null) {
+    baseCreate.notesJson = normalized.notes
   }
 
   const build = await persistWithReference(baseCreate, access.shopDomain)
