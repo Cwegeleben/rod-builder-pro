@@ -2,8 +2,21 @@ import type { Prisma } from '@prisma/client'
 import { DesignStudioTier } from '@prisma/client'
 import { prisma } from '../../db.server'
 import { isDesignStudioFeatureEnabled } from '../flags.server'
+import { isHqShopDomain } from '../access.server'
 
 const SHOP_PARAM_KEYS = ['shop', 'shopDomain', 'shopifyShop', 'shop-name']
+
+const DEFAULT_AUTO_ENROLL = ['rbp-hq-dev.myshopify.com']
+const AUTO_ENROLL_SHOPS = new Set(
+  (
+    (process.env.DESIGN_STUDIO_AUTO_ENROLL || DEFAULT_AUTO_ENROLL.join(','))
+      .split(/[,\s]+/)
+      .map(value => normalizeShopDomain(value) || '')
+      .filter(Boolean) as string[]
+  ).map(domain => domain.toLowerCase()),
+)
+
+const AUTO_ENROLL_TIER = resolveAutoEnrollTier()
 
 let _authenticate: typeof import('../../shopify.server').authenticate | null = null
 async function getAuthenticate() {
@@ -97,6 +110,8 @@ export async function getDesignStudioAccess(request: Request): Promise<DesignStu
   }
   const tenant = await prisma.tenantSettings.findUnique({ where: { shopDomain } })
   if (!tenant) {
+    const fallback = maybeAutoEnroll(shopDomain)
+    if (fallback) return fallback
     return { ...DISABLED_ACCESS, shopDomain, reason: 'tenant-missing' }
   }
   if (!tenant.designStudioEnabled) {
@@ -106,6 +121,33 @@ export async function getDesignStudioAccess(request: Request): Promise<DesignStu
     enabled: true,
     tier: tenant.designStudioTier,
     config: tenant.designStudioConfig as Prisma.JsonValue | null,
+    shopDomain,
+    reason: 'enabled',
+  }
+}
+
+function resolveAutoEnrollTier(): DesignStudioTier {
+  const raw = (process.env.DESIGN_STUDIO_AUTO_ENROLL_TIER || 'PLUS').toUpperCase()
+  if (raw === 'STARTER') return DesignStudioTier.STARTER
+  if (raw === 'CORE') return DesignStudioTier.CORE
+  return DesignStudioTier.PLUS
+}
+
+function shouldAutoEnrollShop(shopDomain: string | null): boolean {
+  if (!shopDomain) return false
+  const normalized = normalizeShopDomain(shopDomain)
+  if (!normalized) return false
+  if (AUTO_ENROLL_SHOPS.has(normalized.toLowerCase())) return true
+  return isHqShopDomain(shopDomain)
+}
+
+function maybeAutoEnroll(shopDomain: string | null): DesignStudioAccess | null {
+  if (!shouldAutoEnrollShop(shopDomain)) return null
+  console.warn('[designStudio] Falling back to auto-enrolled tenant', { shopDomain })
+  return {
+    enabled: true,
+    tier: AUTO_ENROLL_TIER,
+    config: null,
     shopDomain,
     reason: 'enabled',
   }
