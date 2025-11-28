@@ -5,6 +5,25 @@ import type {
   DesignStorefrontPartRole,
 } from '../lib/designStudio/storefront.mock'
 
+export type DesignStorefrontRequestOptions = {
+  shopDomain?: string | null
+  themeRequest?: boolean
+  themeSectionId?: string | null
+}
+
+export function appendDesignStudioParams(params: URLSearchParams, options?: DesignStorefrontRequestOptions) {
+  if (!options) return
+  if (options.shopDomain) {
+    params.set('shop', options.shopDomain)
+  }
+  if (options.themeRequest) {
+    params.set('rbp_theme', '1')
+  }
+  if (options.themeSectionId) {
+    params.set('rbp_theme_section', options.themeSectionId)
+  }
+}
+
 export type UseDesignConfigResult = {
   data: DesignStorefrontConfig | null
   loading: boolean
@@ -17,10 +36,17 @@ export type UseDesignOptionsResult = {
   error: Error | null
 }
 
-export function useDesignConfig(): UseDesignConfigResult {
+export function useDesignConfig(options?: DesignStorefrontRequestOptions): UseDesignConfigResult {
   const [data, setData] = useState<DesignStorefrontConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
+
+  const endpoint = useMemo(() => {
+    const params = new URLSearchParams()
+    appendDesignStudioParams(params, options)
+    const query = params.toString()
+    return query ? `/api/design-studio/config?${query}` : '/api/design-studio/config'
+  }, [options?.shopDomain, options?.themeRequest, options?.themeSectionId])
 
   useEffect(() => {
     let cancelled = false
@@ -28,7 +54,7 @@ export function useDesignConfig(): UseDesignConfigResult {
     async function fetchConfig() {
       setLoading(true)
       try {
-        const response = await fetch('/api/design-studio/config', { signal: controller.signal })
+        const response = await fetch(endpoint, { signal: controller.signal })
         if (!response.ok) {
           throw new Error(`Failed to load storefront config: ${response.status}`)
         }
@@ -48,12 +74,15 @@ export function useDesignConfig(): UseDesignConfigResult {
       cancelled = true
       controller.abort()
     }
-  }, [])
+  }, [endpoint])
 
   return useMemo(() => ({ data, loading, error }), [data, loading, error])
 }
 
-export function useDesignOptions(role: DesignStorefrontPartRole | null): UseDesignOptionsResult {
+export function useDesignOptions(
+  role: DesignStorefrontPartRole | null,
+  options?: DesignStorefrontRequestOptions,
+): UseDesignOptionsResult {
   const [data, setData] = useState<DesignStorefrontOption[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -73,6 +102,7 @@ export function useDesignOptions(role: DesignStorefrontPartRole | null): UseDesi
       try {
         const params = new URLSearchParams()
         params.set('role', currentRole)
+        appendDesignStudioParams(params, options)
         const response = await fetch(`/api/design-studio/options?${params.toString()}`, { signal: controller.signal })
         if (!response.ok) {
           throw new Error(`Failed to load options (${response.status})`)
@@ -93,7 +123,7 @@ export function useDesignOptions(role: DesignStorefrontPartRole | null): UseDesi
       cancelled = true
       controller.abort()
     }
-  }, [role])
+  }, [role, options?.shopDomain, options?.themeRequest, options?.themeSectionId])
 
   return useMemo(() => ({ data, loading, error }), [data, loading, error])
 }

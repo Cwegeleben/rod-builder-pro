@@ -25,12 +25,18 @@ import {
   type DesignStorefrontOption,
   type DesignStorefrontStep,
 } from '../lib/designStudio/storefront.mock'
-import { useDesignConfig, useDesignOptions } from '../hooks/useDesignStorefront'
+import {
+  appendDesignStudioParams,
+  type DesignStorefrontRequestOptions,
+  useDesignConfig,
+  useDesignOptions,
+} from '../hooks/useDesignStorefront'
 import type {
   StorefrontBuildPayload,
   StorefrontSelectionSnapshot,
   StorefrontStepSnapshot,
 } from '../services/designStudio/storefrontBuild.server'
+import { buildShopifyCorsHeaders } from '../utils/shopifyCors.server'
 
 type SaveFeedback = {
   status: 'idle' | 'success' | 'error'
@@ -59,9 +65,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json(
     { designStudioAccess, requestContext },
     {
-      headers: {
+      headers: buildShopifyCorsHeaders(request, {
         'Content-Security-Policy': `frame-ancestors ${frameAncestors.join(' ')};`,
-      },
+      }),
     },
   )
 }
@@ -77,8 +83,17 @@ function buildFrameAncestors(shopDomain: string | null): string[] {
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: polarisStyles }]
 
 export default function DesignStudioStorefrontRoute() {
-  const { designStudioAccess } = useLoaderData<typeof loader>()
-  const { data: config, loading: configLoading } = useDesignConfig()
+  const { designStudioAccess, requestContext } = useLoaderData<typeof loader>()
+  const themeRequest = requestContext.source === 'theme-extension'
+  const requestOptions = useMemo<DesignStorefrontRequestOptions>(
+    () => ({
+      shopDomain: designStudioAccess.shopDomain,
+      themeRequest,
+      themeSectionId: requestContext.themeSectionId ?? null,
+    }),
+    [designStudioAccess.shopDomain, themeRequest, requestContext.themeSectionId],
+  )
+  const { data: config, loading: configLoading } = useDesignConfig(requestOptions)
   const saveFetcher = useFetcher<{ ok: boolean; reference?: string; error?: string }>()
   const steps = config?.steps ?? []
   const [activeStepId, setActiveStepId] = useState<string | null>(steps[0]?.id ?? null)
@@ -133,7 +148,7 @@ export default function DesignStudioStorefrontRoute() {
     })
   }, [orderedRoles])
 
-  const { data: options, loading: optionsLoading } = useDesignOptions(activeRole)
+  const { data: options, loading: optionsLoading } = useDesignOptions(activeRole, requestOptions)
 
   const handleSelectOption = useCallback((option: DesignStorefrontOption) => {
     setSelections(prev => ({ ...prev, [option.role]: option }))
@@ -199,6 +214,13 @@ export default function DesignStudioStorefrontRoute() {
 
   const canSaveBuild = selectionSnapshots.length > 0 && !!config
 
+  const buildsActionUrl = useMemo(() => {
+    const params = new URLSearchParams()
+    appendDesignStudioParams(params, requestOptions)
+    const query = params.toString()
+    return query ? `/api/design-studio/builds?${query}` : '/api/design-studio/builds'
+  }, [requestOptions.shopDomain, requestOptions.themeRequest, requestOptions.themeSectionId])
+
   const handleSaveBuild = useCallback(() => {
     if (!selectionSnapshots.length) {
       setSaveFeedback({ status: 'error', message: 'Select at least one component before saving.' })
@@ -221,8 +243,8 @@ export default function DesignStudioStorefrontRoute() {
     const formData = new FormData()
     formData.set('payload', JSON.stringify(payload))
     setSaveFeedback({ status: 'idle' })
-    saveFetcher.submit(formData, { method: 'post', action: '/api/design-studio/builds' })
-  }, [config, selectionSnapshots, stepSnapshots, summary, saveFetcher])
+    saveFetcher.submit(formData, { method: 'post', action: buildsActionUrl })
+  }, [config, selectionSnapshots, stepSnapshots, summary, buildsActionUrl, saveFetcher])
 
   useEffect(() => {
     if (saveFetcher.state !== 'idle' || !saveFetcher.data) return

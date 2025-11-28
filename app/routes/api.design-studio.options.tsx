@@ -2,17 +2,18 @@ import type { LoaderFunctionArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { getDesignStudioAccess } from '../lib/designStudio/access.server'
 import { isDesignStorefrontPartRole, loadDesignStorefrontOptions } from '../lib/designStudio/storefront.server'
+import { buildShopifyCorsHeaders } from '../utils/shopifyCors.server'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const access = await getDesignStudioAccess(request)
   if (!access.enabled) {
-    return json({ error: access.reason }, { status: 403 })
+    return json({ error: access.reason }, { status: 403, headers: buildShopifyCorsHeaders(request) })
   }
 
   const url = new URL(request.url)
   const roleParam = url.searchParams.get('role')
   if (!roleParam || !isDesignStorefrontPartRole(roleParam)) {
-    return json({ options: [] }, { status: 400 })
+    return json({ options: [] }, { status: 400, headers: buildShopifyCorsHeaders(request) })
   }
 
   const takeParam = url.searchParams.get('take')
@@ -20,10 +21,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   try {
     const options = await loadDesignStorefrontOptions({ access, role: roleParam, take })
-    return json({ options })
+    return json({ options }, { headers: buildShopifyCorsHeaders(request) })
   } catch (error) {
     console.error('[designStudio] Failed to load options', error)
-    return json({ options: [] }, { status: 500 })
+    return json({ options: [] }, { status: 500, headers: buildShopifyCorsHeaders(request) })
   }
 }
 

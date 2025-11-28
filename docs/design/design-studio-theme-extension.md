@@ -29,6 +29,7 @@ The Theme App Extension located in `extensions/design-studio` ships a configurab
 
 - The block injects identifying query parameters (`rbp_theme=1`, `rbp_theme_section={id}`) so the Remix loader can distinguish theme iframe traffic, require the `shop` param, and serve the correct tenant config.
 - `/apps/proxy/design` now returns a `requestContext` payload to the client, paving the way for storefront-specific behavior (Storefront API calls, JWT issuance, etc.).
+- Client-side fetches to `/api/design-studio/*` automatically forward the `shop` + theme identifiers so Fly-hosted APIs can resolve the tenant while responding with `Access-Control-Allow-Origin: https://{shop}.myshopify.com` for Theme Editor CORS.
 - Merchants do **not** need to edit theme liquid; all assets (CSS + translations) are bundled with the extension.
 
 ## Testing Checklist
