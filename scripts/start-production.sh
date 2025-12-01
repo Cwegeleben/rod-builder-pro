@@ -52,6 +52,5 @@ node -e "import('./scripts/preflight/ensure-schema.mjs').then(m=>m.ensure()).cat
 # Launch remix server binding to 0.0.0.0:$PORT
 export PORT="${PORT:-3000}"
 export HOST="${HOST:-0.0.0.0}"
-echo "[startup] launching remix-serve --host ${HOST} --port ${PORT}" >&2
-# Invoke remix-serve and explicitly bind host and port for Fly proxy
-exec ./node_modules/.bin/remix-serve ./build/server/index.js --host "$HOST" --port "$PORT"
+echo "[startup] launching custom remix server --host ${HOST} --port ${PORT}" >&2
+exec node ./server/remix-serve.mjs
