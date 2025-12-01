@@ -18,6 +18,8 @@ export async function action({ request }: ActionFunctionArgs) {
   if (typeof rawPayload !== 'string' || !rawPayload.trim()) {
     return json({ error: 'INVALID_PAYLOAD' }, { status: 400, headers: buildShopifyCorsHeaders(request) })
   }
+  const draftTokenValue = formData.get('draftToken')
+  const draftToken = typeof draftTokenValue === 'string' && draftTokenValue.trim() ? draftTokenValue.trim() : null
 
   let payload
   try {
@@ -27,7 +29,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
-    const result = await createDesignStorefrontBuild({ access, payload })
+    const result = await createDesignStorefrontBuild({ access, payload, draftToken })
     return json(
       { ok: true, buildId: result.id, reference: result.reference },
       { headers: buildShopifyCorsHeaders(request) },

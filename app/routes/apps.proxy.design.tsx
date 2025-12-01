@@ -1,7 +1,8 @@
 import type { LoaderFunctionArgs, LinksFunction } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { useFetcher, useLoaderData } from '@remix-run/react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import {
   AppProvider as PolarisAppProvider,
   Badge,
@@ -35,7 +36,7 @@ import type {
   StorefrontBuildPayload,
   StorefrontSelectionSnapshot,
   StorefrontStepSnapshot,
-} from '../services/designStudio/storefrontBuild.server'
+} from '../services/designStudio/storefrontPayload.server'
 import { buildShopifyCorsHeaders } from '../utils/shopifyCors.server'
 
 type SaveFeedback = {
@@ -95,6 +96,8 @@ export default function DesignStudioStorefrontRoute() {
   )
   const { data: config, loading: configLoading } = useDesignConfig(requestOptions)
   const saveFetcher = useFetcher<{ ok: boolean; reference?: string; error?: string }>()
+  const draftLoadFetcher = useFetcher<{ draft: StorefrontBuildPayload | null; token: string | null }>()
+  const draftSaveFetcher = useFetcher<{ ok: boolean; token: string | null }>()
   const steps = config?.steps ?? []
   const [activeStepId, setActiveStepId] = useState<string | null>(steps[0]?.id ?? null)
   const [activeRole, setActiveRole] = useState<DesignStorefrontPartRole | null>(null)
@@ -103,6 +106,12 @@ export default function DesignStudioStorefrontRoute() {
     Partial<Record<DesignStorefrontPartRole, DesignStorefrontOption | null>>
   >({})
   const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>({ status: 'idle' })
+  const [draftToken, setDraftToken] = useState<string | null>(null)
+  const lastDraftPayloadRef = useRef<string | null>(null)
+  const draftStorageKey = useMemo(
+    () => (designStudioAccess.shopDomain ? `ds-draft:${designStudioAccess.shopDomain}` : null),
+    [designStudioAccess.shopDomain],
+  )
 
   const roleStepMap = useMemo(() => {
     const map = new Map<DesignStorefrontPartRole, string>()
@@ -221,6 +230,66 @@ export default function DesignStudioStorefrontRoute() {
     return query ? `/api/design-studio/builds?${query}` : '/api/design-studio/builds'
   }, [requestOptions.shopDomain, requestOptions.themeRequest, requestOptions.themeSectionId])
 
+  const draftsActionUrl = useMemo(() => {
+    const params = new URLSearchParams()
+    appendDesignStudioParams(params, requestOptions)
+    const query = params.toString()
+    return query ? `/api/design-studio/drafts?${query}` : '/api/design-studio/drafts'
+  }, [requestOptions.shopDomain, requestOptions.themeRequest, requestOptions.themeSectionId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !draftStorageKey) return
+    const storedToken = window.localStorage.getItem(draftStorageKey)
+    if (!storedToken) return
+    setDraftToken(storedToken)
+    const params = new URLSearchParams()
+    appendDesignStudioParams(params, requestOptions)
+    params.set('token', storedToken)
+    draftLoadFetcher.load(`/api/design-studio/drafts?${params.toString()}`)
+  }, [draftStorageKey, draftLoadFetcher, requestOptions])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !draftStorageKey) return
+    if (draftToken) {
+      window.localStorage.setItem(draftStorageKey, draftToken)
+    } else {
+      window.localStorage.removeItem(draftStorageKey)
+    }
+  }, [draftStorageKey, draftToken])
+
+  useEffect(() => {
+    if (draftSaveFetcher.state !== 'idle' || !draftSaveFetcher.data) return
+    if (draftSaveFetcher.data.ok) {
+      setDraftToken(draftSaveFetcher.data.token ?? null)
+    } else {
+      lastDraftPayloadRef.current = null
+    }
+  }, [draftSaveFetcher.state, draftSaveFetcher.data])
+
+  useEffect(() => {
+    if (draftLoadFetcher.state !== 'idle' || !draftLoadFetcher.data) return
+    const { draft, token } = draftLoadFetcher.data
+    if (draft && Array.isArray(draft.selections)) {
+      hydrateSelectionsFromDraft(draft, setSelections)
+      lastDraftPayloadRef.current = JSON.stringify(
+        buildDraftPayloadSnapshot({
+          selections: draft.selections ?? [],
+          summary: draft.summary ?? {
+            basePrice: 0,
+            subtotal: 0,
+            selectedParts: 0,
+            totalParts: 0,
+          },
+          steps: draft.steps,
+          hero: draft.hero,
+          featureFlags: draft.featureFlags,
+        }),
+      )
+      setSaveFeedback({ status: 'idle' })
+    }
+    setDraftToken(token ?? null)
+  }, [draftLoadFetcher.state, draftLoadFetcher.data])
+
   const handleSaveBuild = useCallback(() => {
     if (!selectionSnapshots.length) {
       setSaveFeedback({ status: 'error', message: 'Select at least one component before saving.' })
@@ -230,7 +299,7 @@ export default function DesignStudioStorefrontRoute() {
       setSaveFeedback({ status: 'error', message: 'Storefront config not loaded yet.' })
       return
     }
-    const payload: StorefrontBuildPayload = {
+    const payload = buildDraftPayloadSnapshot({
       selections: selectionSnapshots,
       summary: {
         ...summary,
@@ -239,21 +308,62 @@ export default function DesignStudioStorefrontRoute() {
       steps: stepSnapshots,
       hero: config.hero,
       featureFlags: config.featureFlags,
-    }
+    })
     const formData = new FormData()
     formData.set('payload', JSON.stringify(payload))
+    if (draftToken) {
+      formData.set('draftToken', draftToken)
+    }
     setSaveFeedback({ status: 'idle' })
     saveFetcher.submit(formData, { method: 'post', action: buildsActionUrl })
-  }, [config, selectionSnapshots, stepSnapshots, summary, buildsActionUrl, saveFetcher])
+  }, [config, selectionSnapshots, stepSnapshots, summary, buildsActionUrl, saveFetcher, draftToken])
 
   useEffect(() => {
     if (saveFetcher.state !== 'idle' || !saveFetcher.data) return
     if (saveFetcher.data.ok) {
       setSaveFeedback({ status: 'success', reference: saveFetcher.data.reference })
+      setDraftToken(null)
+      lastDraftPayloadRef.current = null
     } else {
       setSaveFeedback({ status: 'error', message: saveFetcher.data.error ?? 'Unable to save build.' })
     }
   }, [saveFetcher.state, saveFetcher.data])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!config) return
+    const hasSelections = selectionSnapshots.length > 0
+    if (!hasSelections && !draftToken) {
+      lastDraftPayloadRef.current = null
+      return
+    }
+    const payload = buildDraftPayloadSnapshot({
+      selections: selectionSnapshots,
+      summary: {
+        ...summary,
+        basePrice: config.basePrice ?? 0,
+      },
+      steps: stepSnapshots,
+      hero: config.hero,
+      featureFlags: config.featureFlags,
+    })
+    const serialized = JSON.stringify(payload)
+    if (serialized === lastDraftPayloadRef.current) return
+    const timeoutId = window.setTimeout(() => {
+      lastDraftPayloadRef.current = serialized
+      const formData = new FormData()
+      formData.set('payload', serialized)
+      if (draftToken) {
+        formData.set('token', draftToken)
+      }
+      draftSaveFetcher.submit(formData, {
+        method: 'post',
+        action: draftsActionUrl,
+        preventScrollReset: true,
+      })
+    }, 800)
+    return () => window.clearTimeout(timeoutId)
+  }, [config, selectionSnapshots, stepSnapshots, summary, draftToken, draftSaveFetcher, draftsActionUrl])
 
   if (!designStudioAccess.enabled) {
     return (
@@ -653,6 +763,64 @@ function MobileDrawer({ open, onClose, ...rest }: MobileDrawerProps) {
       </div>
     </div>
   )
+}
+
+type SelectionStateSetter = Dispatch<
+  SetStateAction<Partial<Record<DesignStorefrontPartRole, DesignStorefrontOption | null>>>
+>
+
+function hydrateSelectionsFromDraft(draft: StorefrontBuildPayload, setter: SelectionStateSetter) {
+  if (!Array.isArray(draft.selections)) return
+  setter(prev => {
+    const next = { ...prev }
+    draft.selections.forEach(selection => {
+      const current = next[selection.role]
+      const fallback: DesignStorefrontOption =
+        current ??
+        ({
+          id: selection.option.id,
+          role: selection.role,
+          title: selection.option.title,
+          price: selection.option.price,
+          specs: [],
+        } as DesignStorefrontOption)
+      next[selection.role] = {
+        ...fallback,
+        id: selection.option.id,
+        role: selection.role,
+        title: selection.option.title,
+        price: selection.option.price,
+        sku: selection.option.sku ?? undefined,
+        vendor: selection.option.vendor ?? undefined,
+        notes: selection.option.notes ?? undefined,
+        badge: selection.option.badge ?? undefined,
+        specs: fallback.specs ?? [],
+      }
+    })
+    return next
+  })
+}
+
+function buildDraftPayloadSnapshot({
+  selections,
+  summary,
+  steps,
+  hero,
+  featureFlags,
+}: {
+  selections: StorefrontSelectionSnapshot[]
+  summary: StorefrontBuildPayload['summary']
+  steps?: StorefrontStepSnapshot[]
+  hero?: StorefrontBuildPayload['hero']
+  featureFlags?: string[]
+}): StorefrontBuildPayload {
+  return {
+    selections,
+    summary,
+    steps,
+    hero,
+    featureFlags: Array.isArray(featureFlags) ? featureFlags : [],
+  }
 }
 
 function formatRoleLabel(role: DesignStorefrontPartRole) {

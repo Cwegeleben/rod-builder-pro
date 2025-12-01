@@ -4,9 +4,11 @@ import type { Prisma, SupplierSyncState } from '@prisma/client'
 import { prisma } from '../../db.server'
 import { enc, dec } from '../crypto.server'
 import { extractBatsonDetailMeta } from '../../server/importer/preview/parsers/batsonAttributeGrid'
+import { crawlBatson } from '../../../packages/importer/src/crawlers/batsonCrawler'
+import { getTargetById } from '../../server/importer/sites/targets'
 
 const BATSON_STATE_SLUG = 'batson'
-const BATSON_SUPPLIER_SLUGS = [
+export const BATSON_SUPPLIER_SLUGS = [
   'batson-rod-blanks',
   'batson-reel-seats',
   'batson-guides-tops',
@@ -14,6 +16,14 @@ const BATSON_SUPPLIER_SLUGS = [
   'batson-end-caps-gimbals',
   'batson-trim-pieces',
 ]
+const BATSON_SEED_FALLBACKS: Record<string, string> = {
+  'batson-rod-blanks': 'https://batsonenterprises.com/rod-blanks',
+  'batson-reel-seats': 'https://batsonenterprises.com/reel-seats',
+  'batson-guides-tops': 'https://batsonenterprises.com/guides-tip-tops',
+  'batson-grips': 'https://batsonenterprises.com/grips',
+  'batson-end-caps-gimbals': 'https://batsonenterprises.com/end-caps-gimbals',
+  'batson-trim-pieces': 'https://batsonenterprises.com/trim-pieces',
+}
 const DETAIL_ACCEPT_HEADER = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15'
@@ -293,6 +303,87 @@ export async function enqueueBatsonSync(startedBy?: string) {
   return { jobId }
 }
 
+type DiscoverySummaryInput = {
+  slug: string
+  url?: string | null
+  ok?: boolean
+  durationMs?: number
+  stagedCount?: number | null
+  headerSkipCount?: number | null
+  error?: string | null
+}
+
+type DesignStudioBackfillResult = {
+  ok: boolean
+  durationMs: number
+  summary?: Record<string, unknown> | null
+  error?: string | null
+}
+
+const resolveSeedUrlForSlug = (slug: string): string | undefined => {
+  const target = getTargetById(slug)
+  if (target?.url) return target.url
+  return BATSON_SEED_FALLBACKS[slug]
+}
+
+async function discoverBatsonSeeds(cookie: string): Promise<DiscoverySummaryInput[]> {
+  const results: DiscoverySummaryInput[] = []
+  for (const slug of BATSON_SUPPLIER_SLUGS) {
+    const seedUrl = resolveSeedUrlForSlug(slug)
+    const started = Date.now()
+    try {
+      const crawlResult = await crawlBatson(seedUrl ? [seedUrl] : [], {
+        supplierId: slug,
+        discoveryMode: 'full',
+        maxRequestsPerCrawl: 2500,
+        politeness: { maxConcurrency: 1, rpm: 40, blockAssetsOnLists: true },
+        auth: { cookieHeader: cookie },
+      })
+      const durationMs = Date.now() - started
+      results.push({
+        slug,
+        url: seedUrl,
+        ok: true,
+        durationMs,
+        stagedCount: crawlResult?.stagedCount ?? null,
+        headerSkipCount: crawlResult?.headerSkipCount ?? null,
+      })
+    } catch (error) {
+      const durationMs = Date.now() - started
+      results.push({
+        slug,
+        url: seedUrl,
+        ok: false,
+        durationMs,
+        error: (error as Error)?.message || 'discovery-failed',
+      })
+    }
+  }
+  return results
+}
+
+async function runDesignStudioBackfillTask(): Promise<DesignStudioBackfillResult> {
+  const started = Date.now()
+  try {
+    const result = await execa('npx', ['tsx', 'scripts/migrate/backfill-design-studio.ts'], {
+      cwd: process.cwd(),
+      env: { ...process.env },
+    })
+    return {
+      ok: true,
+      durationMs: Date.now() - started,
+      summary: parseScriptSummary(result.stdout),
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      durationMs: Date.now() - started,
+      error: (error as Error)?.message || 'design-studio-backfill-failed',
+      summary: parseScriptSummary(extractStdout(error)),
+    }
+  }
+}
+
 async function runBatsonSyncJob({
   cookie,
   jobId,
@@ -306,6 +397,8 @@ async function runBatsonSyncJob({
 }) {
   const summaries: SupplierSummaryInput[] = []
   let overallOk = true
+  const discoverySummaries = await discoverBatsonSeeds(cookie)
+  if (discoverySummaries.some(res => res.ok === false)) overallOk = false
   for (const slug of BATSON_SUPPLIER_SLUGS) {
     const result = await runIngestForSlug(slug, cookie)
     const status = extractSummaryString(result.summary, 'status')
@@ -319,16 +412,28 @@ async function runBatsonSyncJob({
     })
     if (!result.ok) overallOk = false
   }
+  const designStudioBackfill = await runDesignStudioBackfillTask()
+  if (!designStudioBackfill.ok) overallOk = false
   const finishedAt = new Date()
   const finishedIso = finishedAt.toISOString()
   const startedAtIso = jobStartedAt.toISOString()
   const durationMs = finishedAt.getTime() - jobStartedAt.getTime()
+  const postProcessingSummary = coerceJsonValue({
+    designStudioBackfill: {
+      ok: designStudioBackfill.ok,
+      durationMs: designStudioBackfill.durationMs,
+      error: designStudioBackfill.error ?? null,
+      summary: designStudioBackfill.summary ?? null,
+    },
+  })
   const summary = buildSyncSummary({
     jobId,
     startedBy: startedBy || null,
     startedAt: startedAtIso,
     finishedAt: finishedIso,
     suppliers: summaries,
+    discovery: discoverySummaries,
+    postProcessing: postProcessingSummary,
   })
   await prisma.supplierSyncState.update({
     where: { supplierSlug: BATSON_STATE_SLUG },
@@ -412,6 +517,8 @@ function buildSyncSummary(input: {
   startedAt?: string
   finishedAt?: string
   suppliers: SupplierSummaryInput[]
+  discovery?: DiscoverySummaryInput[]
+  postProcessing?: Prisma.JsonValue | null
 }): Prisma.JsonObject {
   return {
     jobId: input.jobId,
@@ -426,6 +533,16 @@ function buildSyncSummary(input: {
       error: item.error ?? null,
       summary: item.summary ?? null,
     })),
+    discovery: (input.discovery ?? []).map(item => ({
+      slug: item.slug,
+      url: item.url ?? null,
+      ok: typeof item.ok === 'boolean' ? item.ok : null,
+      durationMs: typeof item.durationMs === 'number' ? item.durationMs : null,
+      stagedCount: typeof item.stagedCount === 'number' ? item.stagedCount : null,
+      headerSkipCount: typeof item.headerSkipCount === 'number' ? item.headerSkipCount : null,
+      error: item.error ?? null,
+    })),
+    postProcessing: input.postProcessing ?? null,
   }
 }
 

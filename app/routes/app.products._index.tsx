@@ -17,6 +17,7 @@ import {
   TextField,
   Tooltip,
   Icon,
+  DataTable,
 } from '@shopify/polaris'
 import { AlertCircleIcon } from '@shopify/polaris-icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -25,6 +26,7 @@ import { prisma } from '../db.server'
 import { isHqShop } from '../lib/access.server'
 import { getDesignStudioAccess } from '../lib/designStudio/access.server'
 import { getBatsonSyncState, type BatsonSyncSnapshot } from '../services/suppliers/batsonSync.server'
+import { getBatsonMetricsSnapshot, type BatsonMetricsSnapshot } from '../services/suppliers/batsonMetrics.server'
 // <!-- BEGIN RBP GENERATED: admin-link-manifest-selftest-v1 -->
 import { TEST_IDS } from '../../src/config/testIds'
 // <!-- END RBP GENERATED: admin-link-manifest-selftest-v1 -->
@@ -54,6 +56,26 @@ type BatsonSyncActionResponse = {
   message?: string
   state?: BatsonSyncSnapshot
   jobId?: string
+}
+
+type ProductsIndexLoaderData = {
+  items: ProductRow[]
+  q: string
+  status: string[]
+  sort: string
+  nextCursor: string | null
+  hq: boolean
+  banner?: string
+  created?: number
+  updated?: number
+  skipped?: number
+  failed?: number
+  adminTagQuery?: string
+  canonical?: boolean
+  totalCount?: number
+  batsonSyncState: BatsonSyncSnapshot | null
+  designStudioAccess: Awaited<ReturnType<typeof getDesignStudioAccess>>
+  batsonMetrics: BatsonMetricsSnapshot | null
 }
 
 // HQ detection centralized
@@ -391,6 +413,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const hq = await isHqShop(request)
   const batsonSyncState = hq ? await getBatsonSyncState() : null
+  const batsonMetrics = hq ? await getBatsonMetricsSnapshot() : null
   return json({
     items,
     q,
@@ -409,11 +432,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     canonical: useCanonical,
     totalCount: totalCountOut,
     batsonSyncState,
+    batsonMetrics,
     designStudioAccess,
   })
 }
 
 export default function ProductsIndex() {
+  const loaderData = useLoaderData<typeof loader>() as unknown as ProductsIndexLoaderData
   const {
     items,
     q,
@@ -431,24 +456,8 @@ export default function ProductsIndex() {
     totalCount,
     batsonSyncState,
     designStudioAccess,
-  } = useLoaderData<typeof loader>() as {
-    items: ProductRow[]
-    q: string
-    status: string[]
-    sort: string
-    nextCursor: string | null
-    hq: boolean
-    banner?: string
-    created?: number
-    updated?: number
-    skipped?: number
-    failed?: number
-    adminTagQuery?: string
-    canonical?: boolean
-    totalCount?: number
-    batsonSyncState: BatsonSyncSnapshot | null
-    designStudioAccess: Awaited<ReturnType<typeof getDesignStudioAccess>>
-  }
+    batsonMetrics,
+  } = loaderData
   const [params, setParams] = useSearchParams()
   const location = useLocation()
   const [batsonModalOpen, setBatsonModalOpen] = useState(false)
@@ -527,6 +536,18 @@ export default function ProductsIndex() {
   )
   const currentRunLabel = useMemo(() => describeCurrentRun(batsonState?.currentRun), [batsonState?.currentRun])
   const lastRunLabel = useMemo(() => describeLastRun(batsonState?.lastRun), [batsonState?.lastRun])
+  const batsonMetricsRows = useMemo(
+    () =>
+      (batsonMetrics?.rows ?? []).map((row: BatsonMetricsSnapshot['rows'][number]) => [
+        formatSupplierLabel(row.slug),
+        row.seedCount.toLocaleString(),
+        row.productCount.toLocaleString(),
+        row.designStudioReadyCount.toLocaleString(),
+        row.readyRatioPct == null ? 'n/a' : `${row.readyRatioPct.toFixed(1)}%`,
+      ]),
+    [batsonMetrics],
+  )
+  const batsonMetricsTimestamp = useMemo(() => formatDateTime(batsonMetrics?.generatedAt), [batsonMetrics?.generatedAt])
   const batsonCookieBusy = batsonCookieFetcher.state !== 'idle'
   const batsonSyncBusy = batsonSyncFetcher.state !== 'idle'
   const handleBatsonCookieChange = useCallback((value: string) => {
@@ -1070,6 +1091,30 @@ export default function ProductsIndex() {
                   </Text>
                 ) : null}
               </BlockStack>
+
+              {batsonMetrics ? (
+                <BlockStack gap="150">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h3" variant="headingSm">
+                      Coverage snapshot
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Updated {batsonMetricsTimestamp}
+                    </Text>
+                  </InlineStack>
+                  {batsonMetricsRows.length ? (
+                    <DataTable
+                      columnContentTypes={['text', 'numeric', 'numeric', 'numeric', 'text']}
+                      headings={['Supplier', 'Seeds', 'Products', 'DS Ready', 'Ready %']}
+                      rows={batsonMetricsRows}
+                    />
+                  ) : (
+                    <Text as="p" tone="subdued">
+                      No metrics recorded yet.
+                    </Text>
+                  )}
+                </BlockStack>
+              ) : null}
 
               <BlockStack gap="150">
                 <Text as="h3" variant="headingSm">

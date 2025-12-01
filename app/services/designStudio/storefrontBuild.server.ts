@@ -4,80 +4,29 @@ import { DesignBuildEventType, DesignFulfillmentMode } from '@prisma/client'
 import { prisma } from '../../db.server'
 import type { DesignStudioAccess } from '../../lib/designStudio/access.server'
 import { isDesignStorefrontPartRole } from '../../lib/designStudio/storefront.server'
-import type { DesignStorefrontPartRole } from '../../lib/designStudio/storefront.mock'
-
-export type StorefrontOptionSnapshot = {
-  id: string
-  title: string
-  price: number
-  sku?: string | null
-  vendor?: string | null
-  notes?: string | null
-  badge?: string | null
-}
-
-export type StorefrontSelectionSnapshot = {
-  role: DesignStorefrontPartRole
-  option: StorefrontOptionSnapshot
-}
-
-export type StorefrontSummarySnapshot = {
-  totalParts: number
-  selectedParts: number
-  subtotal: number
-  basePrice: number
-}
-
-export type StorefrontStepSnapshot = {
-  id: string
-  label?: string
-  roles: DesignStorefrontPartRole[]
-}
-
-export type StorefrontBuildPayload = {
-  selections: StorefrontSelectionSnapshot[]
-  summary: StorefrontSummarySnapshot
-  steps?: StorefrontStepSnapshot[]
-  hero?: { title?: string; body?: string } | null
-  featureFlags?: string[]
-  customer?: {
-    name?: string
-    email?: string
-    phone?: string
-  }
-  notes?: string | null
-}
+import {
+  normalizeEmail,
+  normalizeStorefrontPayload,
+  truncate,
+  type NormalizedSelection,
+  type NormalizedStorefrontPayload,
+  type StorefrontBuildPayload,
+} from './storefrontPayload.server'
+import { linkDraftToBuild } from './storefrontDraft.server'
 
 export type CreateStorefrontBuildResult = {
   id: string
   reference: string
 }
 
-type NormalizedSelection = {
-  role: DesignStorefrontPartRole
-  option: Required<StorefrontOptionSnapshot>
-}
-
-type NormalizedPayload = {
-  selections: NormalizedSelection[]
-  summary: StorefrontSummarySnapshot
-  steps: StorefrontStepSnapshot[]
-  hero?: { title?: string; body?: string } | null
-  featureFlags: string[]
-  customer?: {
-    name?: string | null
-    email?: string | null
-    phone?: string | null
-  }
-  notes?: string | null
-}
-
 export async function createDesignStorefrontBuild({
   access,
   payload,
+  draftToken,
 }: {
   access: DesignStudioAccess
   payload: StorefrontBuildPayload
+  draftToken?: string | null
 }): Promise<CreateStorefrontBuildResult> {
   if (!access.enabled) {
     throw new Error('Design Studio access disabled for shop')
@@ -86,7 +35,7 @@ export async function createDesignStorefrontBuild({
     throw new Error('Missing shop domain for Design Studio submission')
   }
 
-  const normalized = normalizePayload(payload)
+  const normalized = normalizeStorefrontPayload(payload)
   if (!normalized.selections.length) {
     throw new Error('No selections available to persist')
   }
@@ -131,6 +80,14 @@ export async function createDesignStorefrontBuild({
     },
   })
 
+  if (draftToken) {
+    await linkDraftToBuild({
+      draftToken,
+      buildId: build.id,
+      shopDomain: access.shopDomain,
+    })
+  }
+
   return { id: build.id, reference: build.reference }
 }
 
@@ -162,71 +119,7 @@ function generateReference(shopDomain: string, attempt: number): string {
   return `DS-${base.slice(0, 4)}-${suffix}${attemptToken}`
 }
 
-function normalizePayload(payload: StorefrontBuildPayload): NormalizedPayload {
-  const selections = Array.isArray(payload.selections) ? payload.selections : []
-  const normalizedSelections: NormalizedSelection[] = selections
-    .map(entry => normalizeSelection(entry))
-    .filter((entry): entry is NormalizedSelection => !!entry)
-
-  const summary = normalizeSummary(payload.summary)
-  const steps = Array.isArray(payload.steps) ? payload.steps : []
-  const featureFlags = Array.isArray(payload.featureFlags) ? payload.featureFlags.filter(isTruthyString) : []
-
-  return {
-    selections: normalizedSelections,
-    summary,
-    steps,
-    hero: payload.hero ?? null,
-    featureFlags,
-    customer: {
-      name: payload.customer?.name ?? null,
-      email: payload.customer?.email ?? null,
-      phone: payload.customer?.phone ?? null,
-    },
-    notes: payload.notes ?? null,
-  }
-}
-
-function normalizeSelection(entry: StorefrontSelectionSnapshot | null | undefined): NormalizedSelection | null {
-  if (!entry || typeof entry !== 'object') return null
-  const roleValue = entry.role
-  if (!isDesignStorefrontPartRole(roleValue)) return null
-  const option = entry.option
-  if (!option || typeof option !== 'object') return null
-  const title = typeof option.title === 'string' ? option.title.trim() : ''
-  if (!title) return null
-  const price = Number(option.price)
-  return {
-    role: roleValue,
-    option: {
-      id: String(option.id || ''),
-      title,
-      price: Number.isFinite(price) ? Math.max(price, 0) : 0,
-      sku: option.sku ? String(option.sku) : option.id ? String(option.id) : null,
-      vendor: option.vendor ? truncate(option.vendor, 120) : null,
-      notes: option.notes ? truncate(option.notes, 240) : null,
-      badge: option.badge ? truncate(option.badge, 60) : null,
-    },
-  }
-}
-
-function normalizeSummary(summary: StorefrontSummarySnapshot | undefined): StorefrontSummarySnapshot {
-  if (!summary) {
-    return { basePrice: 0, subtotal: 0, selectedParts: 0, totalParts: 0 }
-  }
-  const coerce = (value: unknown) => {
-    const num = Number(value)
-    return Number.isFinite(num) ? num : 0
-  }
-  return {
-    basePrice: coerce(summary.basePrice),
-    subtotal: coerce(summary.subtotal),
-    selectedParts: coerce(summary.selectedParts),
-    totalParts: coerce(summary.totalParts),
-  }
-}
-
-function buildComponentSummary(payload: NormalizedPayload) {
+function buildComponentSummary(payload: NormalizedStorefrontPayload) {
   const blank = payload.selections.find(entry => entry.role === 'blank')
   const components = payload.selections.filter(entry => entry.role !== 'blank').map(entry => serializeComponent(entry))
 
@@ -249,7 +142,7 @@ function serializeComponent(entry: NormalizedSelection) {
   }
 }
 
-function buildMetadata(payload: NormalizedPayload) {
+function buildMetadata(payload: NormalizedStorefrontPayload) {
   return {
     hero: payload.hero,
     summary: payload.summary,
@@ -265,23 +158,6 @@ function buildMetadata(payload: NormalizedPayload) {
 function hashSelections(selections: NormalizedSelection[]) {
   const digest = crypto.createHash('sha1').update(JSON.stringify(selections)).digest('hex')
   return digest
-}
-
-function truncate(value: string | null | undefined, limit = 120): string | null {
-  if (!value) return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const safeLimit = Math.max(limit, 3)
-  return trimmed.length > safeLimit ? `${trimmed.slice(0, safeLimit - 3)}...` : trimmed
-}
-
-function normalizeEmail(value: string | null | undefined): string | null {
-  const normalized = truncate(value, 180)
-  return normalized ? normalized.toLowerCase() : null
-}
-
-function isTruthyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0
 }
 
 function isUniqueReferenceError(error: unknown): boolean {

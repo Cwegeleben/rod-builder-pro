@@ -36,8 +36,8 @@ describe('batson guides/tip-tops parsing and title', () => {
       title: 'XYZ Guide',
       rawSpecs: { ring_size: 12, finish: 'Black', code: 'XYG12-BLK' },
     })
-    // Family code prefix appears (XYG) before Guide
-    expect(t).toMatch(/^Batson XYG Guide Ring 12 Black( - Stainless Steel Frame)?$/i)
+    // Family code prefix appears (XYG) before Guide without Batson branding
+    expect(t).toMatch(/^XYG Guide Ring 12 Black( - Stainless Steel Frame)?$/i)
   })
 
   it('builds a tip top title using tube size with brand fallback', () => {
@@ -45,8 +45,8 @@ describe('batson guides/tip-tops parsing and title', () => {
       title: 'Forecast Tip Top',
       rawSpecs: { tube_size: 6.0, color: 'Gunsmoke', code: 'TT06GS' },
     })
-    // Family prefix TT precedes Tip Top
-    expect(t).toMatch(/^Forecast TT Tip Top Tube 6mm Gunsmoke( - Stainless Steel Frame)?$/i)
+    // Family prefix TT precedes type descriptor
+    expect(t).toBe('Forecast TT Universal Tip Top Gunsmoke 6mm Tube')
   })
 
   it('builds a kit title when placeholder title present with brand fallback', () => {
@@ -54,6 +54,6 @@ describe('batson guides/tip-tops parsing and title', () => {
       title: 'Page not found',
       rawSpecs: { is_kit: true, finish: 'Black', code: 'GK3411' },
     })
-    expect(t).toMatch(/^Batson Guide Kit Black$/i)
+    expect(t).toMatch(/^Guide Kit Black$/i)
   })
 })

@@ -1,7 +1,11 @@
 // <!-- BEGIN RBP GENERATED: staging-upsert-v1 -->
 import crypto from 'crypto'
 import { prisma } from '../../../../app/db.server'
-import { deriveDesignStudioAnnotations } from '../../../../app/lib/designStudio/annotations.server'
+import {
+  deriveDesignStudioAnnotations,
+  normalizeDesignPartType,
+} from '../../../../app/lib/designStudio/annotations.server'
+import { evaluateDesignStudioReadiness, formatBlockingReasons } from '../../../../app/lib/designStudio/readiness.server'
 
 export async function upsertStaging(
   supplierId: string,
@@ -56,6 +60,19 @@ export async function upsertStaging(
     rawSpecs: rec.rawSpecs,
     normSpecs: rec.normSpecs,
   })
+  const designPartType = normalizeDesignPartType(rec.partType || designStudio.role)
+  const readiness = evaluateDesignStudioReadiness({
+    designPartType,
+    annotation: designStudio,
+    priceMsrp,
+    priceWholesale: priceWh,
+    availability: rec.availability ?? null,
+    images: rec.images,
+  })
+  const blockingReasons = readiness.ready ? null : readiness.reasons
+  const coverageNotes = readiness.ready
+    ? designStudio.coverageNotes || null
+    : formatBlockingReasons(blockingReasons || []) || designStudio.coverageNotes || null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const client: any = prisma
   // Use named composite unique (supplierId, templateId, externalId)
@@ -77,16 +94,19 @@ export async function upsertStaging(
       normSpecs: rec.normSpecs || undefined,
       priceMsrp: priceMsrp ?? undefined,
       priceWh: priceWh ?? undefined,
+      availability: rec.availability ?? null,
       hashContent: hash,
       fetchedAt: new Date(),
-      designStudioReady: designStudio.ready,
+      designStudioReady: readiness.ready,
       designStudioFamily: designStudio.family || null,
       designStudioSeries: designStudio.series || null,
       designStudioRole: designStudio.role,
       designStudioCompatibility: designStudio.compatibility,
-      designStudioCoverageNotes: designStudio.coverageNotes || null,
+      designStudioCoverageNotes: coverageNotes,
       designStudioSourceQuality: designStudio.sourceQuality || null,
       designStudioHash: designStudio.hash,
+      designPartType,
+      designStudioBlockingReasons: blockingReasons,
     },
     create: {
       supplierId,
@@ -100,15 +120,18 @@ export async function upsertStaging(
       normSpecs: rec.normSpecs || undefined,
       priceMsrp: priceMsrp ?? undefined,
       priceWh: priceWh ?? undefined,
+      availability: rec.availability ?? null,
       hashContent: hash,
-      designStudioReady: designStudio.ready,
+      designStudioReady: readiness.ready,
       designStudioFamily: designStudio.family || null,
       designStudioSeries: designStudio.series || null,
       designStudioRole: designStudio.role,
       designStudioCompatibility: designStudio.compatibility,
-      designStudioCoverageNotes: designStudio.coverageNotes || null,
+      designStudioCoverageNotes: coverageNotes,
       designStudioSourceQuality: designStudio.sourceQuality || null,
       designStudioHash: designStudio.hash,
+      designPartType,
+      designStudioBlockingReasons: blockingReasons,
     },
   })
 }

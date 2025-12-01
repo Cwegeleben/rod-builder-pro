@@ -1,7 +1,12 @@
 import crypto from 'node:crypto'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../db.server'
-import { deriveDesignStudioAnnotations, type DesignStudioAnnotation } from '../lib/designStudio/annotations.server'
+import {
+  deriveDesignStudioAnnotations,
+  normalizeDesignPartType,
+  type DesignStudioAnnotation,
+} from '../lib/designStudio/annotations.server'
+import { evaluateDesignStudioReadiness, formatBlockingReasons } from '../lib/designStudio/readiness.server'
 import { recordDesignStudioAudit } from '../lib/designStudio/audit.server'
 
 export interface NormalizedProductInput {
@@ -86,6 +91,11 @@ function withDesignStudio(
   return { ...input, designStudio }
 }
 
+function serializeJson(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  return JSON.stringify(value)
+}
+
 export function computeContentHash(input: NormalizedProductInput): string {
   const enriched = withDesignStudio(input)
   const payload = {
@@ -97,6 +107,9 @@ export function computeContentHash(input: NormalizedProductInput): string {
     priceMsrp: input.priceMsrp ?? null,
     priceWholesale: input.priceWholesale ?? null,
     availability: input.availability ?? null,
+    designPartType: normalizeDesignPartType(
+      resolvePartTypeFromInput(input, jsonValueToRecord(input.rawSpecs), jsonValueToRecord(input.normSpecs)),
+    ),
     designStudio: enriched.designStudio,
   }
   const str = stableStringify(payload)
@@ -108,6 +121,27 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
   const supplierId = await ensureSupplier(enrichedInput.supplier)
   const contentHash = computeContentHash(enrichedInput)
   const ds = enrichedInput.designStudio
+  const raw = jsonValueToRecord(input.rawSpecs)
+  const norm = jsonValueToRecord(input.normSpecs)
+  const resolvedPartType = resolvePartTypeFromInput(input, raw, norm)
+  const designPartType = normalizeDesignPartType(resolvedPartType ?? ds.role ?? input.type ?? null)
+  const readiness = evaluateDesignStudioReadiness({
+    designPartType,
+    annotation: ds,
+    priceMsrp: input.priceMsrp ?? null,
+    priceWholesale: input.priceWholesale ?? null,
+    availability: input.availability ?? null,
+    images: input.images ?? null,
+  })
+  const blockingReasons = readiness.ready ? null : readiness.reasons
+  const coverageNotes = readiness.ready
+    ? (ds.coverageNotes ?? null)
+    : formatBlockingReasons(blockingReasons || []) || ds.coverageNotes || null
+  const dsForAudit: DesignStudioAnnotation = {
+    ...ds,
+    ready: readiness.ready,
+    coverageNotes: coverageNotes ?? ds.coverageNotes,
+  }
 
   // Find product by (supplierId, sku)
   const prodRows = await prisma.$queryRawUnsafe<Array<{ id: string; latestVersionId: string | null }>>(
@@ -126,17 +160,41 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
         `UPDATE Product
          SET title = ?,
              type = ?,
+             designPartType = ?,
+             description = ?,
+             images = ?,
+             priceMsrp = ?,
+             priceWholesale = ?,
+             availability = ?,
              designStudioReady = ?,
              designStudioFamily = ?,
+             designStudioSeries = ?,
+             designStudioRole = ?,
+             designStudioCompatibility = ?,
+             designStudioSourceQuality = ?,
+             designStudioHash = ?,
              designStudioCoverageNotes = ?,
+             designStudioBlockingReasons = ?,
              designStudioLastTouchedAt = CURRENT_TIMESTAMP,
              updatedAt = CURRENT_TIMESTAMP
          WHERE id = ?`,
         input.title,
         input.type ?? null,
-        ds.ready ? 1 : 0,
+        designPartType ?? null,
+        input.description ?? null,
+        serializeJson(input.images ?? null),
+        input.priceMsrp ?? null,
+        input.priceWholesale ?? null,
+        input.availability ?? null,
+        readiness.ready ? 1 : 0,
         ds.family ?? null,
-        ds.coverageNotes ?? null,
+        ds.series ?? null,
+        ds.role ?? null,
+        serializeJson(ds.compatibility ?? null),
+        ds.sourceQuality ?? null,
+        ds.hash,
+        coverageNotes,
+        serializeJson(blockingReasons),
         productId,
       )
     } catch {
@@ -147,19 +205,34 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
     productId = crypto.randomUUID()
     await prisma.$executeRawUnsafe(
       `INSERT INTO Product (
-         id, supplierId, sku, title, type, status,
-         designStudioReady, designStudioFamily, designStudioLastTouchedAt, designStudioCoverageNotes,
+         id, supplierId, sku, title, type, designPartType, status,
+         description, images, priceMsrp, priceWholesale, availability,
+         designStudioReady, designStudioFamily, designStudioSeries, designStudioRole,
+         designStudioCompatibility, designStudioSourceQuality, designStudioHash,
+         designStudioLastTouchedAt, designStudioCoverageNotes, designStudioBlockingReasons,
          createdAt, updatedAt
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       productId,
       supplierId,
       input.sku,
       input.title,
       input.type ?? null,
+      designPartType ?? null,
       'READY',
-      ds.ready ? 1 : 0,
+      input.description ?? null,
+      serializeJson(input.images ?? null),
+      input.priceMsrp ?? null,
+      input.priceWholesale ?? null,
+      input.availability ?? null,
+      readiness.ready ? 1 : 0,
       ds.family ?? null,
-      ds.coverageNotes ?? null,
+      ds.series ?? null,
+      ds.role ?? null,
+      serializeJson(ds.compatibility ?? null),
+      ds.sourceQuality ?? null,
+      ds.hash,
+      coverageNotes,
+      serializeJson(blockingReasons),
     )
   }
 
@@ -189,12 +262,15 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
   const toJson = (v: unknown) => (v === null || v === undefined ? null : JSON.stringify(v))
   await prisma.$executeRawUnsafe(
     `INSERT INTO ProductVersion (
-        id, productId, contentHash, rawSpecs, normSpecs, description, images,
+        id, productId, designPartType, contentHash, rawSpecs, normSpecs, description, images,
         priceMsrp, priceWholesale, availability, sourceSnapshot, fetchedAt, createdAt,
-        designStudioRole, designStudioSeries, designStudioCompatibility, designStudioSourceQuality, designStudioHash
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)`,
+        designStudioReady, designStudioFamily, designStudioRole, designStudioSeries,
+        designStudioCompatibility, designStudioSourceQuality, designStudioCoverageNotes,
+        designStudioHash, designStudioBlockingReasons
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     versionId,
     productId,
+    designPartType ?? null,
     contentHash,
     toJson(input.rawSpecs ?? null),
     toJson(input.normSpecs ?? null),
@@ -205,11 +281,15 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
     input.availability ?? null,
     toJson(input.sources ?? null),
     fetchedAt.toISOString(),
+    readiness.ready ? 1 : 0,
+    ds.family ?? null,
     ds.role ?? null,
     ds.series ?? null,
     toJson(ds.compatibility),
     ds.sourceQuality ?? null,
+    coverageNotes,
     ds.hash,
+    serializeJson(blockingReasons),
   )
 
   // Point product.latestVersionId to the new version
@@ -224,7 +304,7 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
   }
 
   await upsertSourcesLinks(supplierId, productId, input.sources)
-  await recordDesignStudioAudit({ productId, productVersionId: versionId, ds })
+  await recordDesignStudioAudit({ productId, productVersionId: versionId, ds: dsForAudit })
   return { supplierId, productId, versionId, createdProduct, createdVersion: true, contentHash }
 }
 

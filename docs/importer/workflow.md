@@ -4,6 +4,11 @@ This doc summarizes how runs flow from seeding to Review to Publish.
 
 ## Entry points
 
+- **Simple run (canonical)**: `app/services/importer/runOptions.server.ts::startImportFromOptions`
+
+  - This is the only supported way to kick off Batson importer work (locally or on Fly). It handles discovery, staging, diffing, and readiness plumbing in one flow.
+  - Always trigger importer refreshes through this entry point (or the UI endpoint that calls it). Command-line helpers (`npm run importer:smoke`, ad-hoc `tsx` scripts, etc.) are reserved for diagnostics and should not be used for production data loads.
+
 - Stage latest (HQ): `app/routes/api.importer.runs.ts` (action `stage-latest`)
 
   - Resolves supplierId from ImportTemplate target via `getTargetById`.
@@ -14,7 +19,7 @@ This doc summarizes how runs flow from seeding to Review to Publish.
 
   - Seeds via series-parser (optional) then `crawlBatson`.
   - Computes diffs into existing or new run (same supplierId).
-  - Now marks run `staged` and persists counts/options.
+  - Marks run `staged`, persists counts/options, and feeds downstream readiness jobs.
 
 - Publish: `app/routes/api.importer.runs.$runId.publish.shopify.ts`
 
@@ -61,3 +66,4 @@ This doc summarizes how runs flow from seeding to Review to Publish.
 
 - Review shows `ImportDiff` rows only. If staging > 0 but diffs = 0, Review UI will be empty.
 - Re-running Prepare Review is idempotent: staging upserts; diffs overwrite per run.
+- Deprecated helpers: the legacy CLI scripts (`npm run importer:smoke`, `tsx packages/importer/...`) remain for troubleshooting but are not part of the happy path. When in doubt, fire the “simple run” launcher so future syncs follow the exact same pipeline every time.

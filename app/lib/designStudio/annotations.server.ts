@@ -26,6 +26,29 @@ export type DesignStudioAnnotation = {
   hash: string
 }
 
+export function normalizeDesignPartType(partType?: string | null): string | null {
+  if (!partType) return null
+  const trimmed = partType.trim()
+  if (!trimmed) return null
+  const lower = trimmed.toLowerCase()
+  if (lower.includes('blank')) return 'BLANK'
+  if (lower.includes('guide set')) return 'GUIDE_SET'
+  if (lower.includes('guide') && lower.includes('tip')) return 'GUIDE_TIP'
+  if (lower.includes('guide')) return 'GUIDE'
+  if (lower.includes('reel') && lower.includes('seat')) return 'REEL_SEAT'
+  if (lower.includes('seat')) return 'SEAT'
+  if (lower.includes('handle') || lower.includes('grip')) return 'HANDLE'
+  if (lower.includes('butt')) return 'BUTT_CAP'
+  if (lower.includes('kit')) return 'KIT'
+  return (
+    trimmed
+      .replace(/[^a-z0-9]+/gi, '_')
+      .replace(/_{2,}/g, '_')
+      .replace(/^_|_$/g, '')
+      .toUpperCase() || null
+  )
+}
+
 const SERIES_FAMILY_MAP: Array<{ pattern: RegExp; family: string }> = [
   { pattern: /eternity/i, family: 'Rainshadow Eternity' },
   { pattern: /revelation/i, family: 'Rainshadow Revelation' },

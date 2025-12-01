@@ -3,8 +3,8 @@ import { prisma } from '../../db.server'
 import type { DesignStudioAccess } from './access.server'
 import type { DesignStudioWizardStep } from './tenantSeeds'
 import {
-  getMockDesignStorefrontConfig,
   getMockDesignStorefrontOptions,
+  getMockDesignStorefrontConfig,
   type DesignStorefrontConfig,
   type DesignStorefrontOption,
   type DesignStorefrontPartRole,
@@ -132,15 +132,9 @@ export async function loadDesignStorefrontConfig(access: DesignStudioAccess): Pr
   if (!access.enabled) {
     throw new Error('Design Studio disabled for this shop')
   }
-  if (!PRODUCT_DB_ENABLED) {
-    const mock = await getMockDesignStorefrontConfig()
-    return { ...mock, tier: access.tier }
-  }
-
   const tenantConfig = normalizeTenantConfig(access.config)
   const steps = buildSteps(tenantConfig.wizardSteps, tenantConfig.componentRoles)
-
-  return {
+  const resolvedConfig: DesignStorefrontConfig = {
     hero: resolveHeroCopy(tenantConfig.copy),
     tier: access.tier,
     currency: 'USD',
@@ -148,6 +142,14 @@ export async function loadDesignStorefrontConfig(access: DesignStudioAccess): Pr
     featureFlags: tenantConfig.featureFlags,
     steps,
   }
+
+  if (!PRODUCT_DB_ENABLED) {
+    const mock = await getMockDesignStorefrontConfig()
+    const featureFlags = resolvedConfig.featureFlags.length ? resolvedConfig.featureFlags : mock.featureFlags
+    return { ...mock, ...resolvedConfig, featureFlags }
+  }
+
+  return resolvedConfig
 }
 
 export async function loadDesignStorefrontOptions({

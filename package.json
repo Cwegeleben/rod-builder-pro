@@ -17,7 +17,7 @@
     "release:staging": "npm run typecheck && npm run build && npm run deploy:shopify:staging && fly deploy --config fly.staging.toml --now",
     "config:use": "shopify app config use",
     "env": "shopify app env",
-    "start": "remix-serve ./build/server/index.js --host $HOST --port $PORT",
+    "start": "node server/remix-serve.mjs",
     "docker-start": "npm run setup && npm run start",
     "setup": "prisma generate",
     "migrate:soft": "prisma migrate deploy || echo 'Soft migrate ignored failure'",
@@ -43,6 +43,8 @@
     "preflight:admin-links": "tsx scripts/preflight/adminLinks.ts",
     "preflight:admin-templates-sync": "tsx scripts/preflight/adminTemplatesSync.ts",
     "preflight:templates-cost-field": "tsx scripts/preflight/templatesCostField.ts",
+    "preflight:importer-smoke": "rm -rf .tmp/crawlee && mkdir -p .tmp && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} prisma migrate deploy && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} CRAWLEE_STORAGE_DIR=${CRAWLEE_STORAGE_DIR:-.tmp/crawlee} BATSON_SEEDS=${BATSON_SEEDS:-https://batsonenterprises.com/collections/blanks} tsx packages/importer/src/cli/smoke.ts",
+    "preflight:design-studio-metrics": "mkdir -p .tmp && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} tsx scripts/dev/seedDesignStudioSamples.ts && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} tsx scripts/migrate/backfill-design-studio.ts && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} DESIGN_STUDIO_SUPPLIERS=${DESIGN_STUDIO_SUPPLIERS:-batson} tsx scripts/migrate/backfill-design-storefront-products.ts && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} tsx scripts/diagnostics/designStudioMetrics.ts",
     "smoke:single-seed": "node scripts/smoke/single-seed-run.mjs",
     "migrate:templates-cost": "tsx scripts/migrate/migrate-templates-cost.mts",
     "migrate:backfill:publish-handles": "node scripts/migrate/backfill-publish-handles.mjs",
@@ -51,10 +53,14 @@
     "db:cleanup:empty-partstaging": "node scripts/migrate/cleanup-empty-partstaging.mjs",
     "db:cleanup:partstaging": "node scripts/migrate/cleanup-empty-partstaging.mjs && node scripts/migrate/dedupe-partstaging.mjs",
     "db:cleanup:productdb": "node scripts/migrate/clear-productdb.mjs",
+    "db:seed:design-studio-samples": "DATABASE_URL=${DATABASE_URL:-file:./prisma/dev.sqlite} tsx scripts/dev/seedDesignStudioSamples.ts",
+    "diagnostics:design-studio": "DATABASE_URL=${DATABASE_URL:-file:./prisma/dev.sqlite} tsx scripts/diagnostics/designStudioMetrics.ts",
+    "db:backfill:design-studio": "tsx scripts/migrate/backfill-design-studio.ts",
+    "db:backfill:design-storefront": "tsx scripts/migrate/backfill-design-storefront-products.ts",
     "db:migrate:deploy": "pnpm db:cleanup:partstaging && pnpm prisma migrate deploy",
     "db:titles:batson": "tsx scripts/migrate/recompute-batson-titles.ts",
     "db:migrate:dev": "pnpm db:cleanup:partstaging && pnpm prisma migrate dev",
-    "importer:smoke": "pnpm exec tsx packages/importer/src/cli/smoke.ts",
+    "importer:smoke": "BATSON_SEEDS=${BATSON_SEEDS:-https://batsonenterprises.com/collections/blanks} tsx packages/importer/src/cli/smoke.ts",
     "importer:diff": "pnpm exec tsx packages/importer/src/cli/diff-smoke.ts",
     "importer:apply": "pnpm exec tsx packages/importer/src/cli/apply-run.ts",
     "importer:apply:gw": "pnpm exec tsx packages/importer/src/cli/apply-run-via-gateway.ts",
@@ -139,5 +145,6 @@
     "*.{js,jsx,ts,tsx,css,md,json}": [
       "prettier --write"
     ]
-  }
+  },
+  "packageManager": "pnpm@10.15.0+sha512.486ebc259d3e999a4e8691ce03b5cac4a71cbeca39372a9b762cb500cfdf0873e2cb16abe3d951b1ee2cf012503f027b98b6584e4df22524e0c7450d9ec7aa7b"
 }

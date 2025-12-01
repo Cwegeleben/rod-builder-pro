@@ -17,6 +17,31 @@ _Last updated: 2025-11-27_
 ## 3. Data & Importer Automation
 
 - Extend importer normalization to stamp `designStudio.family`, `designStudio.series`, and `designStudio.role` for each SKU. Default heuristics: blanks auto-map via supplier series → lineup, components follow category taxonomy.
+- Ship a repeatable backfill so annotated staging rows land in the canonical Product tables. Run `npm run -s db:backfill:design-storefront` (script: `scripts/migrate/backfill-design-storefront-products.ts`) to push ready PartStaging rows into `Product`/`ProductVersion` using the same heuristics; filters include `DESIGN_STUDIO_SUPPLIERS`, `DESIGN_STUDIO_SKUS`, `DESIGN_STUDIO_BACKFILL_BATCH`, and `DESIGN_STUDIO_INCLUDE_REVIEW`. Pair it with `npm run -s db:backfill:design-studio` when you need to re-derive `designStudio.*` metadata for PartStaging/Product rows.
+- **Importer data assurance plan** (weekly sync safety net):
+  1. **Declare schema contract** – list every attribute the component table depends on (e.g., `designStudio.family`, `designStudio.series`, `designStudio.role`, readiness flags, compatibility sets, coverage notes, hashes) and keep it versioned in this doc plus the loader typings.
+  2. **Audit normalization** – confirm each attribute is produced inside `packages/importer` + `app/services/importer/runOptions.server.ts` before PartStaging writes; add unit tests if a field is only implied.
+  3. **Persist canonically** – ensure `app/services/productDbWriter.server.ts` stores the fields on `Product`/`ProductVersion` (or DS-specific tables). Add Prisma migrations for any missing columns.
+  4. **Run dual backfills** – execute `npm run -s db:backfill:design-studio` followed by `npm run -s db:backfill:design-storefront` after schema/code changes to realign staging + Product DB; log before/after metrics in `docs/importer/`.
+  5. **Surface + verify** – update `/app/products` loaders/columns to read the canonical DS attributes, then cover them with Playwright + Vitest checks so regressions fail fast.
+  6. **Regression guardrail** – include an importer smoke (e.g., `npm run -s importer:smoke`) plus snapshot assertions that a representative SKU retains the DS fields after a full run; wire into CI once stable.
+  7. **Verification snapshot (2025-11-28)** – Seeded 4 representative Batson SKUs via `npm run db:seed:design-studio-samples` (defaults to `file:./prisma/dev.sqlite`), executed both backfills, and captured metrics with `npm run diagnostics:design-studio` (see summary below). Ready count now >0, confirming the helper + product writer pathway with real rows instead of an empty DB. Re-run this block whenever importer heuristics change.
+
+```
+Design Studio Metrics (2025-11-28)
+Products: 8 (all ready)
+Roles: blank x4, reel_seat x1, handle x1, guide_set x1, component x1
+Coverage gaps: missing family 0, needs review 0
+```
+
+### Current baseline (2025-11-28)
+
+- Database: `file:./.tmp/importer-smoke-dev.sqlite` (physical file `prisma/.tmp/importer-smoke-dev.sqlite`)
+- Products: 8 total, ProductVersions: 8 total
+- Ready split: `designStudioReady=true` → 8, `needs-review` → 0
+- Per-supplier: Batson (slug `batson`) → 8 products
+- Roles: blanks 4, reel seats 1, handle/grip 1, guide sets 1, accessories/components 1
+- Coverage gaps: missing family 0, needs review 0
 - Auto-generate `designStudio.compatibility` sets (e.g., length/power/action, finish, grip options) so the storefront wizard can cross-filter components without custom logic.
 - Capture readiness metadata per SKU: `dsReady:boolean`, `coverageNotes`, `sourceQuality`. These feed gating rules inside admin queue.
 - Part staging table already tracks variant deltas; add `designStudioHash` to detect importer changes that require admin review.

@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { DesignStudioTier } from '@prisma/client'
 import { prisma } from '../../db.server'
 import { isDesignStudioFeatureEnabled } from '../flags.server'
-import { isHqShopDomain } from '../access.server'
+import { isHqShop, isHqShopDomain } from '../access.server'
 
 const SHOP_PARAM_KEYS = ['shop', 'shopDomain', 'shopifyShop', 'shop-name']
 
@@ -108,13 +108,14 @@ export async function getDesignStudioAccess(request: Request): Promise<DesignStu
   if (!shopDomain) {
     return { ...DISABLED_ACCESS, reason: 'no-shop' }
   }
+  const hqOverride = await isHqShop(request)
   const tenant = await prisma.tenantSettings.findUnique({ where: { shopDomain } })
   if (!tenant) {
-    const fallback = maybeAutoEnroll(shopDomain)
+    const fallback = maybeAutoEnroll(shopDomain, hqOverride)
     if (fallback) return fallback
     return { ...DISABLED_ACCESS, shopDomain, reason: 'tenant-missing' }
   }
-  if (!tenant.designStudioEnabled) {
+  if (!tenant.designStudioEnabled && !hqOverride) {
     return { ...DISABLED_ACCESS, shopDomain, reason: 'tenant-disabled' }
   }
   return {
@@ -141,8 +142,8 @@ function shouldAutoEnrollShop(shopDomain: string | null): boolean {
   return isHqShopDomain(shopDomain)
 }
 
-function maybeAutoEnroll(shopDomain: string | null): DesignStudioAccess | null {
-  if (!shouldAutoEnrollShop(shopDomain)) return null
+function maybeAutoEnroll(shopDomain: string | null, force = false): DesignStudioAccess | null {
+  if (!force && !shouldAutoEnrollShop(shopDomain)) return null
   console.warn('[designStudio] Falling back to auto-enrolled tenant', { shopDomain })
   return {
     enabled: true,

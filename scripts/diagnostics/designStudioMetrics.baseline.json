@@ -1,0 +1,14 @@
+{
+  "minProducts": 8,
+  "minReadyProducts": 8,
+  "minSupplierTotals": {
+    "batson": 8
+  },
+  "minRoleTotals": {
+    "blank": 4,
+    "reel_seat": 1,
+    "guide_set": 1,
+    "handle": 1,
+    "component": 1
+  }
+}

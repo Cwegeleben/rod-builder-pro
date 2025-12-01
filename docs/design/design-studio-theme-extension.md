@@ -32,6 +32,25 @@ The Theme App Extension located in `extensions/design-studio` ships a configurab
 - Client-side fetches to `/api/design-studio/*` automatically forward the `shop` + theme identifiers so Fly-hosted APIs can resolve the tenant while responding with `Access-Control-Allow-Origin: https://{shop}.myshopify.com` for Theme Editor CORS.
 - Merchants do **not** need to edit theme liquid; all assets (CSS + translations) are bundled with the extension.
 
+## Static Asset CORS + Custom Remix Server
+
+- Shopify Theme Editor loads our Remix bundles directly from Fly. Shopify blocks responses that do not echo the exact `Origin`, so we swapped the default `remix-serve` entrypoint with `server/remix-serve.mjs`, an Express wrapper that adds `Access-Control-Allow-Origin` for trusted Shopify hostnames and serves `build/client` with long-term caching.
+- The helper lives in `server/shopify-cors.js` and is now unit-tested (`server/shopify-cors.unit.test.ts`) to prevent future regressions when Shopify introduces new preview domains.
+- To exercise the production server locally, run a build (`npm run build`) and start it with explicit env vars (example):
+
+  ```bash
+  SHOPIFY_API_KEY=dev \
+  SHOPIFY_API_SECRET=dev \
+  SHOPIFY_APP_URL=http://localhost:4000 \
+  SCOPES=read_products \
+  DATABASE_URL="file:./prisma/dev.sqlite" \
+  SKIP_MIGRATE=1 \
+  PORT=4000 \
+  npm start
+  ```
+
+  You can then `curl -I -H "Origin: https://admin.shopify.com" http://localhost:4000/assets/<bundle>.js` to confirm the shim returns the Shopify origin.
+
 ## Testing Checklist
 
 - [ ] Add the block in a development theme on the target shop and confirm it renders without CSP or mixed-content warnings.

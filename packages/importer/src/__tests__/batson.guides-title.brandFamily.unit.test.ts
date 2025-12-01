@@ -15,7 +15,7 @@ describe('Batson guide/tip-top brand + family title formatting', () => {
       title: 'Forecast Tip Top',
       rawSpecs: { tube_size: 6.0, color: 'Gunsmoke', code: 'TT06GS' },
     })
-    expect(t).toMatch(/^Forecast TT Tip Top Tube 6mm Gunsmoke( - Stainless Steel Frame)?$/)
+    expect(t).toBe('Forecast TT Universal Tip Top Gunsmoke 6mm Tube')
   })
 
   it('suppresses GK family for kits but keeps brand fallback', () => {

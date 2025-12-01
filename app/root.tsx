@@ -10,6 +10,8 @@ import {
   useRouteLoaderData,
 } from '@remix-run/react'
 import { json, type LinksFunction } from '@remix-run/node'
+import { useEffect, useState } from 'react'
+import { shouldEnableThemeScrollRestoration } from './lib/theme-scroll-restoration'
 import './styles/globals.css'
 import './styles/theme.css'
 
@@ -42,7 +44,7 @@ export default function App() {
           }}
         />
         <Outlet />
-        <ScrollRestoration />
+        <ThemeAwareScrollRestoration />
         <Scripts />
       </body>
     </html>
@@ -196,5 +198,17 @@ export function ErrorBoundary() {
       </body>
     </html>
   )
+}
+
+function ThemeAwareScrollRestoration() {
+  const [enabled, setEnabled] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    setEnabled(shouldEnableThemeScrollRestoration(window.location.search))
+  }, [])
+
+  if (!enabled) return null
+  return <ScrollRestoration />
 }
 // <!-- END RBP GENERATED: supplier-importer-ui-v1 -->

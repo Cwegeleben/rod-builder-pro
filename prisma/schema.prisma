@@ -238,6 +238,7 @@ model PartStaging {
   normSpecs   Json?
   priceMsrp   Decimal?
   priceWh     Decimal?
+  availability String?
   hashContent String   @default("")
   fetchedAt   DateTime @default(now())
   designStudioReady Boolean   @default(false)
@@ -248,6 +249,8 @@ model PartStaging {
   designStudioCoverageNotes String?
   designStudioSourceQuality String?
   designStudioHash   String   @default("")
+  designPartType String?
+  designStudioBlockingReasons Json?
 
   // Back-writes from publish pipeline
   shopifyProductId String?
@@ -421,11 +424,17 @@ model Product {
   sku             String
   title           String
   type            String?
+  designPartType  String?
   status          ProductStatus   @default(DRAFT) // DRAFT READY PUBLISHED
   latestVersionId String?         @unique
   // Distinct relation for the latest (pointer) version to avoid ambiguity with versions history relation
   latestVersion   ProductVersion? @relation("LatestProductVersion", fields: [latestVersionId], references: [id])
   publishHandle   String?
+  description     String?
+  images          Json?
+  priceMsrp       Decimal?
+  priceWholesale  Decimal?
+  availability    String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   // Full version history (many) relation name distinct from latestVersion pointer
@@ -433,8 +442,14 @@ model Product {
   sources         ProductSource[]  @relation("ProductSources")
   designStudioReady Boolean        @default(false)
   designStudioFamily String?
+  designStudioSeries String?
+  designStudioRole   String?
+  designStudioCompatibility Json?
+  designStudioSourceQuality String?
   designStudioLastTouchedAt DateTime?
   designStudioCoverageNotes String?
+  designStudioHash   String   @default("")
+  designStudioBlockingReasons Json?
   annotationAudits DesignStudioAnnotationAudit[]
 
   @@unique([supplierId, sku], name: "product_supplier_sku_unique")
@@ -480,6 +495,12 @@ enum DesignStudioTier {
   ENTERPRISE
 }
 
+enum DesignStorefrontDraftStatus {
+  ACTIVE
+  SUBMITTED
+  EXPIRED
+}
+
 /// ProductVersion: immutable snapshot of normalized content
 model ProductVersion {
   id            String   @id @default(cuid())
@@ -488,6 +509,7 @@ model ProductVersion {
   product       Product  @relation("ProductVersions", fields: [productId], references: [id], onDelete: Cascade)
   // Back reference for latestVersion pointer
   productsLatest Product[] @relation("LatestProductVersion")
+  designPartType  String?
   contentHash   String
   rawSpecs      Json?
   normSpecs     Json?
@@ -499,11 +521,15 @@ model ProductVersion {
   sourceSnapshot Json?
   fetchedAt     DateTime @default(now())
   createdAt     DateTime @default(now())
+  designStudioReady Boolean @default(false)
+  designStudioFamily String?
   designStudioRole String?
   designStudioSeries String?
   designStudioCompatibility Json?
   designStudioSourceQuality String?
+  designStudioCoverageNotes String?
   designStudioHash  String   @default("")
+  designStudioBlockingReasons Json?
   annotationAudits DesignStudioAnnotationAudit[] @relation("ProductVersionAnnotationAudits")
 
   @@unique([productId, contentHash], name: "product_version_hash_unique")
@@ -539,6 +565,8 @@ model DesignBuild {
   tier             DesignStudioTier      @default(STARTER)
   status           DesignBuildStatus     @default(DRAFT)
   fulfillmentMode  DesignFulfillmentMode @default(RBP_BUILD)
+  storefrontDraftId String?              @unique
+  storefrontDraft  DesignStorefrontDraft? @relation("DraftToBuild", fields: [storefrontDraftId], references: [id], onDelete: SetNull)
   customerName     String?
   customerEmail    String?
   customerPhone    String?
@@ -566,6 +594,27 @@ model DesignBuild {
 
   @@index([shopDomain, status])
   @@index([tier])
+  @@index([storefrontDraftId])
+}
+
+model DesignStorefrontDraft {
+  id           String                      @id @default(cuid())
+  token        String                      @unique
+  shopDomain   String
+  tier         DesignStudioTier            @default(STARTER)
+  status       DesignStorefrontDraftStatus @default(ACTIVE)
+  selections   Json?
+  summary      Json?
+  customer     Json?
+  metadata     Json?
+  notes        String?
+  expiresAt    DateTime?
+  submittedAt  DateTime?
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+  builds       DesignBuild[]               @relation("DraftToBuild")
+
+  @@index([shopDomain, status])
 }
 
 model DesignBuildEvent {

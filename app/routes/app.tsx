@@ -9,6 +9,8 @@ import { useEffect, useState, type PropsWithChildren } from 'react'
 
 import { authenticate } from '../shopify.server'
 import { isProductDbExclusive } from '../lib/flags.server'
+import { getDesignStudioAccess } from '../lib/designStudio/access.server'
+import type { DesignStudioAccess } from '../lib/designStudio/access.server'
 function isLegacyImporterPath(pathname: string): boolean {
   return (
     pathname.startsWith('/app/imports') || pathname.startsWith('/app/admin/import') || pathname.startsWith('/hq/import')
@@ -29,7 +31,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       dest.searchParams.set('legacy', 'disabled')
       throw redirect(dest.pathname + dest.search)
     }
-    return { apiKey: process.env.SHOPIFY_API_KEY ?? '', exclusive }
+    const designStudioAccess = await getDesignStudioAccess(request)
+    return { apiKey: process.env.SHOPIFY_API_KEY ?? '', exclusive, designStudioAccess }
   } catch (err) {
     // Allow HQ override in local/e2e runs without a full Shopify session
     try {
@@ -43,7 +46,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           dest.searchParams.set('legacy', 'disabled')
           throw redirect(dest.pathname + dest.search)
         }
-        return { apiKey: process.env.SHOPIFY_API_KEY ?? '', exclusive }
+        const designStudioAccess = await getDesignStudioAccess(request)
+        return { apiKey: process.env.SHOPIFY_API_KEY ?? '', exclusive, designStudioAccess }
       }
     } catch {
       /* ignore */
@@ -53,7 +57,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 }
 
 export default function App() {
-  const { apiKey, exclusive } = useLoaderData<typeof loader>() as { apiKey: string; exclusive?: boolean }
+  const { apiKey, exclusive, designStudioAccess } = useLoaderData<typeof loader>() as {
+    apiKey: string
+    exclusive?: boolean
+    designStudioAccess: DesignStudioAccess
+  }
 
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
@@ -70,6 +78,7 @@ export default function App() {
         {/** Import links updated for importer-v2-3 */}
         {/* <!-- BEGIN RBP GENERATED: importer-v2-3 --> */}
         {!exclusive ? <Link to="imports">Imports</Link> : null}
+        {designStudioAccess?.enabled ? <Link to="design-studio">Design Studio</Link> : null}
         {/* <!-- END RBP GENERATED: importer-v2-3 --> */}
       </SafeNavMenu>
       {/* END RBP GENERATED: admin-hq-importer-ux-v2 */}

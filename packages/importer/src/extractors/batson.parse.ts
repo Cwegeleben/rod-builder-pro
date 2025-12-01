@@ -122,11 +122,56 @@ export async function extractProduct(
     .first()
     .innerHTML()
     .catch(() => '')
-  const rawImages = (
-    jld?.images && jld.images.length
-      ? jld.images
-      : await page.locator('img').evaluateAll(ns => ns.map(n => n.getAttribute('src') || '').filter(Boolean))
-  ) as string[]
+  let rawImages: string[] = []
+  const jldImages = Array.isArray(jld?.images) ? (jld?.images as string[]) : null
+  if (jldImages && jldImages.length) {
+    rawImages = jldImages.map(String)
+  } else {
+    rawImages = (await page
+      .locator('img')
+      .evaluateAll(ns =>
+        ns
+          .map(n => {
+            const el = n as { getAttribute: (name: string) => string | null }
+            const direct = el.getAttribute('src') || ''
+            const dataSrc = el.getAttribute('data-src') || el.getAttribute('data-original') || ''
+            const dataLarge = el.getAttribute('data-large_image') || ''
+            const srcset = el.getAttribute('srcset') || el.getAttribute('data-srcset') || ''
+            const entries = [direct, dataSrc, dataLarge]
+            if (srcset) {
+              entries.push(
+                ...srcset
+                  .split(',')
+                  .map(part => part.trim().split(' ')[0])
+                  .filter(Boolean),
+              )
+            }
+            return entries
+          })
+          .flat()
+          .filter(Boolean),
+      )
+      .catch(() => [])) as string[]
+    if (!rawImages.length) {
+      rawImages = (await page
+        .evaluate(() => {
+          const selectors = [
+            'meta[property="og:image"]',
+            'meta[property="og:image:secure_url"]',
+            'meta[name="twitter:image"]',
+            'meta[name="twitter:image:src"]',
+          ]
+          const urls: string[] = []
+          for (const sel of selectors) {
+            const el = document.querySelector(sel)
+            const content = el?.getAttribute('content')
+            if (content) urls.push(content)
+          }
+          return urls
+        })
+        .catch(() => [])) as string[]
+    }
+  }
   // Normalize to absolute URLs and dedupe
   const images = Array.from(
     new Set(
@@ -138,7 +183,7 @@ export async function extractProduct(
             return src
           }
         })
-        .filter(Boolean),
+        .filter(u => /^https?:\/\//i.test(u)),
     ),
   )
 

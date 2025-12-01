@@ -10,7 +10,7 @@ async function main() {
     console.error('Set BATSON_SEEDS to one or more category/series URLs')
     process.exit(1)
   }
-  const count = await crawlBatson(seeds)
+  const count = await crawlBatson(seeds, { ignoreSavedSources: true })
   console.log(`staged=${count}`)
 }
 main().catch(e => {
