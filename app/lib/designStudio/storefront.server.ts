@@ -100,7 +100,7 @@ type LoadOptionsArgs = {
 type ProductPayload = Prisma.ProductGetPayload<{
   select: {
     id: true
-    sku: true
+    productCode: true
     title: true
     designStudioReady: true
     designStudioFamily: true
@@ -179,7 +179,7 @@ export async function loadDesignStorefrontOptions({
       take,
       select: {
         id: true,
-        sku: true,
+        productCode: true,
         title: true,
         designStudioReady: true,
         designStudioFamily: true,
@@ -340,7 +340,7 @@ function mapProductToOption(product: ProductPayload, asRole: DesignStorefrontPar
     role: asRole,
     title: product.title,
     vendor: product.supplier?.name ?? undefined,
-    sku: product.sku,
+    sku: product.productCode,
     subtitle: buildSubtitle(compatibility),
     notes: product.designStudioCoverageNotes ?? undefined,
     price: resolvePrice(version),

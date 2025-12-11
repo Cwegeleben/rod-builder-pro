@@ -1,4 +1,5 @@
 // <!-- BEGIN RBP GENERATED: importer-normalize-diff-v1 -->
+import { normalizeTipTop } from '../lib/tipTop'
 export type NormResult = { partType: string; specs: Record<string, unknown> }
 
 export function normalize(rec: {
@@ -49,6 +50,36 @@ export function normalize(rec: {
     if (foundFinish && !specs.finish) specs.finish = foundFinish
     // Kit detection: presence of 'kit' and multiple sizes in title
     if (/\bkit\b/i.test(rec.title)) specs.is_kit = true
+
+    if (rec.partType === 'tip_top') {
+      const raw = rec.rawSpecs || {}
+      const tipTop = normalizeTipTop({
+        sku:
+          (typeof raw.code === 'string' && raw.code) ||
+          (typeof raw.externalId === 'string' && raw.externalId) ||
+          (typeof raw.sku === 'string' && raw.sku) ||
+          undefined,
+        title: rec.title,
+        description: rec.description,
+        series: typeof raw.series === 'string' ? raw.series : undefined,
+        frameMaterial: specs.frame_material as string | undefined,
+        ringMaterial: specs.ring_material as string | undefined,
+        tubeSize: specs.tube_size,
+        ringSize: specs.ring_size,
+      })
+      specs.tipTop = {
+        type: tipTop.type,
+        frameMaterialLong: tipTop.frameMaterialLong,
+        ringMaterialLong: tipTop.ringMaterialLong,
+        tubeSizeNormalized: tipTop.tubeSizeNormalized,
+        ringSizeNormalized: tipTop.ringSizeNormalized,
+        title: tipTop.title,
+      }
+      if (tipTop.tubeSizeNormalized != null) specs.tube_size = tipTop.tubeSizeNormalized
+      if (tipTop.ringSizeNormalized != null) specs.ring_size = tipTop.ringSizeNormalized
+      if (tipTop.frameMaterialCode) specs.frame_material = tipTop.frameMaterialCode
+      if (tipTop.ringMaterialCode) specs.ring_material = tipTop.ringMaterialCode
+    }
   }
 
   return { partType: rec.partType, specs }

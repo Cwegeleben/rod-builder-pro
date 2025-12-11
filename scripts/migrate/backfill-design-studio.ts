@@ -279,7 +279,7 @@ async function backfillProducts(batchSize = 50) {
             designStudioCoverageNotes: coverageNotes,
             designStudioLastTouchedAt: new Date(),
             designPartType,
-            priceMsrp: row.latestVersion?.priceMsrp ?? null,
+            msrp: row.latestVersion?.priceMsrp ?? null,
             priceWholesale: row.latestVersion?.priceWholesale ?? null,
             availability: row.latestVersion?.availability ?? null,
             images: row.latestVersion?.images ?? null,

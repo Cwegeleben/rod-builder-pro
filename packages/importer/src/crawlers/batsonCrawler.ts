@@ -2,6 +2,8 @@
 // <!-- BEGIN RBP GENERATED: scrape-template-wiring-v2 -->
 import { PlaywrightCrawler, log } from 'crawlee'
 import { extractProduct, extractBatsonSeriesRows } from '../extractors/batson.parse'
+import { normalizeBatsonProduct } from '../../../../app/services/suppliers/batsonNormalize.server'
+import type { BatsonRawProduct } from '../../../../app/services/suppliers/batsonNormalize.server'
 
 // Pure helper to decide if a product record should be staged (used for testing)
 export function shouldStageBatsonProduct(
@@ -24,6 +26,38 @@ export function shouldStageBatsonProduct(
 import { normalizeUrl } from '../lib/url'
 
 const ORIGIN = 'https://batsonenterprises.com'
+
+const PART_TYPE_HINTS: Record<string, string> = {
+  'batson-rod-blanks': 'Rod Blank',
+  'batson-reel-seats': 'Reel Seat',
+  'batson-guides-tops': 'Guide',
+  'batson-grips': 'Grip',
+  'batson-end-caps-gimbals': 'End Cap',
+  'batson-trim-pieces': 'Trim Piece',
+}
+
+const resolvePartType = (supplier: string, fallback?: string | null) => {
+  const hint = PART_TYPE_HINTS[supplier.toLowerCase()] || null
+  return hint || fallback || null
+}
+
+const buildBatsonNormalizationInput = (payload: {
+  externalId: string
+  partType: string
+  title: string
+  description?: string
+  rawSpecs: Record<string, unknown>
+  availability?: string | null
+  priceMsrp?: number | null
+}): BatsonRawProduct => ({
+  externalId: payload.externalId,
+  partType: payload.partType,
+  title: payload.title,
+  description: payload.description || '',
+  rawSpecs: payload.rawSpecs || {},
+  availability: payload.availability ?? null,
+  priceMsrp: payload.priceMsrp ?? null,
+})
 
 function isOnDomain(href: string) {
   try {
@@ -294,14 +328,28 @@ export async function crawlBatson(
             for (const row of rows) {
               if (seen.has(row.externalId)) continue
               seen.add(row.externalId)
+              const resolvedSeriesPartType = resolvePartType(SUPPLIER, row.partType) || row.partType
+              const normalizationInput = buildBatsonNormalizationInput({
+                externalId: row.externalId,
+                partType: resolvedSeriesPartType,
+                title: row.title,
+                description: row.description,
+                rawSpecs: row.rawSpecs,
+                availability: row.availability ?? null,
+                priceMsrp: row.priceMsrp ?? null,
+              })
+              const canonicalSpecs = normalizeBatsonProduct(normalizationInput)
               const toStage = {
                 externalId: row.externalId,
                 title: row.title,
-                partType: 'Rod Blank',
+                partType: resolvedSeriesPartType,
                 description: row.description || '',
                 images: row.images || [],
                 rawSpecs: row.rawSpecs,
-                normSpecs: row.normSpecs,
+                normSpecs: (canonicalSpecs as Record<string, unknown> | null) || row.normSpecs,
+                availability: row.availability ?? null,
+                priceMsrp: row.priceMsrp ?? undefined,
+                priceWh: row.priceWh ?? undefined,
               }
               await upsertStaging(SUPPLIER, { ...toStage, templateId: options?.templateId })
               await linkExternalIdForSource(SUPPLIER, currentUrl, row.externalId, options?.templateId)
@@ -334,13 +382,28 @@ export async function crawlBatson(
           } else if (!seen.has(rec.externalId)) {
             seen.add(rec.externalId)
             // Strip header flags before staging (schema does not include these fields)
+            const resolvedPartType = resolvePartType(SUPPLIER, rec.partType) || rec.partType
+            const normalizationInput = buildBatsonNormalizationInput({
+              externalId: rec.externalId,
+              partType: resolvedPartType,
+              title: rec.title,
+              description: rec.description || '',
+              rawSpecs: rec.rawSpecs,
+              availability: rec.availability ?? null,
+              priceMsrp: rec.priceMsrp ?? null,
+            })
+            const canonicalSpecs = normalizeBatsonProduct(normalizationInput)
             const toStage = {
               externalId: rec.externalId,
               title: rec.title,
-              partType: rec.partType,
+              partType: resolvedPartType,
               description: rec.description,
               images: rec.images,
               rawSpecs: rec.rawSpecs,
+              normSpecs: (canonicalSpecs as Record<string, unknown> | null) || rec.normSpecs,
+              availability: rec.availability ?? null,
+              priceMsrp: rec.priceMsrp ?? undefined,
+              priceWh: rec.priceWh ?? undefined,
             }
             await upsertStaging(SUPPLIER, { ...toStage, templateId: options?.templateId })
             await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId, options?.templateId)
@@ -357,13 +420,28 @@ export async function crawlBatson(
               headerSkips.push({ externalId: rec.externalId, reason, url: currentUrl })
               log.info(`skip header ${rec.externalId} @ ${currentUrl} reason=${reason}`)
             } else {
+              const resolvedPartType = resolvePartType(SUPPLIER, rec.partType) || rec.partType
+              const normalizationInput = buildBatsonNormalizationInput({
+                externalId: rec.externalId,
+                partType: resolvedPartType,
+                title: rec.title,
+                description: rec.description || '',
+                rawSpecs: rec.rawSpecs,
+                availability: rec.availability ?? null,
+                priceMsrp: rec.priceMsrp ?? null,
+              })
+              const canonicalSpecs = normalizeBatsonProduct(normalizationInput)
               const toStage = {
                 externalId: rec.externalId,
                 title: rec.title,
-                partType: rec.partType,
+                partType: resolvedPartType,
                 description: rec.description,
                 images: rec.images,
                 rawSpecs: rec.rawSpecs,
+                normSpecs: (canonicalSpecs as Record<string, unknown> | null) || rec.normSpecs,
+                availability: rec.availability ?? null,
+                priceMsrp: rec.priceMsrp ?? undefined,
+                priceWh: rec.priceWh ?? undefined,
               }
               await upsertStaging(SUPPLIER, { ...toStage, templateId: options?.templateId })
               await linkExternalIdForSource(SUPPLIER, currentUrl, rec.externalId, options?.templateId)

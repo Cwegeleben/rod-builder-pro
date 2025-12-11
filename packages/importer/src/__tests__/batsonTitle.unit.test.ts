@@ -80,7 +80,7 @@ describe('buildBatsonTitle', () => {
         ring_material: 'SiC',
       },
     })
-    expect(title).toBe('Universal Tip Top Titanium Polished Stainless 5.5mm Tube - Silicon Carbide (SiC) Size 10 Ring')
+    expect(title).toBe('Standard Tip Top Titanium 5.5 Tube – Silicon Carbide 10 Ring')
   })
 
   it('formats reel seats with tube and finish', () => {

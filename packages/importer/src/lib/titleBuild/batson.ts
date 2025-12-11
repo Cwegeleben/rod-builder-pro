@@ -2,6 +2,8 @@
 // Supports blanks, guides, tip tops, guide kits, reel seats, grips, end caps/gimbals, and trim pieces.
 // Uses heuristics based on normalized specs and falls back to legacy blank-centric ordering.
 
+import { normalizeTipTop, expandFrameMaterial, expandRingMaterial } from '../tipTop'
+
 export type BatsonTitleInput = {
   title?: string
   rawSpecs?: Record<string, unknown>
@@ -121,162 +123,25 @@ function escapeRegExp(source: string): string {
   return source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-const FRAME_MATERIAL_OVERRIDES: Record<string, string> = {
-  SS: 'Stainless Steel',
-  SS304: 'Stainless Steel (304)',
-  SS304L: 'Stainless Steel (304L)',
-  SS316: 'Stainless Steel (316)',
-  SS316L: 'Stainless Steel (316L)',
-  SS316TI: 'Stainless Steel (316Ti)',
-  SS420: 'Stainless Steel (420)',
-  STAINLESS: 'Stainless Steel',
-  STAINLESSSTEEL: 'Stainless Steel',
-  TITANIUM: 'Titanium',
-  TITANIUMALLOY: 'Titanium Alloy',
-  TITANIUMFRAME: 'Titanium',
-  TI: 'Titanium',
-  TITANIUMGR5: 'Titanium (Grade 5)',
-  TITANIUMGRADE5: 'Titanium (Grade 5)',
-  TITANIUMGRADE2: 'Titanium (Grade 2)',
-  ALUMINUM: 'Aluminum',
-  ALUMINIUM: 'Aluminum',
-}
-
-const RING_MATERIAL_DETAILS: Record<string, { label: string; short?: string }> = {
-  SIC: { label: 'Silicon Carbide', short: 'SiC' },
-  SICINSERT: { label: 'Silicon Carbide', short: 'SiC' },
-  SILICONCARBIDE: { label: 'Silicon Carbide', short: 'SiC' },
-  ALCONITE: { label: 'Alconite Ceramic' },
-  ZIRCONIA: { label: 'Zirconia Ceramic' },
-  ZIRCONIUM: { label: 'Zirconium Ceramic' },
-  NANOLITE: { label: 'Nanolite Ceramic' },
-  NANO: { label: 'Nano Ceramic' },
-  NANOPLASMA: { label: 'Nano Plasma Ceramic' },
-  ALUMINA: { label: 'Alumina Ceramic' },
-  ALUMINUMOXIDE: { label: 'Aluminum Oxide Ceramic' },
-  ALUMOXIDE: { label: 'Aluminum Oxide Ceramic' },
-}
-
 function describeFrameMaterial(value?: unknown): string {
   if (value == null) return ''
-  const raw = String(value).replace(/frame/i, '').trim()
-  if (!raw) return ''
-  const compact = raw.replace(/[^a-z0-9]/gi, '').toUpperCase()
-  if (FRAME_MATERIAL_OVERRIDES[compact]) return FRAME_MATERIAL_OVERRIDES[compact]
-  const stainlessMatch = compact.match(/^S{1,2}(\d{3}[A-Z]?)$/)
-  if (stainlessMatch) return `Stainless Steel (${stainlessMatch[1]})`
-  if (compact.startsWith('STAINLESSSTEEL')) {
-    const grade = compact.slice('STAINLESSSTEEL'.length)
-    return grade ? `Stainless Steel (${grade})` : 'Stainless Steel'
-  }
-  return titleCase(raw)
+  const direct = expandFrameMaterial(String(value))
+  if (direct) return direct
+  const raw = String(value).trim()
+  return raw ? titleCase(raw) : ''
 }
 
 function describeRingMaterial(value?: unknown): string {
   if (value == null) return ''
-  const raw = String(value).replace(/ring/i, '').trim()
-  if (!raw) return ''
-  const compact = raw.replace(/[^a-z0-9]/gi, '').toUpperCase()
-  const detail = RING_MATERIAL_DETAILS[compact]
-  if (detail) {
-    return detail.short ? `${detail.label} (${detail.short})` : detail.label
-  }
-  if (/silicon\s*carbide/i.test(raw)) return 'Silicon Carbide (SiC)'
-  if (/alum(in)?um\s*oxide/i.test(raw)) return 'Aluminum Oxide Ceramic'
-  if (/ceramic/i.test(raw)) return titleCase(raw)
-  const hasMixedCase = /[a-z]/.test(raw) && /[A-Z]/.test(raw)
-  if (hasMixedCase) return raw
-  if (/^[A-Z0-9]+$/.test(raw)) return raw
-  return titleCase(raw)
+  const direct = expandRingMaterial(String(value))
+  if (direct) return direct
+  const raw = String(value).trim()
+  return raw ? titleCase(raw) : ''
 }
 
 function formatDecimal(value: number): string {
   const fixed = value.toFixed(1)
   return fixed.replace(/\.0$/, '')
-}
-
-function formatTipTopTube(value?: number | null): string {
-  if (value == null || !Number.isFinite(value)) return ''
-  const magnitude = formatDecimal(value)
-  return `${magnitude}${value < 10 ? 'mm' : ''}`
-}
-
-const TIP_TYPE_DROP_WORDS = [
-  'tip',
-  'top',
-  'tip top',
-  'tip-top',
-  'guide',
-  'guides',
-  'kit',
-  'kits',
-  'batson',
-  'rainshadow',
-  'alps',
-  'forecast',
-]
-
-function sanitizeTipTypeCandidate(value: string): string {
-  let text = value
-  for (const word of TIP_TYPE_DROP_WORDS) {
-    const rx = new RegExp(`\\b${escapeRegExp(word)}\\b`, 'gi')
-    text = text.replace(rx, ' ')
-  }
-  text = text.replace(/[#/]+/g, ' ')
-  text = text.replace(/\s+/g, ' ').trim()
-  if (!text || text.length < 3) return ''
-  return titleCase(text)
-}
-
-function deriveTipTopType(input: BatsonTitleInput, specs: Record<string, unknown>, brandDisplay: string): string {
-  const brandPattern = brandDisplay ? new RegExp(`\\b${escapeRegExp(brandDisplay)}\\b`, 'i') : null
-  const candidates: Array<unknown> = [
-    (specs as Record<string, unknown>).tip_top_type,
-    (specs as Record<string, unknown>).tipTopType,
-    specs.tip_type,
-    (specs as Record<string, unknown>).tipType,
-    specs.tip_style,
-    (specs as Record<string, unknown>).tipStyle,
-    specs.tip_category,
-    (specs as Record<string, unknown>).tipCategory,
-    specs.style,
-    specs.application,
-    specs.series_type,
-    (specs as Record<string, unknown>).seriesType,
-    specs.series_style,
-    (specs as Record<string, unknown>).seriesStyle,
-    specs.part_subtype,
-    (specs as Record<string, unknown>).partSubtype,
-    specs.use_case,
-    (specs as Record<string, unknown>).useCase,
-    specs.type,
-    specs.subtype,
-  ]
-  for (const source of candidates) {
-    if (typeof source !== 'string') continue
-    let candidate = source
-    if (brandPattern) candidate = candidate.replace(brandPattern, '')
-    candidate = candidate.replace(/tip[\s-]*top/gi, '').trim()
-    const sanitized = sanitizeTipTypeCandidate(candidate)
-    if (sanitized) return sanitized
-  }
-  const partType =
-    typeof specs.part_type === 'string' ? specs.part_type : typeof specs.partType === 'string' ? specs.partType : ''
-  if (partType) {
-    const sanitized = sanitizeTipTypeCandidate(partType)
-    if (sanitized) return sanitized
-  }
-  const titleCandidate = input.title || ''
-  if (titleCandidate) {
-    const match = titleCandidate.match(/([^\n]+?)\s+Tip[\s-]?Top/i)
-    if (match) {
-      let prefix = match[1]
-      if (brandPattern) prefix = prefix.replace(brandPattern, '')
-      const sanitized = sanitizeTipTypeCandidate(prefix)
-      if (sanitized) return sanitized
-    }
-  }
-  return 'Universal'
 }
 
 function detectCategory(specs: Record<string, unknown>, explicit?: string | null | undefined): BatsonCategory {
@@ -394,14 +259,14 @@ function buildGuideTitle(
   const frame = (specs.frame_material || sx['frameMaterial'] || specs.frame || '') as string
   const finish = (specs.finish || specs.color || '') as string
   const ringMaterialRaw =
-    specs.ring_material ||
-    sx['ringMaterial'] ||
-    specs.ring_type ||
-    sx['ringType'] ||
-    sx['ring_material_type'] ||
-    sx['ringMaterialType'] ||
-    sx['insert'] ||
-    sx['insertMaterial'] ||
+    (specs.ring_material as string | undefined) ||
+    (sx['ringMaterial'] as string | undefined) ||
+    (specs.ring_type as string | undefined) ||
+    (sx['ringType'] as string | undefined) ||
+    (sx['ring_material_type'] as string | undefined) ||
+    (sx['ringMaterialType'] as string | undefined) ||
+    (sx['insert'] as string | undefined) ||
+    (sx['insertMaterial'] as string | undefined) ||
     ''
   const ringMaterialDisplay = describeRingMaterial(ringMaterialRaw)
 
@@ -445,32 +310,31 @@ function buildGuideTitle(
   const frameDisplay = describeFrameMaterial(frame)
 
   if (isTipTop) {
-    const tipType = deriveTipTopType(input, specs, brandDisplay)
-    const typeSegment = tipType ? `${tipType} Tip Top` : 'Tip Top'
-    guideParts.push(typeSegment)
-    const tubeDisplay = tube != null ? formatTipTopTube(tube) : ''
-    const frameFinishSegment = [frameDisplay, finishDisplay].filter(Boolean).join(' ').trim()
-    const leftDescriptor = [frameFinishSegment, tubeDisplay ? `${tubeDisplay} Tube` : '']
+    const descriptionBlob = [
+      input.title,
+      (specs.original_title as string | undefined) || undefined,
+      (specs.description as string | undefined) || undefined,
+      (specs.series as string | undefined) || undefined,
+    ]
       .filter(Boolean)
       .join(' ')
-      .trim()
-    const ringSizeDisplay = ring != null ? formatDecimal(ring) : ''
-    const ringSizeLabel = ringSizeDisplay ? `Size ${ringSizeDisplay}` : ''
-    const ringDescriptorCore = [ringMaterialDisplay, ringSizeLabel].filter(Boolean).join(' ').trim()
-    const ringDescriptor = ringDescriptorCore ? `${ringDescriptorCore} Ring` : ''
-    const descriptorSections = [leftDescriptor, ringDescriptor].filter(Boolean)
-    const descriptor = descriptorSections.join(' - ')
-    if (descriptor) guideParts.push(descriptor)
-    else {
-      if (frameDisplay) guideParts.push(frameDisplay)
-      if (finishDisplay) guideParts.push(finishDisplay)
-    }
-    return clamp255(toSingleLine(guideParts.filter(Boolean).join(' ')))
+    const tipTop = normalizeTipTop({
+      sku: codeStr,
+      title: input.title,
+      description: descriptionBlob,
+      series: (specs.series as string | undefined) || undefined,
+      family: familyToken || undefined,
+      frameMaterial: frame,
+      ringMaterial: ringMaterialRaw,
+      tubeSize: specs.tube_size ?? sx['tip_top_size'] ?? sx['tip_size'] ?? sx['tube'],
+      ringSize: specs.ring_size ?? sx['ringSize'] ?? sx['ring_diameter'] ?? sx['ringDiameter'],
+    })
+    return clamp255(toSingleLine(tipTop.title))
   }
 
   let descriptor = ''
   if (ring != null) {
-    const ringSizeLabel = `Size ${formatDecimal(ring)}`
+    const ringSizeLabel = formatDecimal(ring)
     descriptor = `Ring ${ringSizeLabel}${finishDisplay ? ' ' + finishDisplay : ''}${frameDisplay ? ' - ' + frameDisplay + ' Frame' : ''}`
   } else if (tube != null) {
     const tubeVal = `Tube ${tube}${tube < 10 ? 'mm' : ''}`

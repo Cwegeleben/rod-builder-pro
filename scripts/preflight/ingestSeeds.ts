@@ -140,7 +140,7 @@ function rewriteBatsonDetailUrl(url: string): string | null {
 
 async function main() {
   const supplierSlug = process.env.SUPPLIER_ID || 'batson-reel-seats'
-  const limit = Math.max(1, Math.min(500, Number(process.env.LIMIT || '50')))
+  const limit = Math.max(1, Math.min(2000, Number(process.env.LIMIT || '500')))
   const detailOnly = String(process.env.DETAIL_ONLY || '1') === '1'
   const sourceFilter = (process.env.SOURCE || 'discovered').toLowerCase() // all|forced|discovered
   const bypassHtmlHash = String(process.env.BYPASS_HTML_HASH || '').trim() === '1'
@@ -216,6 +216,54 @@ async function main() {
   }
   const unique = Array.from(new Set(urls))
 
+  type DetailSeedTarget = {
+    canonicalUrl: string
+    primaryUrl: string
+    sourceUrls: string[]
+    variantCodes: string[]
+  }
+
+  const canonicalizeDetailUrl = (href: string): string | null => {
+    try {
+      const u = new URL(href)
+      u.hash = ''
+      u.searchParams.delete('variant')
+      u.searchParams.delete('Variant')
+      return u.toString()
+    } catch {
+      return null
+    }
+  }
+
+  const buildDetailTargets = (input: string[]): DetailSeedTarget[] => {
+    const map = new Map<string, DetailSeedTarget & { variants: Set<string> }>()
+    for (const originalUrl of input) {
+      const canonicalUrl = canonicalizeDetailUrl(originalUrl)
+      if (!canonicalUrl) continue
+      let entry = map.get(canonicalUrl)
+      if (!entry) {
+        entry = {
+          canonicalUrl,
+          primaryUrl: originalUrl,
+          sourceUrls: [originalUrl],
+          variantCodes: [],
+          variants: new Set<string>(),
+        }
+        map.set(canonicalUrl, entry)
+      } else {
+        entry.sourceUrls.push(originalUrl)
+      }
+      try {
+        const parsed = new URL(originalUrl)
+        const variant = normalizeCode(parsed.searchParams.get('variant'))
+        if (variant) entry.variants.add(variant)
+      } catch {
+        /* ignore */
+      }
+    }
+    return Array.from(map.values()).map(({ variants, ...rest }) => ({ ...rest, variantCodes: Array.from(variants) }))
+  }
+
   const isBatsonGuidesDetailUrl = (href: string): boolean => {
     try {
       const u = new URL(href)
@@ -270,6 +318,16 @@ async function main() {
     console.log(JSON.stringify({ ok: true, supplierId, attempted: 0, staged: 0, errors: 0, items: [] }, null, 2))
     return
   }
+  const detailTargets = buildDetailTargets(picked)
+  if (!detailTargets.length) {
+    console.log(JSON.stringify({ ok: true, supplierId, attempted: 0, staged: 0, errors: 0, items: [] }, null, 2))
+    return
+  }
+  if (detailTargets.length !== picked.length) {
+    console.log(
+      `[ingestSeeds] deduped ${picked.length} detail URL(s) down to ${detailTargets.length} canonical target(s) for ${supplierSlug}`,
+    )
+  }
 
   const { upsertNormalizedProduct } = await import('../../app/services/productDbWriter.server')
   const { linkExternalIdForSource } = await import('../../packages/importer/src/seeds/sources')
@@ -291,14 +349,9 @@ async function main() {
   const concurrency = getConcurrencyFromEnv()
   console.log('[discoverAndSeed] detail expansion concurrency:', concurrency)
 
-  const processDetailUrl = async (url: string, _index: number) => {
-    let targetVariant = ''
-    try {
-      const parsedSeed = new URL(url)
-      targetVariant = normalizeCode(parsedSeed.searchParams.get('variant'))
-    } catch {
-      targetVariant = ''
-    }
+  const processDetailUrl = async (seed: DetailSeedTarget, _index: number) => {
+    const { primaryUrl, canonicalUrl, sourceUrls, variantCodes } = seed
+    const requestedVariants = new Set(variantCodes || [])
     const loadDetailHtml = async (targetUrl: string): Promise<{ html: string; resolvedUrl: string }> => {
       const ctrl = new AbortController()
       const timer = setTimeout(() => ctrl.abort(), 15000)
@@ -351,21 +404,21 @@ async function main() {
 
     let htmlResult: { html: string; resolvedUrl: string }
     try {
-      htmlResult = await loadDetailHtml(url)
+      htmlResult = await loadDetailHtml(primaryUrl)
     } catch (err) {
       errors++
       const reason = (err as Error)?.message || 'fetch-failed'
-      items.push({ url, ok: false, reason })
-      await logSkippedDetail({ url, error: reason })
+      items.push({ url: canonicalUrl, ok: false, reason })
+      await logSkippedDetail({ url: canonicalUrl, error: reason })
       return
     }
 
     let html = htmlResult.html
-    let activeDetailUrl = htmlResult.resolvedUrl || url
+    let activeDetailUrl = htmlResult.resolvedUrl || primaryUrl
 
     const visitedDetailUrls = new Set<string>([activeDetailUrl])
     const tryRewriteAndReload = async () => {
-      const rewritten = rewriteBatsonDetailUrl(activeDetailUrl) || rewriteBatsonDetailUrl(url)
+      const rewritten = rewriteBatsonDetailUrl(activeDetailUrl) || rewriteBatsonDetailUrl(primaryUrl)
       if (!rewritten || visitedDetailUrls.has(rewritten)) return false
       visitedDetailUrls.add(rewritten)
       console.log('[detail-expansion] rewriting Batson URL', { from: activeDetailUrl, to: rewritten })
@@ -391,23 +444,56 @@ async function main() {
       }
     }
 
-    const detailUrlForContent = activeDetailUrl || url
+    const detailUrlForContent = activeDetailUrl || primaryUrl
+
+    const resolveImageUrl = (src?: string | null): string | null => {
+      const trimmed = String(src || '').trim()
+      if (!trimmed || /^data:/i.test(trimmed)) return null
+      try {
+        return new URL(trimmed, detailUrlForContent).toString()
+      } catch {
+        return /^https?:/i.test(trimmed) ? trimmed : null
+      }
+    }
+    const heroImageUrl = (() => {
+      const meta = html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i)?.[1]
+      if (meta) {
+        const resolved = resolveImageUrl(meta)
+        if (resolved) return resolved
+      }
+      const img = html.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i)?.[1]
+      if (img) {
+        const resolved = resolveImageUrl(img)
+        if (resolved) return resolved
+      }
+      return null
+    })()
+    const sharedImages = heroImageUrl ? [heroImageUrl] : null
+    const sharedImagesJson = sharedImages ? (sharedImages as unknown as Prisma.InputJsonValue) : null
 
     const htmlHash = computeHtmlHash(html)
-    const previousHash = htmlHashCache.get(url) || ''
+    const previousHash = sourceUrls.map(src => htmlHashCache.get(src) || '').find(Boolean) || ''
     if (!bypassHtmlHash && previousHash && previousHash === htmlHash) {
-      console.log('[detail-expansion] unchanged HTML, skipping parse/upsert:', url)
+      console.log('[detail-expansion] unchanged HTML, skipping parse/upsert:', canonicalUrl)
       await ensureSnapshotForUrl(detailUrlForContent, html)
-      await persistHtmlHash(url, htmlHash, supplierIdsForHash)
-      htmlHashCache.set(url, htmlHash)
-      items.push({ url, ok: true, reason: 'unchanged-skip' })
+      await Promise.all(
+        sourceUrls.map(async alias => {
+          await persistHtmlHash(alias, htmlHash, supplierIdsForHash)
+          htmlHashCache.set(alias, htmlHash)
+        }),
+      )
+      items.push({ url: canonicalUrl, ok: true, reason: 'unchanged-skip' })
       return
     }
     let hashCommitted = false
     const commitHash = async () => {
       if (hashCommitted) return
-      await persistHtmlHash(url, htmlHash, supplierIdsForHash)
-      htmlHashCache.set(url, htmlHash)
+      await Promise.all(
+        sourceUrls.map(async alias => {
+          await persistHtmlHash(alias, htmlHash, supplierIdsForHash)
+          htmlHashCache.set(alias, htmlHash)
+        }),
+      )
       hashCommitted = true
     }
 
@@ -455,9 +541,10 @@ async function main() {
         const rows = extractBatsonAttributeGrid(html, base) as BatsonRow[]
         if (Array.isArray(rows) && rows.length) {
           let scopedRows = rows
-          if (targetVariant) {
-            const filtered = rows.filter(r => normalizeCode(r?.raw?.Code) === targetVariant)
-            if (filtered.length) scopedRows = filtered
+          if (requestedVariants.size) {
+            const filtered = rows.filter(r => requestedVariants.has(normalizeCode(r?.raw?.Code)))
+            // Only narrow the working set when deduped variants would still cover most of the rows.
+            if (filtered.length && filtered.length >= rows.length * 0.8) scopedRows = filtered
           }
           for (const r of scopedRows) {
             try {
@@ -522,7 +609,7 @@ async function main() {
                 title,
                 type,
                 description: String(r.title || ''),
-                images: null,
+                images: sharedImagesJson,
                 rawSpecs: r.raw as unknown as Prisma.InputJsonValue,
                 normSpecs: {
                   ...(r.specs as Record<string, string | number | null>),
@@ -544,7 +631,7 @@ async function main() {
               await new Promise(res => setTimeout(res, 100))
             } catch (e) {
               errors++
-              items.push({ url, ok: false, reason: (e as Error)?.message || 'series-row-failed' })
+              items.push({ url: canonicalUrl, ok: false, reason: (e as Error)?.message || 'series-row-failed' })
             }
           }
           // Polite delay after series page before continuing to next seed
@@ -728,7 +815,7 @@ async function main() {
                 title,
                 type: 'Reel Seat',
                 description: String(r.title || ''),
-                images: null,
+                images: sharedImagesJson,
                 rawSpecs: r.raw as unknown as Prisma.InputJsonValue,
                 normSpecs: {
                   ...(r.specs as Record<string, string | number | null>),
@@ -756,7 +843,7 @@ async function main() {
               await new Promise(res => setTimeout(res, 100))
             } catch (e) {
               errors++
-              items.push({ url, ok: false, reason: (e as Error)?.message || 'series-row-failed' })
+              items.push({ url: canonicalUrl, ok: false, reason: (e as Error)?.message || 'series-row-failed' })
             }
           }
           // Polite delay after series page before continuing to next seed
@@ -779,8 +866,8 @@ async function main() {
       if (!externalId) throw new Error('no-external-id')
       // Skip generic listing pages which resolve to PRODUCTS (no discrete item)
       if (externalId === 'PRODUCTS') {
-        items.push({ url, ok: false, reason: 'skip-listing-page' })
-        await logSkippedDetail({ url, error: 'skip-listing-page' })
+        items.push({ url: canonicalUrl, ok: false, reason: 'skip-listing-page' })
+        await logSkippedDetail({ url: canonicalUrl, error: 'skip-listing-page' })
         return
       }
       const { extractBatsonInfoAttributes } = await import(
@@ -918,8 +1005,8 @@ async function main() {
         partTypeDerived === 'Tip Top' ? 'tip-top' : partTypeDerived === 'Guide' ? 'guide' : undefined
       if (restrictToGuides) {
         if (!classification || !allowedGuideClasses.has(classification)) {
-          items.push({ url, ok: false, reason: 'skip-non-guide-detail' })
-          await logSkippedDetail({ url, error: 'skip-non-guide-detail' })
+          items.push({ url: canonicalUrl, ok: false, reason: 'skip-non-guide-detail' })
+          await logSkippedDetail({ url: canonicalUrl, error: 'skip-non-guide-detail' })
           return
         }
       }
@@ -947,8 +1034,8 @@ async function main() {
           }
         }
         await commitHash()
-        items.push({ url, sku: externalId, ok: false, reason: 'page-not-found' })
-        await logSkippedDetail({ url, error: 'page-not-found' })
+        items.push({ url: canonicalUrl, sku: externalId, ok: false, reason: 'page-not-found' })
+        await logSkippedDetail({ url: canonicalUrl, error: 'page-not-found' })
         return
       }
 
@@ -1016,33 +1103,33 @@ async function main() {
         title,
         type: partTypeDerived,
         description: (jld?.description as string) || '',
-        images: jld?.images as unknown as Prisma.InputJsonValue,
+        images: (jld?.images as unknown as Prisma.InputJsonValue | null) ?? sharedImagesJson,
         rawSpecs: rawSpecs as unknown as Prisma.InputJsonValue,
         normSpecs: normSpecsMerged as unknown as Prisma.InputJsonValue,
         priceMsrp: resolvedPrices.priceMsrp,
         priceWholesale: resolvedPrices.priceWholesale,
         availability: isPageNotFound ? 'Unavailable' : resolvedAvailability,
-        sources: [{ url, externalId, source: 'discovered' }],
+        sources: [{ url: detailUrlForContent, externalId, source: 'discovered' }],
         fetchedAt: new Date(),
       })
-      await linkExternalIdForSource(supplierId, url, externalId, undefined)
+      await linkExternalIdForSource(supplierId, detailUrlForContent, externalId, undefined)
       await commitHash()
-      items.push({ url, sku: externalId, ok: true })
+      items.push({ url: canonicalUrl, sku: externalId, ok: true })
       staged++
     } catch (e) {
-      items.push({ url, ok: false, reason: (e as Error)?.message || 'failed' })
+      items.push({ url: canonicalUrl, ok: false, reason: (e as Error)?.message || 'failed' })
       errors++
-      await logSkippedDetail({ url, error: (e as Error)?.message || 'failed' })
+      await logSkippedDetail({ url: canonicalUrl, error: (e as Error)?.message || 'failed' })
     }
     // polite delay between items
     await new Promise(res => setTimeout(res, 300))
   }
 
-  await mapWithConcurrency(picked, concurrency, processDetailUrl)
+  await mapWithConcurrency(detailTargets, concurrency, processDetailUrl)
 
   console.log(
     JSON.stringify(
-      { ok: true, supplierId, attempted: picked.length, staged, errors, items: items.slice(0, 25) },
+      { ok: errors === 0, supplierId, attempted: detailTargets.length, staged, errors, items: items.slice(0, 25) },
       null,
       2,
     ),

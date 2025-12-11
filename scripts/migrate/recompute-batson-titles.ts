@@ -78,7 +78,7 @@ async function main() {
   // Duplicate SKU guard (should be impossible due to unique constraint)
   const dupes: Record<string, number> = {}
   for (const p of products) {
-    const key = `${p.supplierId}::${p.sku}`
+    const key = `${p.supplierId}::${p.productCode}`
     dupes[key] = (dupes[key] || 0) + 1
   }
   const dupList = Object.entries(dupes).filter(([, n]) => n > 1)
@@ -110,7 +110,7 @@ async function main() {
         techniqueLabel,
       }
       const row: BatsonBlankRow = {
-        modelCode: p.sku,
+        modelCode: p.productCode,
         lengthFtInRaw: sv<string>('length_label') || String(sv<number>('length_in') || ''),
         piecesRaw: String(sv<number>('pieces') || ''),
         powerRaw: sv<string>('power') || '',
@@ -121,7 +121,7 @@ async function main() {
       nextTitle = buildBatsonBlankTitle(seriesCtx, row)
     } else if (p.type === 'Reel Seat') {
       const brandFallback =
-        /alps/i.test(sv<string>('brand') || p.title || '') || /^AIP/i.test(p.sku)
+        /alps/i.test(sv<string>('brand') || p.title || '') || /^AIP/i.test(p.productCode)
           ? 'Alps'
           : /forecast/i.test(sv<string>('brand') || p.title || '')
             ? 'Forecast'
@@ -136,14 +136,14 @@ async function main() {
             : 'Reel Seat Hardware'
       const familyName = (() => {
         const t = String(sv<string>('series') || p.title || '')
-        if (/aip\s*contour/i.test(t) || (/^AIP/i.test(p.sku) && /contour/i.test(t))) return 'AIP Contour'
+        if (/aip\s*contour/i.test(t) || (/^AIP/i.test(p.productCode) && /contour/i.test(t))) return 'AIP Contour'
         const f = String(sv<string>('familyName') || '')
         return isLikelyCode(f) ? '' : f || ''
       })()
       const row: BatsonReelSeatRow = {
         rawName: p.title,
         brandRaw: sv<string>('brand') || undefined,
-        codeRaw: p.sku,
+        codeRaw: p.productCode,
         familyName: familyName || undefined,
         seatStyle:
           sv<string>('seatStyle') ||
@@ -162,7 +162,7 @@ async function main() {
       continue
     }
 
-    nextTitle = stripSkuFromTitle(nextTitle, p.sku)
+    nextTitle = stripSkuFromTitle(nextTitle, p.productCode)
     if (!nextTitle || nextTitle === p.title) continue
 
     await prisma.product.update({ where: { id: p.id }, data: { title: nextTitle } })

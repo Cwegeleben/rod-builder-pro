@@ -16,7 +16,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       Array<{
         id: string
         supplierId: string
-        sku: string
+        productCode: string
         title: string
         type: string | null
         status: string
@@ -32,7 +32,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         fetchedAt: string | null
       }>
     >(
-      `SELECT p.id, p.supplierId, p.sku, p.title, p.type, p.status, p.updatedAt, p.latestVersionId,
+      `SELECT p.id, p.supplierId, p.sku AS productCode, p.title, p.type, p.status, p.updatedAt, p.latestVersionId,
               v.description, v.images, v.normSpecs, v.rawSpecs, v.priceMsrp, v.priceWholesale, v.availability, v.fetchedAt
          FROM Product p
          LEFT JOIN ProductVersion v ON v.id = p.latestVersionId
@@ -54,7 +54,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const product = {
       id: r.id,
       supplierId: r.supplierId,
-      sku: r.sku,
+      productCode: r.productCode,
       title: r.title,
       type: r.type,
       status: r.status,
@@ -86,7 +86,7 @@ export default function ProductDetail() {
         product: {
           id: string
           supplierId: string
-          sku: string
+          productCode: string
           title: string
           type: string | null
           status: string
@@ -118,7 +118,7 @@ export default function ProductDetail() {
               {canonical ? (
                 <div className="space-y-s">
                   <Text as="p">Title: {title}</Text>
-                  <Text as="p">SKU: {data.product.sku}</Text>
+                  <Text as="p">Product Code: {data.product.productCode}</Text>
                   <Text as="p">Supplier: {data.product.supplierId}</Text>
                   <Text as="p">Type: {data.product.type || '-'}</Text>
                   <Text as="p">Status: {data.product.status}</Text>

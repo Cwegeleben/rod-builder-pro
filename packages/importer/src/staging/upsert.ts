@@ -6,6 +6,7 @@ import {
   normalizeDesignPartType,
 } from '../../../../app/lib/designStudio/annotations.server'
 import { evaluateDesignStudioReadiness, formatBlockingReasons } from '../../../../app/lib/designStudio/readiness.server'
+import { extractTipTopReadinessContext } from '../lib/tipTop'
 
 export async function upsertStaging(
   supplierId: string,
@@ -61,6 +62,8 @@ export async function upsertStaging(
     normSpecs: rec.normSpecs,
   })
   const designPartType = normalizeDesignPartType(rec.partType || designStudio.role)
+  const normSpecsRecord = (rec.normSpecs as Record<string, unknown> | null) || null
+  const tipTopContext = extractTipTopReadinessContext(normSpecsRecord)
   const readiness = evaluateDesignStudioReadiness({
     designPartType,
     annotation: designStudio,
@@ -68,6 +71,8 @@ export async function upsertStaging(
     priceWholesale: priceWh,
     availability: rec.availability ?? null,
     images: rec.images,
+    specs: normSpecsRecord,
+    tipTop: tipTopContext,
   })
   const blockingReasons = readiness.ready ? null : readiness.reasons
   const coverageNotes = readiness.ready

@@ -43,10 +43,9 @@ describe('batson guides/tip-tops parsing and title', () => {
   it('builds a tip top title using tube size with brand fallback', () => {
     const t = buildBatsonTitle({
       title: 'Forecast Tip Top',
-      rawSpecs: { tube_size: 6.0, color: 'Gunsmoke', code: 'TT06GS' },
+      rawSpecs: { tube_size: 6.0, frame_material: 'SS316', ring_material: 'AL', code: 'FTT6.0-6C' },
     })
-    // Family prefix TT precedes type descriptor
-    expect(t).toBe('Forecast TT Universal Tip Top Gunsmoke 6mm Tube')
+    expect(t).toBe('Standard Tip Top 316 Stainless Steel 6.0 Tube – Alconite 6 Ring')
   })
 
   it('builds a kit title when placeholder title present with brand fallback', () => {

@@ -153,11 +153,11 @@ async function main() {
 
   await prisma.designStudioAnnotationAudit
     .deleteMany({
-      where: { product: { supplierId, sku: { in: externalIds } } },
+      where: { product: { supplierId, productCode: { in: externalIds } } },
     })
     .catch(() => {})
 
-  await prisma.product.deleteMany({ where: { supplierId, sku: { in: externalIds } } })
+  await prisma.product.deleteMany({ where: { supplierId, productCode: { in: externalIds } } })
   await prisma.partStaging.deleteMany({ where: { supplierId, externalId: { in: externalIds } } })
 
   const now = new Date()

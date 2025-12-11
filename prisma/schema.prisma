@@ -47,27 +47,27 @@ enum FieldStorage {
 }
 
 model SpecTemplate {
-  id        String      @id @default(cuid())
-  name      String      @unique
+  id                   String            @id @default(cuid())
+  name                 String            @unique
   // <!-- BEGIN RBP GENERATED: importer-templates-zero-orphan-v1 -->
-  status    TemplateStatus @default(ACTIVE)
+  status               TemplateStatus    @default(ACTIVE)
   // <!-- END RBP GENERATED: importer-templates-zero-orphan-v1 -->
   // <!-- BEGIN RBP GENERATED: importer-templates-orphans-v1 -->
   // Optional template-level cost used by importer defaults and UI. No default; managed via core cost field instead.
-  cost      Float?
+  cost                 Float?
   // Product image URL (optional) for importer to attach a default product image
-  productImageUrl String?
+  productImageUrl      String?
   // Supplier availability metadata (read-only in UI, updated by importer)
   supplierAvailability String?
   // <!-- END RBP GENERATED: importer-templates-orphans-v1 -->
-  fields    SpecField[]
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  fields               SpecField[]
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
   // Versioning
-  versions TemplateVersion[]
+  versions             TemplateVersion[]
   // Phase 2 (hybrid): when this row is a draft derived from a remote published template
-  remoteTemplateId String?   // canonical template_id (remote handle)
-  remoteVersion    Int?      // remote version at import time
+  remoteTemplateId     String? // canonical template_id (remote handle)
+  remoteVersion        Int? // remote version at import time
 
   @@index([remoteTemplateId])
 }
@@ -78,6 +78,7 @@ enum TemplateStatus {
   ACTIVE
   ARCHIVED
 }
+
 // <!-- END RBP GENERATED: importer-templates-zero-orphan-v1 -->
 
 model SpecField {
@@ -99,17 +100,18 @@ model SpecField {
 }
 
 model TemplateVersion {
-  id          String       @id @default(cuid())
-  templateId  String
-  template    SpecTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  id            String       @id @default(cuid())
+  templateId    String
+  template      SpecTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
   versionNumber Int
   // Using String storage for now; upgrade to Json later with a dedicated migration.
-  dataJson     String
-  publishedAt  DateTime @default(now())
-  createdAt    DateTime @default(now())
+  dataJson      String
+  publishedAt   DateTime     @default(now())
+  createdAt     DateTime     @default(now())
 
   @@unique([templateId, versionNumber])
 }
+
 // END products-workspace-v3-0
 
 // Product type to template mapping
@@ -133,37 +135,38 @@ model ImportProfile {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  jobs           ImportJob[]
+  jobs ImportJob[]
 
   @@unique([supplierDomain, productType])
 }
 
 model ImportJob {
-  id          String        @id @default(cuid())
+  id          String         @id @default(cuid())
   profileId   String?
   profile     ImportProfile? @relation(fields: [profileId], references: [id])
   url         String
   productType String
-  status      String        @default("queued") // queued | running | completed | failed | cancelled
-  countsJson  Json          // { total, processed, created, updated, skipped, errors }
-  logJson     Json          // array of log lines
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  status      String         @default("queued") // queued | running | completed | failed | cancelled
+  countsJson  Json // { total, processed, created, updated, skipped, errors }
+  logJson     Json // array of log lines
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
-  items       ImportItem[]
+  items ImportItem[]
 }
 
 model ImportItem {
-  id         String     @id @default(cuid())
+  id         String    @id @default(cuid())
   jobId      String
-  job        ImportJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job        ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
   sourceUrl  String
   rawJson    Json
   mappedJson Json?
-  status     String      @default("pending") // pending | mapped | created | updated | skipped | error
+  status     String    @default("pending") // pending | mapped | created | updated | skipped | error
   error      String?
-  createdAt  DateTime    @default(now())
+  createdAt  DateTime  @default(now())
 }
+
 // <!-- BEGIN RBP GENERATED: supplier-inventory-sync-v1 -->
 model SupplierAuthProfile {
   id             String   @id @default(cuid())
@@ -179,7 +182,7 @@ model SupplierAuthProfile {
 }
 
 model SupplierInventorySnapshot {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   supplierDomain String
   productCode    String
   qtyAvailable   Int?
@@ -187,8 +190,9 @@ model SupplierInventorySnapshot {
   lastSeenAt     DateTime?
   snapshotJson   Json?
   status         String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 }
+
 // <!-- END RBP GENERATED: supplier-inventory-sync-v1 -->
 // <!-- END RBP GENERATED: supplier-importer-v1 -->
 
@@ -200,11 +204,11 @@ model ImporterVersion {
 }
 
 model ImportRun {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   supplierId String
-  startedAt  DateTime @default(now())
+  startedAt  DateTime  @default(now())
   finishedAt DateTime?
-  status     String   // started success failed
+  status     String // started success failed
   // Progress/state snapshot for UI streaming and polling
   // Shape: { phase: string, percent: number, etaSeconds?: number, counts?: Json, details?: Json }
   progress   Json?
@@ -212,69 +216,70 @@ model ImportRun {
 }
 
 model ImportDiff {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   importRunId String
   externalId  String
-  diffType    String   // add change delete conflict
+  diffType    String // add change delete conflict
   before      Json?
   after       Json?
   validation  Json?
-  resolution  String?  // approve reject edit
+  resolution  String? // approve reject edit
   resolvedBy  String?
   resolvedAt  DateTime?
 }
 
 model PartStaging {
-  id          String   @id @default(cuid())
-  supplierId  String
+  id                          String   @id @default(cuid())
+  supplierId                  String
   // Template-scoped staging to isolate multiple imports under same supplier
-  templateId  String?
-  externalId  String
-  title       String
-  partType    String
-  description String?
-  images      Json?
-  rawSpecs    Json?
-  normSpecs   Json?
-  priceMsrp   Decimal?
-  priceWh     Decimal?
-  availability String?
-  hashContent String   @default("")
-  fetchedAt   DateTime @default(now())
-  designStudioReady Boolean   @default(false)
-  designStudioFamily String?
-  designStudioSeries String?
-  designStudioRole  String?
-  designStudioCompatibility Json?
-  designStudioCoverageNotes String?
-  designStudioSourceQuality String?
-  designStudioHash   String   @default("")
-  designPartType String?
+  templateId                  String?
+  externalId                  String
+  title                       String
+  partType                    String
+  description                 String?
+  images                      Json?
+  rawSpecs                    Json?
+  normSpecs                   Json?
+  priceMsrp                   Decimal?
+  priceWh                     Decimal?
+  availability                String?
+  hashContent                 String   @default("")
+  fetchedAt                   DateTime @default(now())
+  designStudioReady           Boolean  @default(false)
+  designStudioFamily          String?
+  designStudioSeries          String?
+  designStudioRole            String?
+  designStudioCompatibility   Json?
+  designStudioCoverageNotes   String?
+  designStudioSourceQuality   String?
+  designStudioHash            String   @default("")
+  designPartType              String?
   designStudioBlockingReasons Json?
 
   // Back-writes from publish pipeline
-  shopifyProductId String?
+  shopifyProductId  String?
   shopifyVariantIds Json?
-  publishedAt      DateTime?
-  publishStatus    String?   // created | updated | skipped | error
-  publishResult    Json?
+  publishedAt       DateTime?
+  publishStatus     String? // created | updated | skipped | error
+  publishResult     Json?
 
   @@unique([supplierId, templateId, externalId], name: "part_staging_supplier_template_ext_unique")
 }
+
 // <!-- END RBP GENERATED: importer-v2-schema -->
 
 // <!-- BEGIN RBP GENERATED: hq-importer-new-import-v2 (mapping-snapshot-schema) -->
 /// Global template-level alias memory: maps a normalized source label to a template field key.
 model TemplateAlias {
-  id          String   @id @default(cuid())
-  templateId  String
+  id         String   @id @default(cuid())
+  templateId String
   // Normalized source label (e.g., "item_length_in")
-  labelNorm   String
-  fieldKey    String
-  source      String   @default("manual") // manual | auto
-  confidence  Float    @default(1.0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  labelNorm  String
+  fieldKey   String
+  source     String   @default("manual") // manual | auto
+  confidence Float    @default(1.0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@unique([templateId, labelNorm], name: "template_alias_unique")
 }
@@ -294,38 +299,40 @@ model RunMappingSnapshot {
 
 /// Optional per-item applied mapping materialization for diagnostics
 model RunItemMapping {
-  id         String   @id @default(cuid())
-  runId      String
-  itemKey    String
-  applied    Json     // { fieldKey: value }
-  diagnostics Json    // { missing:[], sources:{} }
-  createdAt  DateTime @default(now())
+  id          String   @id @default(cuid())
+  runId       String
+  itemKey     String
+  applied     Json // { fieldKey: value }
+  diagnostics Json // { missing:[], sources:{} }
+  createdAt   DateTime @default(now())
 
-  @@index([runId])
   @@unique([runId, itemKey], name: "run_item_mapping_unique")
+  @@index([runId])
 }
+
 // <!-- END RBP GENERATED: hq-importer-new-import-v2 (mapping-snapshot-schema) -->
 
 // <!-- BEGIN RBP GENERATED: importer-seeds-v1 -->
 model ProductSource {
-  id           String   @id @default(cuid())
-  supplierId   String
-  supplier     Supplier @relation("SupplierSources", fields: [supplierId], references: [id])
+  id          String   @id @default(cuid())
+  supplierId  String
+  supplier    Supplier @relation("SupplierSources", fields: [supplierId], references: [id])
   // Template-scoped product sources (seeds) to avoid cross-template bleed
-  templateId   String?
-  url          String
-  externalId   String?
-  source       String   // 'manual' | 'discovered' | 'forced'
-  notes        String?
-  htmlHash     String?
-  firstSeenAt  DateTime @default(now())
-  lastSeenAt   DateTime @default(now())
+  templateId  String?
+  url         String
+  externalId  String?
+  source      String // 'manual' | 'discovered' | 'forced'
+  notes       String?
+  htmlHash    String?
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
   // Link to canonical Product when known (after first successful normalization/upsert)
-  productId    String?
-  product      Product? @relation("ProductSources", fields: [productId], references: [id])
+  productId   String?
+  product     Product? @relation("ProductSources", fields: [productId], references: [id])
 
   @@unique([supplierId, templateId, url], name: "product_source_supplier_template_url_unique")
 }
+
 // <!-- END RBP GENERATED: importer-seeds-v1 -->
 
 // <!-- BEGIN RBP GENERATED: hq-import-settings-v1 -->
@@ -342,29 +349,31 @@ model SupplierCredentials {
 }
 
 model ImportSchedule {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   supplierId String
-  enabled    Boolean  @default(true)
-  cron       String   // e.g. "0 3 * * *"
-  profile    String   // "price_avail"
+  enabled    Boolean   @default(true)
+  cron       String // e.g. "0 3 * * *"
+  profile    String // "price_avail"
   lastRunAt  DateTime?
   nextDueAt  DateTime?
 }
+
 // <!-- END RBP GENERATED: hq-import-settings-v1 -->
 
 // <!-- BEGIN RBP GENERATED: importer-price-avail-job-v1 -->
 model SupplierCookieJar {
-  supplierId   String   @id
+  supplierId   String    @id
   jarEncrypted String
   lastLoginAt  DateTime
   expiresAt    DateTime?
-  updatedAt    DateTime @updatedAt
+  updatedAt    DateTime  @updatedAt
 }
+
 // <!-- END RBP GENERATED: importer-price-avail-job-v1 -->
 
 model SupplierSyncState {
-  id                    String   @id @default(cuid())
-  supplierSlug          String   @unique
+  id                    String    @id @default(cuid())
+  supplierSlug          String    @unique
   authCookieEnc         String?
   authCookieSetAt       DateTime?
   authCookieSetBy       String?
@@ -378,25 +387,60 @@ model SupplierSyncState {
   lastSyncError         String?
   currentSyncRun        Json?
   lastSyncRun           Json?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model ProductImportRun {
+  id            String                  @id @default(cuid())
+  supplierSlug  String
+  supplierId    String?
+  startedAt     DateTime                @default(now())
+  finishedAt    DateTime?
+  status        String                  @default("pending")
+  totalAdds     Int                     @default(0)
+  totalChanges  Int                     @default(0)
+  totalDeletes  Int                     @default(0)
+  summary       Json?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  items ProductImportRunItem[]
+}
+
+model ProductImportRunItem {
+  id             String             @id @default(cuid())
+  runId          String
+  run            ProductImportRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
+  supplierSlug   String
+  supplierSiteId String?
+  productCode    String
+  category       String
+  family         String?
+  kind           String
+  beforeSnapshot Json?
+  afterSnapshot  Json?
+  changedFields  Json?
+  createdAt      DateTime           @default(now())
+
+  @@index([runId])
 }
 
 // <!-- BEGIN RBP GENERATED: importer-v2-3 -->
 model ImportTemplate {
-  id            String   @id
-  name          String
+  id             String    @id
+  name           String
   // importer v2.3 config/state blob (template-first 1:1)
-  importConfig  Json
+  importConfig   Json
   // quick status for Home row
-  state         String   @default("NEEDS_SETTINGS")
-  lastRunAt     DateTime?
-  hadFailures   Boolean  @default(false)
+  state          String    @default("NEEDS_SETTINGS")
+  lastRunAt      DateTime?
+  hadFailures    Boolean   @default(false)
   // current preparing run (async review prep); cleared on completion/failure
   preparingRunId String?
 
   // logs relation
-  logs          ImportLog[]
+  logs ImportLog[]
 
   @@index([state])
   @@index([preparingRunId])
@@ -405,55 +449,66 @@ model ImportTemplate {
 // BEGIN product_db canonical models (phase 1)
 /// Supplier: distinct source of products. Consolidates legacy supplierId uses.
 model Supplier {
-  id         String   @id @default(cuid())
-  slug       String   @unique
-  name       String
-  urlRoot    String?
-  active     Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  products   Product[]
-  sources    ProductSource[] @relation("SupplierSources")
+  id        String          @id @default(cuid())
+  slug      String          @unique
+  name      String
+  urlRoot   String?
+  active    Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  products  Product[]
+  sources   ProductSource[] @relation("SupplierSources")
 }
 
-/// Product: stable identity keyed by (supplierId, sku)
+/// Product: stable identity keyed by (supplierId, productCode)
 model Product {
-  id              String          @id @default(cuid())
-  supplierId      String
-  supplier        Supplier        @relation(fields: [supplierId], references: [id], onDelete: Cascade)
-  sku             String
-  title           String
-  type            String?
-  designPartType  String?
-  status          ProductStatus   @default(DRAFT) // DRAFT READY PUBLISHED
-  latestVersionId String?         @unique
+  id                          String                        @id @default(cuid())
+  supplierId                  String
+  supplier                    Supplier                      @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplierSiteId              String?
+  productCode                 String                        @map("sku")
+  title                       String
+  type                        String?
+  category                    String?
+  family                      String?
+  brand                       String?
+  series                      String?
+  material                    String?
+  color                       String?
+  designPartType              String?
+  status                      ProductStatus                 @default(DRAFT) // DRAFT READY PUBLISHED
+  latestVersionId             String?                       @unique
   // Distinct relation for the latest (pointer) version to avoid ambiguity with versions history relation
-  latestVersion   ProductVersion? @relation("LatestProductVersion", fields: [latestVersionId], references: [id])
-  publishHandle   String?
-  description     String?
-  images          Json?
-  priceMsrp       Decimal?
-  priceWholesale  Decimal?
-  availability    String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  latestVersion               ProductVersion?               @relation("LatestProductVersion", fields: [latestVersionId], references: [id])
+  publishHandle               String?
+  description                 String?
+  images                      Json?
+  msrp                        Decimal?                      @map("priceMsrp")
+  priceWholesale              Decimal?
+  availability                String?
+  active                      Boolean                       @default(true)
+  attributes                  Json?
+  createdAt                   DateTime                      @default(now())
+  updatedAt                   DateTime                      @updatedAt
   // Full version history (many) relation name distinct from latestVersion pointer
-  versions        ProductVersion[] @relation("ProductVersions")
-  sources         ProductSource[]  @relation("ProductSources")
-  designStudioReady Boolean        @default(false)
-  designStudioFamily String?
-  designStudioSeries String?
-  designStudioRole   String?
-  designStudioCompatibility Json?
-  designStudioSourceQuality String?
-  designStudioLastTouchedAt DateTime?
-  designStudioCoverageNotes String?
-  designStudioHash   String   @default("")
+  versions                    ProductVersion[]              @relation("ProductVersions")
+  sources                     ProductSource[]               @relation("ProductSources")
+  designStudioReady           Boolean                       @default(false)
+  designStudioFamily          String?
+  designStudioSeries          String?
+  designStudioRole            String?
+  designStudioCompatibility   Json?
+  designStudioSourceQuality   String?
+  designStudioLastTouchedAt   DateTime?
+  designStudioCoverageNotes   String?
+  designStudioHash            String                        @default("")
   designStudioBlockingReasons Json?
-  annotationAudits DesignStudioAnnotationAudit[]
+  annotationAudits            DesignStudioAnnotationAudit[]
 
-  @@unique([supplierId, sku], name: "product_supplier_sku_unique")
+  @@unique([supplierId, productCode], name: "product_supplier_product_code_unique")
   @@index([supplierId])
+  @@index([category, family], name: "product_category_family_idx")
+  @@index([designStudioReady], name: "product_design_ready_idx")
 }
 
 enum ProductStatus {
@@ -503,94 +558,95 @@ enum DesignStorefrontDraftStatus {
 
 /// ProductVersion: immutable snapshot of normalized content
 model ProductVersion {
-  id            String   @id @default(cuid())
-  productId     String
+  id                          String                        @id @default(cuid())
+  productId                   String
   // Belongs-to relation paired with Product.versions history.
-  product       Product  @relation("ProductVersions", fields: [productId], references: [id], onDelete: Cascade)
+  product                     Product                       @relation("ProductVersions", fields: [productId], references: [id], onDelete: Cascade)
   // Back reference for latestVersion pointer
-  productsLatest Product[] @relation("LatestProductVersion")
-  designPartType  String?
-  contentHash   String
-  rawSpecs      Json?
-  normSpecs     Json?
-  description   String?
-  images        Json?
-  priceMsrp     Decimal?
-  priceWholesale Decimal?
-  availability  String?
-  sourceSnapshot Json?
-  fetchedAt     DateTime @default(now())
-  createdAt     DateTime @default(now())
-  designStudioReady Boolean @default(false)
-  designStudioFamily String?
-  designStudioRole String?
-  designStudioSeries String?
-  designStudioCompatibility Json?
-  designStudioSourceQuality String?
-  designStudioCoverageNotes String?
-  designStudioHash  String   @default("")
+  productsLatest              Product[]                     @relation("LatestProductVersion")
+  designPartType              String?
+  contentHash                 String
+  rawSpecs                    Json?
+  normSpecs                   Json?
+  description                 String?
+  images                      Json?
+  priceMsrp                   Decimal?
+  priceWholesale              Decimal?
+  availability                String?
+  sourceSnapshot              Json?
+  fetchedAt                   DateTime                      @default(now())
+  createdAt                   DateTime                      @default(now())
+  designStudioReady           Boolean                       @default(false)
+  designStudioFamily          String?
+  designStudioRole            String?
+  designStudioSeries          String?
+  designStudioCompatibility   Json?
+  designStudioSourceQuality   String?
+  designStudioCoverageNotes   String?
+  designStudioHash            String                        @default("")
   designStudioBlockingReasons Json?
-  annotationAudits DesignStudioAnnotationAudit[] @relation("ProductVersionAnnotationAudits")
+  annotationAudits            DesignStudioAnnotationAudit[] @relation("ProductVersionAnnotationAudits")
 
   @@unique([productId, contentHash], name: "product_version_hash_unique")
   @@index([productId])
 }
 
 model DesignStudioAnnotationAudit {
-  id                String         @id @default(cuid())
-  productId         String
-  product           Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
-  productVersionId  String?
-  productVersion    ProductVersion? @relation("ProductVersionAnnotationAudits", fields: [productVersionId], references: [id], onDelete: SetNull)
-  designStudioHash  String
-  ready             Boolean
-  family            String?
-  series            String?
-  role              String?
-  coverageNotes     String?
-  sourceQuality     String?
-  compatibility     Json?
-  recordedAt        DateTime       @default(now())
-  source            String         @default("importer")
+  id               String          @id @default(cuid())
+  productId        String
+  product          Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productVersionId String?
+  productVersion   ProductVersion? @relation("ProductVersionAnnotationAudits", fields: [productVersionId], references: [id], onDelete: SetNull)
+  designStudioHash String
+  ready            Boolean
+  family           String?
+  series           String?
+  role             String?
+  coverageNotes    String?
+  sourceQuality    String?
+  compatibility    Json?
+  recordedAt       DateTime        @default(now())
+  source           String          @default("importer")
 
   @@index([productId, recordedAt])
   @@index([designStudioHash])
 }
+
 // END product_db canonical models (phase 1)
 
 model DesignBuild {
-  id               String                @id @default(cuid())
-  reference        String                @unique
-  shopDomain       String
-  tier             DesignStudioTier      @default(STARTER)
-  status           DesignBuildStatus     @default(DRAFT)
-  fulfillmentMode  DesignFulfillmentMode @default(RBP_BUILD)
-  storefrontDraftId String?              @unique
-  storefrontDraft  DesignStorefrontDraft? @relation("DraftToBuild", fields: [storefrontDraftId], references: [id], onDelete: SetNull)
-  customerName     String?
-  customerEmail    String?
-  customerPhone    String?
-  useCase          String?
-  experienceLevel  String?
-  blankSku         String?
-  blankTitle       String?
-  componentSummary Json?
-  bomHash          String?
-  promisedShipWeek DateTime?
-  assignedBuilder  String?
-  budgetCeiling    Decimal?
-  notesJson        Json?
-  metadata         Json?
-  submittedAt      DateTime?
-  approvedAt       DateTime?
-  scheduledAt      DateTime?
-  fulfilledAt      DateTime?
-  blockedReason    String?
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  id                String                 @id @default(cuid())
+  reference         String                 @unique
+  shopDomain        String
+  tier              DesignStudioTier       @default(STARTER)
+  status            DesignBuildStatus      @default(DRAFT)
+  fulfillmentMode   DesignFulfillmentMode  @default(RBP_BUILD)
+  storefrontDraftId String?                @unique
+  storefrontDraft   DesignStorefrontDraft? @relation("DraftToBuild", fields: [storefrontDraftId], references: [id], onDelete: SetNull)
+  customerName      String?
+  customerEmail     String?
+  customerPhone     String?
+  useCase           String?
+  experienceLevel   String?
+  blankSku          String?
+  blankTitle        String?
+  componentSummary  Json?
+  bomHash           String?
+  promisedShipWeek  DateTime?
+  assignedBuilder   String?
+  budgetCeiling     Decimal?
+  notesJson         Json?
+  metadata          Json?
+  submittedAt       DateTime?
+  approvedAt        DateTime?
+  scheduledAt       DateTime?
+  fulfilledAt       DateTime?
+  blockedReason     String?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
 
-  events           DesignBuildEvent[]
-  attachments      DesignBuildAttachment[]
+  events      DesignBuildEvent[]
+  attachments DesignBuildAttachment[]
 
   @@index([shopDomain, status])
   @@index([tier])
@@ -598,33 +654,33 @@ model DesignBuild {
 }
 
 model DesignStorefrontDraft {
-  id           String                      @id @default(cuid())
-  token        String                      @unique
-  shopDomain   String
-  tier         DesignStudioTier            @default(STARTER)
-  status       DesignStorefrontDraftStatus @default(ACTIVE)
-  selections   Json?
-  summary      Json?
-  customer     Json?
-  metadata     Json?
-  notes        String?
-  expiresAt    DateTime?
-  submittedAt  DateTime?
-  createdAt    DateTime                    @default(now())
-  updatedAt    DateTime                    @updatedAt
-  builds       DesignBuild[]               @relation("DraftToBuild")
+  id          String                      @id @default(cuid())
+  token       String                      @unique
+  shopDomain  String
+  tier        DesignStudioTier            @default(STARTER)
+  status      DesignStorefrontDraftStatus @default(ACTIVE)
+  selections  Json?
+  summary     Json?
+  customer    Json?
+  metadata    Json?
+  notes       String?
+  expiresAt   DateTime?
+  submittedAt DateTime?
+  createdAt   DateTime                    @default(now())
+  updatedAt   DateTime                    @updatedAt
+  builds      DesignBuild[]               @relation("DraftToBuild")
 
   @@index([shopDomain, status])
 }
 
 model DesignBuildEvent {
-  id          String              @id @default(cuid())
+  id          String               @id @default(cuid())
   buildId     String
-  build       DesignBuild         @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  build       DesignBuild          @relation(fields: [buildId], references: [id], onDelete: Cascade)
   eventType   DesignBuildEventType
   payload     Json?
   performedBy String?
-  createdAt   DateTime            @default(now())
+  createdAt   DateTime             @default(now())
 
   @@index([buildId, createdAt])
 }
@@ -653,68 +709,73 @@ model TenantSettings {
 }
 
 model ImportLog {
-  id          String   @id @default(cuid())
-  templateId  String
-  runId       String
-  type        String
-  payload     Json
-  at          DateTime @default(now())
+  id         String   @id @default(cuid())
+  templateId String
+  runId      String
+  type       String
+  payload    Json
+  at         DateTime @default(now())
 
-  template    ImportTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  template ImportTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
   @@index([templateId, runId, type])
 }
+
 // <!-- END RBP GENERATED: importer-v2-3 -->
 
 // BEGIN importer delete audit (v1)
 /// Audit log for delete operations (dry-run previews and committed deletes).
 /// Provides accountability & rollback insight. Not strictly required for runtime logic.
 model ImportDeleteAudit {
-  id            String   @id @default(cuid())
-  templateIds   String   // comma-separated list to keep simple for SQLite (alternatively Json in future)
-  countsJson    Json?    // { templates, logs, runs, diffs, staging, sources }
-  deletedJson   Json?    // same shape as counts when committed
-  forced        Boolean  @default(false)
-  dryRun        Boolean  @default(false)
-  userHq        Boolean  @default(true) // whether HQ guard passed
-  blockedCodes  String?  // comma-separated blocker codes present when forced
-  durationMs    Int?
-  createdAt     DateTime @default(now())
+  id           String   @id @default(cuid())
+  templateIds  String // comma-separated list to keep simple for SQLite (alternatively Json in future)
+  countsJson   Json? // { templates, logs, runs, diffs, staging, sources }
+  deletedJson  Json? // same shape as counts when committed
+  forced       Boolean  @default(false)
+  dryRun       Boolean  @default(false)
+  userHq       Boolean  @default(true) // whether HQ guard passed
+  blockedCodes String? // comma-separated blocker codes present when forced
+  durationMs   Int?
+  createdAt    DateTime @default(now())
 }
+
 // END importer delete audit (v1)
 
 // BEGIN publish telemetry (canonical products)
 model PublishTelemetry {
-  id          String   @id @default(cuid())
-  productIds  Json?
-  attempted   Int      @default(0)
-  created     Int      @default(0)
-  updated     Int      @default(0)
-  skipped     Int      @default(0)
-  failed      Int      @default(0)
-  startedAt   DateTime @default(now())
-  finishedAt  DateTime?
-  durationMs  Int?
-  diag        Json?
+  id         String    @id @default(cuid())
+  productIds Json?
+  attempted  Int       @default(0)
+  created    Int       @default(0)
+  updated    Int       @default(0)
+  skipped    Int       @default(0)
+  failed     Int       @default(0)
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  durationMs Int?
+  diag       Json?
 
   @@index([startedAt])
 }
+
 // END publish telemetry (canonical products)
 
 // BEGIN import telemetry (canonical products)
 model ImportTelemetry {
-  id            String   @id @default(cuid())
-  runId         String   @unique
-  supplierId    String
-  newProducts   Int      @default(0)
-  newVersions   Int      @default(0)
-  skipped       Int      @default(0)
-  failed        Int      @default(0)
-  durationMs    Int?
-  startedAt     DateTime @default(now())
-  finishedAt    DateTime?
-  diag          Json?
+  id          String    @id @default(cuid())
+  runId       String    @unique
+  supplierId  String
+  newProducts Int       @default(0)
+  newVersions Int       @default(0)
+  skipped     Int       @default(0)
+  failed      Int       @default(0)
+  durationMs  Int?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  diag        Json?
 
   @@index([supplierId])
   @@index([startedAt])
 }
+
 // END import telemetry (canonical products)

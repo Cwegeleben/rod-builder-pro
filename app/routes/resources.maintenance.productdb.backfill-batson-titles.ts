@@ -81,7 +81,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Duplicate guard (should be prevented by unique constraint)
   const dupes: Record<string, number> = {}
   products.forEach(p => {
-    const k = `${p.supplierId}::${p.sku}`
+    const k = `${p.supplierId}::${p.productCode}`
     dupes[k] = (dupes[k] || 0) + 1
   })
   const duplicates = Object.entries(dupes)
@@ -89,7 +89,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     .map(([k, n]) => ({ key: k, count: n }))
 
   let updated = 0
-  const sample: Array<{ id: string; sku: string; before: string; after: string }> = []
+  const sample: Array<{ id: string; productCode: string; before: string; after: string }> = []
 
   const { buildBatsonBlankTitle, buildBatsonReelSeatTitle } = await import('../server/importer/products/batsonTitle')
 
@@ -118,7 +118,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         techniqueLabel,
       }
       const row: BatsonBlankRow = {
-        modelCode: p.sku,
+        modelCode: p.productCode,
         lengthFtInRaw: sv<string>('length_label') || String(sv<number>('length_in') || ''),
         piecesRaw: String(sv<number>('pieces') || ''),
         powerRaw: sv<string>('power') || '',
@@ -128,9 +128,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       nextTitle = buildBatsonBlankTitle(seriesCtx, row)
     } else if (effType === 'Reel Seat') {
       const brandText = sv<string>('brand') || p.title || ''
-      const skuUpper = (p.sku || '').toUpperCase()
+      const skuUpper = (p.productCode || '').toUpperCase()
       const brandFallback =
-        /alps/i.test(brandText) || /^AIP/i.test(p.sku) || /\bALPS\b/.test(skuUpper) || /^ALPS[-_]/.test(skuUpper)
+        /alps/i.test(brandText) ||
+        /^AIP/i.test(p.productCode) ||
+        /\bALPS\b/.test(skuUpper) ||
+        /^ALPS[-_]/.test(skuUpper)
           ? 'Alps'
           : /forecast/i.test(brandText) || /\bFORECAST\b/.test(skuUpper) || /^FORECAST[-_]/.test(skuUpper)
             ? 'Forecast'
@@ -145,14 +148,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
             : 'Reel Seat Hardware'
       const familyName = (() => {
         const t = String(sv<string>('series') || p.title || '')
-        if (/aip\s*contour/i.test(t) || (/^AIP/i.test(p.sku) && /contour/i.test(t))) return 'AIP Contour'
+        if (/aip\s*contour/i.test(t) || (/^AIP/i.test(p.productCode) && /contour/i.test(t))) return 'AIP Contour'
         const f = String(sv<string>('familyName') || '')
         return isLikelyCode(f) ? '' : f || ''
       })()
       const row: BatsonReelSeatRow = {
         rawName: p.title,
         brandRaw: sv<string>('brand') || undefined,
-        codeRaw: p.sku,
+        codeRaw: p.productCode,
         familyName: familyName || undefined,
         seatStyle:
           sv<string>('seatStyle') ||
@@ -169,14 +172,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       continue
     }
 
-    nextTitle = stripSkuFromTitle(nextTitle, p.sku)
+    nextTitle = stripSkuFromTitle(nextTitle, p.productCode)
     if (!nextTitle || nextTitle === p.title) continue
 
     if (!dry) {
       await prisma.product.update({ where: { id: p.id }, data: { title: nextTitle } })
     }
     updated++
-    if (sample.length < 10) sample.push({ id: p.id, sku: p.sku, before: p.title, after: nextTitle })
+    if (sample.length < 10) sample.push({ id: p.id, productCode: p.productCode, before: p.title, after: nextTitle })
   }
 
   return json({ ok: true, dryRun: dry, suppliers: slugs, scanned: products.length, updated, duplicates, sample })

@@ -7,6 +7,10 @@ import { extractJsonLd, mapProductFromJsonLd } from './jsonld'
 import { buildBatsonTitle } from '../lib/titleBuild/batson'
 import { applyTemplate } from '../../../../src/importer/extract/applyTemplate'
 import { slugFromPath, hash as hashUrl } from '../../../../src/importer/extract/fallbacks'
+import {
+  extractBatsonDetailMeta,
+  extractBatsonInfoAttributes,
+} from '../../../../app/server/importer/preview/parsers/batsonAttributeGrid'
 
 type Extracted = {
   externalId: string
@@ -15,6 +19,10 @@ type Extracted = {
   description?: string
   images: string[]
   rawSpecs: Record<string, unknown>
+  normSpecs?: Record<string, unknown>
+  priceMsrp?: number | null
+  priceWh?: number | null
+  availability?: string | null
   isHeader?: boolean
   headerReason?: string
 }
@@ -122,6 +130,37 @@ export async function extractProduct(
     .first()
     .innerHTML()
     .catch(() => '')
+  let priceMsrp: number | null = null
+  let priceWh: number | null = null
+  let availability: string | null = null
+  let availabilityNote: string | null = null
+  let normSpecs: Record<string, unknown> | undefined
+  const rawSpecs: Record<string, unknown> = {}
+  try {
+    const detailMeta = extractBatsonDetailMeta(html)
+    priceMsrp = detailMeta?.msrp ?? null
+    priceWh = detailMeta?.priceWholesale ?? null
+    availability = detailMeta?.availability ?? null
+    availabilityNote = detailMeta?.availabilityNote ?? null
+  } catch {
+    /* ignore detail-meta failures */
+  }
+  try {
+    const info = extractBatsonInfoAttributes(html)
+    if (info?.raw && Object.keys(info.raw).length) {
+      Object.entries(info.raw).forEach(([key, value]) => {
+        if (!rawSpecs[key]) rawSpecs[key] = value
+      })
+    }
+    if (info?.specs && Object.keys(info.specs).length) {
+      normSpecs = { ...(normSpecs || {}), ...info.specs }
+      if (!availability && typeof info.specs.availability === 'string') {
+        availability = info.specs.availability as string
+      }
+    }
+  } catch {
+    /* ignore info attribute failures */
+  }
   let rawImages: string[] = []
   const jldImages = Array.isArray(jld?.images) ? (jld?.images as string[]) : null
   if (jldImages && jldImages.length) {
@@ -188,8 +227,6 @@ export async function extractProduct(
   )
 
   const partType = guessPartType(`${title} ${description}`)
-  const rawSpecs: Record<string, unknown> = {}
-
   // Guide & Tip Top attribute-grid / information-attributes parsing (Batson Guides & Tip Tops)
   try {
     const $ = cheerio.load(html)
@@ -263,6 +300,7 @@ export async function extractProduct(
   }
 
   const rawSpecsMerged: Record<string, unknown> = { ...(jld?.rawSpecs || {}), ...rawSpecs }
+  if (availabilityNote) rawSpecsMerged.availability_note = availabilityNote
   // Preserve original title for audit
   if (title) rawSpecsMerged.original_title = title
   const constructedTitle = buildBatsonTitle({ title, rawSpecs: rawSpecsMerged })
@@ -282,6 +320,10 @@ export async function extractProduct(
     description: description || '',
     images: dedupe(images),
     rawSpecs: rawSpecsMerged,
+    normSpecs,
+    priceMsrp,
+    priceWh,
+    availability: availability || null,
     usedTemplateKey,
     isHeader: header.isHeader || undefined,
     headerReason: header.reason || undefined,
@@ -331,6 +373,7 @@ const BATSON_LABEL_MAP: Record<string, string> = {
   '30" diameter': 'thirty_in_dia',
   'tip top size': 'tip_top_size',
   'rod blank application': 'applications',
+  availability: 'availability',
 }
 
 // Utility: collapse whitespace and trim
@@ -340,6 +383,13 @@ function cleanText(v: string | null | undefined): string {
 
 // Heuristic SKU/externalId pattern for Batson rod blanks (e.g., SU1264F-M)
 const SKU_PATTERN = /\b[A-Z]{2,}\d{2,}[A-Z0-9-]*\b/
+
+const parsePrice = (value: string): number | undefined => {
+  const match = value.replace(/,/g, '').match(/(\d+(?:\.\d+)?)/)
+  if (!match) return undefined
+  const num = Number(match[1])
+  return Number.isFinite(num) ? num : undefined
+}
 
 // Extract a series spec table into multiple product rows.
 // Returns empty array if no suitable multi-row structure detected.
@@ -407,6 +457,9 @@ export async function extractBatsonSeriesRows(page: Page): Promise<ExtractedSeri
       const normSpecs: Record<string, string> = {}
       const warnings: string[] = []
       let externalId: string | undefined
+      let rowAvailability: string | undefined
+      let rowPrice: number | undefined
+      let rowMsrp: number | undefined
       r.forEach((cell, i) => {
         const headerLabel = normalizedHeaders[i] || ''
         const valueClean = cleanText(cell)
@@ -415,6 +468,9 @@ export async function extractBatsonSeriesRows(page: Page): Promise<ExtractedSeri
           rawSpecs[headerLabel] = valueClean
           const mapped = BATSON_LABEL_MAP[headerLabel]
           if (mapped) normSpecs[mapped] = valueClean
+          if (!rowAvailability && /availability/.test(headerLabel)) rowAvailability = valueClean
+          if (!rowMsrp && /msrp/.test(headerLabel)) rowMsrp = parsePrice(valueClean)
+          if (!rowPrice && /price/.test(headerLabel) && !/msrp/.test(headerLabel)) rowPrice = parsePrice(valueClean)
         }
       })
       if (!externalId) {
@@ -430,6 +486,9 @@ export async function extractBatsonSeriesRows(page: Page): Promise<ExtractedSeri
         images: [],
         rawSpecs,
         normSpecs,
+        availability: rowAvailability,
+        priceMsrp: rowMsrp ?? null,
+        priceWh: rowPrice ?? null,
         rowIndex: rowIndex++,
         parseWarnings: warnings.length ? warnings : undefined,
       })
@@ -446,6 +505,7 @@ export async function extractBatsonSeriesRows(page: Page): Promise<ExtractedSeri
       if (!externalId) continue
       const rawSpecs: Record<string, string> = lowerRaw
       const normSpecs: Record<string, string> = {}
+      const availability = lowerRaw['availability'] || lowerRaw['status']
       Object.entries(lowerRaw).forEach(([lk, lv]) => {
         const mapped = BATSON_LABEL_MAP[lk]
         if (mapped) normSpecs[mapped] = lv
@@ -459,6 +519,7 @@ export async function extractBatsonSeriesRows(page: Page): Promise<ExtractedSeri
         images: [],
         rawSpecs,
         normSpecs,
+        availability: availability || undefined,
         rowIndex: rowIndex++,
       })
     }

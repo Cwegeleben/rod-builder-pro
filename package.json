@@ -60,6 +60,7 @@
     "db:migrate:deploy": "pnpm db:cleanup:partstaging && pnpm prisma migrate deploy",
     "db:titles:batson": "tsx scripts/migrate/recompute-batson-titles.ts",
     "db:migrate:dev": "pnpm db:cleanup:partstaging && pnpm prisma migrate dev",
+    "supplier:sync:batson": "tsx scripts/importer/runBatsonSync.ts",
     "importer:smoke": "BATSON_SEEDS=${BATSON_SEEDS:-https://batsonenterprises.com/collections/blanks} tsx packages/importer/src/cli/smoke.ts",
     "importer:diff": "pnpm exec tsx packages/importer/src/cli/diff-smoke.ts",
     "importer:apply": "pnpm exec tsx packages/importer/src/cli/apply-run.ts",

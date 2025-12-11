@@ -6,6 +6,7 @@ import { enc, dec } from '../crypto.server'
 import { extractBatsonDetailMeta } from '../../server/importer/preview/parsers/batsonAttributeGrid'
 import { crawlBatson } from '../../../packages/importer/src/crawlers/batsonCrawler'
 import { getTargetById } from '../../server/importer/sites/targets'
+import { runBatsonDiffForSlug, type BatsonDiffResult } from './batsonDiff.server'
 
 const BATSON_STATE_SLUG = 'batson'
 export const BATSON_SUPPLIER_SLUGS = [
@@ -24,6 +25,10 @@ const BATSON_SEED_FALLBACKS: Record<string, string> = {
   'batson-end-caps-gimbals': 'https://batsonenterprises.com/end-caps-gimbals',
   'batson-trim-pieces': 'https://batsonenterprises.com/trim-pieces',
 }
+const BATSON_DISCOVERY_REQUEST_CAP = Math.max(
+  50,
+  Math.min(2000, Number(process.env.BATSON_DISCOVERY_MAX_REQUESTS || '600') || 600),
+)
 const DETAIL_ACCEPT_HEADER = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15'
@@ -131,6 +136,31 @@ async function ensureState(): Promise<SupplierSyncState> {
   const existing = await prisma.supplierSyncState.findUnique({ where: { supplierSlug: BATSON_STATE_SLUG } })
   if (existing) return existing
   return prisma.supplierSyncState.create({ data: { supplierSlug: BATSON_STATE_SLUG } })
+}
+
+async function ensureAbandonedRunClosed(state: SupplierSyncState) {
+  const current = coerceCurrentRun(state.currentSyncRun)
+  if (current.status !== 'running') return
+  const finishedAt = new Date()
+  const finishedIso = finishedAt.toISOString()
+  const startedIso = current.startedAt ?? finishedIso
+  const startedAt = current.startedAt ? new Date(current.startedAt) : finishedAt
+  const durationMs = finishedAt.getTime() - startedAt.getTime()
+  await prisma.supplierSyncState.update({
+    where: { supplierSlug: BATSON_STATE_SLUG },
+    data: {
+      lastSyncStatus: 'failed',
+      lastSyncError: 'previous-run-abandoned',
+      currentSyncRun: buildCurrentRun({ status: 'failed', startedAt: startedIso, finishedAt: finishedIso }),
+      lastSyncRun: buildLastRun({
+        status: 'failed',
+        startedAt: startedIso,
+        finishedAt: finishedIso,
+        durationMs,
+        summary: (state.lastSyncSummary as Prisma.JsonValue | null) ?? null,
+      }),
+    },
+  })
 }
 
 export function deriveCookieStatus(
@@ -254,10 +284,23 @@ async function requireFreshCookie(): Promise<{ cookie: string; state: SupplierSy
 }
 
 export async function enqueueBatsonSync(startedBy?: string) {
-  const { cookie } = await requireFreshCookie()
+  const { cookie, state } = await requireFreshCookie()
+  await ensureAbandonedRunClosed(state)
   const jobId = randomUUID()
   const startedAt = new Date()
   const startedAtIso = startedAt.toISOString()
+  const initialSummary = buildSyncSummary({
+    jobId,
+    startedBy: startedBy || null,
+    startedAt: startedAtIso,
+    suppliers: BATSON_SUPPLIER_SLUGS.map(slug => ({
+      slug,
+      status: 'queued',
+      ok: null,
+      startedAt: null,
+      finishedAt: null,
+    })),
+  })
   await prisma.supplierSyncState.update({
     where: { supplierSlug: BATSON_STATE_SLUG },
     data: {
@@ -265,49 +308,46 @@ export async function enqueueBatsonSync(startedBy?: string) {
       lastSyncAt: startedAt,
       lastSyncStatus: 'running',
       lastSyncError: null,
-      lastSyncSummary: buildSyncSummary({
-        jobId,
-        startedBy: startedBy || null,
-        startedAt: startedAt.toISOString(),
-        suppliers: BATSON_SUPPLIER_SLUGS.map(slug => ({ slug, status: 'queued' })),
-      }),
+      lastSyncSummary: initialSummary,
       currentSyncRun: buildCurrentRun({ status: 'running', startedAt: startedAtIso }),
     },
   })
-  void runBatsonSyncJob({ cookie, jobId, startedBy, jobStartedAt: startedAt }).catch(async err => {
-    const finishedAt = new Date()
-    const finishedIso = finishedAt.toISOString()
-    const durationMs = finishedAt.getTime() - startedAt.getTime()
-    await prisma.supplierSyncState.update({
-      where: { supplierSlug: BATSON_STATE_SLUG },
-      data: {
-        lastSyncStatus: 'error',
-        lastSyncError: (err as Error)?.message || 'sync-failed',
-        lastSyncSummary: buildSyncSummary({
-          jobId,
-          startedBy: startedBy || null,
-          finishedAt: finishedIso,
-          suppliers: [],
-        }),
-        currentSyncRun: buildCurrentRun({ status: 'failed', startedAt: startedAtIso, finishedAt: finishedIso }),
-        lastSyncRun: buildLastRun({
-          status: 'failed',
-          startedAt: startedAtIso,
-          finishedAt: finishedIso,
-          durationMs,
-          summary: null,
-        }),
-      },
-    })
-  })
+  void runBatsonSyncJob({ cookie, jobId, startedBy, jobStartedAt: startedAt, summarySeed: initialSummary }).catch(
+    async err => {
+      const finishedAt = new Date()
+      const finishedIso = finishedAt.toISOString()
+      const durationMs = finishedAt.getTime() - startedAt.getTime()
+      await prisma.supplierSyncState.update({
+        where: { supplierSlug: BATSON_STATE_SLUG },
+        data: {
+          lastSyncStatus: 'error',
+          lastSyncError: (err as Error)?.message || 'sync-failed',
+          lastSyncSummary: buildSyncSummary({
+            jobId,
+            startedBy: startedBy || null,
+            finishedAt: finishedIso,
+            suppliers: [],
+          }),
+          currentSyncRun: buildCurrentRun({ status: 'failed', startedAt: startedAtIso, finishedAt: finishedIso }),
+          lastSyncRun: buildLastRun({
+            status: 'failed',
+            startedAt: startedAtIso,
+            finishedAt: finishedIso,
+            durationMs,
+            summary: null,
+          }),
+        },
+      })
+    },
+  )
   return { jobId }
 }
 
 type DiscoverySummaryInput = {
   slug: string
   url?: string | null
-  ok?: boolean
-  durationMs?: number
+  ok?: boolean | null
+  durationMs?: number | null
   stagedCount?: number | null
   headerSkipCount?: number | null
   error?: string | null
@@ -335,7 +375,8 @@ async function discoverBatsonSeeds(cookie: string): Promise<DiscoverySummaryInpu
       const crawlResult = await crawlBatson(seedUrl ? [seedUrl] : [], {
         supplierId: slug,
         discoveryMode: 'full',
-        maxRequestsPerCrawl: 2500,
+        maxRequestsPerCrawl: BATSON_DISCOVERY_REQUEST_CAP,
+        ignoreSavedSources: true,
         politeness: { maxConcurrency: 1, rpm: 40, blockAssetsOnLists: true },
         auth: { cookieHeader: cookie },
       })
@@ -389,26 +430,76 @@ async function runBatsonSyncJob({
   jobId,
   startedBy,
   jobStartedAt,
+  summarySeed,
 }: {
   cookie: string
   jobId: string
   startedBy?: string
   jobStartedAt: Date
+  summarySeed?: Prisma.JsonObject
 }) {
   const summaries: SupplierSummaryInput[] = []
   let overallOk = true
+  const liveSummary = cloneSummary(summarySeed)
+  liveSummary.jobId = jobId
+  liveSummary.startedBy = startedBy || liveSummary.startedBy || null
+  liveSummary.startedAt = liveSummary.startedAt ?? jobStartedAt.toISOString()
+  liveSummary.suppliers = ensureSupplierEntries(liveSummary.suppliers)
+  const persistLiveSummary = async () => {
+    await prisma.supplierSyncState.update({
+      where: { supplierSlug: BATSON_STATE_SLUG },
+      data: { lastSyncSummary: liveSummary as Prisma.JsonObject },
+    })
+  }
+  const updateSupplierSummary = async (slug: string, patch: Partial<Omit<SupplierSummaryInput, 'slug'>>) => {
+    const target = ensureSupplierEntry(liveSummary.suppliers!, slug)
+    Object.assign(target, patch)
+    await persistLiveSummary()
+  }
   const discoverySummaries = await discoverBatsonSeeds(cookie)
   if (discoverySummaries.some(res => res.ok === false)) overallOk = false
+  liveSummary.discovery = discoverySummaries.map(item => ({
+    slug: item.slug,
+    url: item.url ?? null,
+    ok: typeof item.ok === 'boolean' ? item.ok : null,
+    durationMs: typeof item.durationMs === 'number' ? item.durationMs : null,
+    stagedCount: typeof item.stagedCount === 'number' ? item.stagedCount : null,
+    headerSkipCount: typeof item.headerSkipCount === 'number' ? item.headerSkipCount : null,
+    error: item.error ?? null,
+  }))
+  await persistLiveSummary()
   for (const slug of BATSON_SUPPLIER_SLUGS) {
+    const supplierStartedAt = new Date().toISOString()
+    await updateSupplierSummary(slug, {
+      status: 'running',
+      startedAt: supplierStartedAt,
+      finishedAt: null,
+      durationMs: null,
+      error: null,
+      ok: null,
+    })
     const result = await runIngestForSlug(slug, cookie)
+    const diffResult = result.ok ? await runBatsonDiffForSlug(slug) : null
+    const finishedAt = new Date().toISOString()
     const status = extractSummaryString(result.summary, 'status')
+    const supplierSummaryPayload = mergeSummaryWithDiff(result.summary, diffResult)
     summaries.push({
       slug,
       status,
       ok: result.ok,
+      startedAt: supplierStartedAt,
+      finishedAt,
       durationMs: result.durationMs,
       error: result.error || null,
-      summary: result.summary ? coerceJsonValue(result.summary) : null,
+      summary: supplierSummaryPayload,
+    })
+    await updateSupplierSummary(slug, {
+      status: result.ok ? 'success' : 'error',
+      ok: result.ok,
+      finishedAt,
+      durationMs: result.durationMs,
+      error: result.error || null,
+      summary: supplierSummaryPayload,
     })
     if (!result.ok) overallOk = false
   }
@@ -457,6 +548,59 @@ async function runBatsonSyncJob({
   })
 }
 
+type SupplierSummaryRecord = SupplierSummaryInput & { slug: string }
+
+type BatsonSyncSummaryRecord = {
+  jobId?: string | null
+  startedBy?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  suppliers?: SupplierSummaryRecord[]
+  discovery?: DiscoverySummaryInput[]
+  postProcessing?: Prisma.JsonValue | null
+}
+
+function cloneSummary(summary?: Prisma.JsonObject): BatsonSyncSummaryRecord {
+  if (!summary) return {}
+  return JSON.parse(JSON.stringify(summary)) as BatsonSyncSummaryRecord
+}
+
+function ensureSupplierEntries(current?: SupplierSummaryRecord[]): SupplierSummaryRecord[] {
+  const list: SupplierSummaryRecord[] = Array.isArray(current) ? current : []
+  for (const slug of BATSON_SUPPLIER_SLUGS) {
+    if (!list.some(item => item.slug === slug)) {
+      list.push({
+        slug,
+        status: 'queued',
+        ok: null,
+        startedAt: null,
+        finishedAt: null,
+        durationMs: null,
+        error: null,
+        summary: null,
+      })
+    }
+  }
+  return list
+}
+
+function ensureSupplierEntry(list: SupplierSummaryRecord[], slug: string): SupplierSummaryRecord {
+  const existing = list.find(item => item.slug === slug)
+  if (existing) return existing
+  const entry: SupplierSummaryRecord = {
+    slug,
+    status: 'queued',
+    ok: null,
+    startedAt: null,
+    finishedAt: null,
+    durationMs: null,
+    error: null,
+    summary: null,
+  }
+  list.push(entry)
+  return entry
+}
+
 async function runIngestForSlug(slug: string, cookie: string) {
   const started = Date.now()
   const env = {
@@ -476,6 +620,25 @@ async function runIngestForSlug(slug: string, cookie: string) {
     const stdout = extractStdout(err)
     const summary = parseScriptSummary(stdout)
     return { ok: false as const, summary, durationMs: Date.now() - started, error }
+  }
+}
+
+function mergeSummaryWithDiff(summary: Record<string, unknown> | null | undefined, diff: BatsonDiffResult | null) {
+  const diffPayload = diff ? buildDiffSummaryPayload(diff) : null
+  if (!summary && !diffPayload) return null
+  const base = summary && typeof summary === 'object' ? { ...summary } : {}
+  if (diffPayload) base.diff = diffPayload
+  return coerceJsonValue(base)
+}
+
+function buildDiffSummaryPayload(result: BatsonDiffResult) {
+  return {
+    runId: result.run.id,
+    counts: result.counts,
+    totals: {
+      existing: result.totalExisting,
+      staging: result.totalStaging,
+    },
   }
 }
 
@@ -505,8 +668,10 @@ function extractStdout(error: unknown): string {
 type SupplierSummaryInput = {
   slug: string
   status?: string | null
-  ok?: boolean
-  durationMs?: number
+  ok?: boolean | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  durationMs?: number | null
   error?: string | null
   summary?: Prisma.JsonValue | null
 }
@@ -529,6 +694,8 @@ function buildSyncSummary(input: {
       slug: item.slug,
       status: item.status ?? null,
       ok: typeof item.ok === 'boolean' ? item.ok : null,
+      startedAt: item.startedAt ?? null,
+      finishedAt: item.finishedAt ?? null,
       durationMs: typeof item.durationMs === 'number' ? item.durationMs : null,
       error: item.error ?? null,
       summary: item.summary ?? null,

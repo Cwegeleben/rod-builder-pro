@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import type { DesignStudioAnnotation } from './annotations.server'
+import { extractTipTopReadinessContext } from '../../../packages/importer/src/lib/tipTop'
 
 export type DesignStudioBlockingReasonCode =
   | 'missing_part_type'
@@ -12,6 +13,8 @@ export type DesignStudioBlockingReasonCode =
   | 'missing_availability'
   | 'missing_imagery'
   | 'missing_hash'
+  | 'missing_tip_top_tube'
+  | 'missing_tip_top_ring'
 
 export type DesignStudioBlockingReason = {
   code: DesignStudioBlockingReasonCode
@@ -25,6 +28,8 @@ export type DesignStudioReadinessInput = {
   priceWholesale?: number | null
   availability?: string | null
   images?: Prisma.InputJsonValue | null | undefined
+  specs?: Record<string, unknown> | null
+  tipTop?: { tubeSize?: number | null; ringSize?: number | null } | null
 }
 
 const REASON_MESSAGES: Record<DesignStudioBlockingReasonCode, string> = {
@@ -38,6 +43,8 @@ const REASON_MESSAGES: Record<DesignStudioBlockingReasonCode, string> = {
   missing_availability: 'Availability is required',
   missing_imagery: 'At least one image is required',
   missing_hash: 'Design Studio hash is missing',
+  missing_tip_top_tube: 'Tip top tube size is required',
+  missing_tip_top_ring: 'Tip top ring size is required',
 }
 
 function coerceNumber(value: unknown): number | null {
@@ -71,6 +78,7 @@ export function evaluateDesignStudioReadiness(input: DesignStudioReadinessInput)
 } {
   const reasons: DesignStudioBlockingReason[] = []
   const hasPartType = typeof input.designPartType === 'string' && input.designPartType.trim().length > 0
+  const normalizedPartType = input.designPartType ? input.designPartType.trim().toUpperCase() : null
   if (!hasPartType) reasons.push({ code: 'missing_part_type', message: REASON_MESSAGES.missing_part_type })
 
   if (!input.annotation.family) {
@@ -93,6 +101,16 @@ export function evaluateDesignStudioReadiness(input: DesignStudioReadinessInput)
     }
     if (!compat.power || String(compat.power).trim().length === 0) {
       reasons.push({ code: 'missing_blank_power', message: REASON_MESSAGES.missing_blank_power })
+    }
+  }
+
+  if (normalizedPartType === 'GUIDE_TIP') {
+    const tipTopContext = input.tipTop ?? extractTipTopReadinessContext(input.specs ?? null)
+    if (!coerceNumber(tipTopContext?.tubeSize)) {
+      reasons.push({ code: 'missing_tip_top_tube', message: REASON_MESSAGES.missing_tip_top_tube })
+    }
+    if (!coerceNumber(tipTopContext?.ringSize)) {
+      reasons.push({ code: 'missing_tip_top_ring', message: REASON_MESSAGES.missing_tip_top_ring })
     }
   }
 

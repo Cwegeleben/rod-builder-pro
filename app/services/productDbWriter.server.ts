@@ -8,6 +8,7 @@ import {
 } from '../lib/designStudio/annotations.server'
 import { evaluateDesignStudioReadiness, formatBlockingReasons } from '../lib/designStudio/readiness.server'
 import { recordDesignStudioAudit } from '../lib/designStudio/audit.server'
+import { extractTipTopReadinessContext } from '../../packages/importer/src/lib/tipTop'
 
 export interface NormalizedProductInput {
   supplier: { id?: string; slug?: string; name?: string; urlRoot?: string }
@@ -125,6 +126,7 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
   const norm = jsonValueToRecord(input.normSpecs)
   const resolvedPartType = resolvePartTypeFromInput(input, raw, norm)
   const designPartType = normalizeDesignPartType(resolvedPartType ?? ds.role ?? input.type ?? null)
+  const tipTopContext = extractTipTopReadinessContext(norm || null)
   const readiness = evaluateDesignStudioReadiness({
     designPartType,
     annotation: ds,
@@ -132,6 +134,8 @@ export async function upsertNormalizedProduct(input: NormalizedProductInput): Pr
     priceWholesale: input.priceWholesale ?? null,
     availability: input.availability ?? null,
     images: input.images ?? null,
+    specs: norm || null,
+    tipTop: tipTopContext,
   })
   const blockingReasons = readiness.ready ? null : readiness.reasons
   const coverageNotes = readiness.ready
