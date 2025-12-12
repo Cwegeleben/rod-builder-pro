@@ -4,6 +4,11 @@ import type {
   DesignStorefrontOption,
   DesignStorefrontPartRole,
 } from '../lib/designStudio/storefront.mock'
+import type { CompatibilityIssue } from '../lib/designStudio/compatibility'
+import {
+  serializeCompatibilityContext,
+  type DesignStorefrontCompatibilityContext,
+} from '../lib/designStudio/compatibility'
 
 export type DesignStorefrontRequestOptions = {
   shopDomain?: string | null
@@ -32,6 +37,7 @@ export type UseDesignConfigResult = {
 
 export type UseDesignOptionsResult = {
   data: DesignStorefrontOption[]
+  issues: CompatibilityIssue[]
   loading: boolean
   error: Error | null
 }
@@ -82,14 +88,21 @@ export function useDesignConfig(options?: DesignStorefrontRequestOptions): UseDe
 export function useDesignOptions(
   role: DesignStorefrontPartRole | null,
   options?: DesignStorefrontRequestOptions,
+  compatibilityContext?: DesignStorefrontCompatibilityContext | null,
 ): UseDesignOptionsResult {
   const [data, setData] = useState<DesignStorefrontOption[]>([])
+  const [issues, setIssues] = useState<CompatibilityIssue[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
+  const serializedCompatibility = useMemo(
+    () => serializeCompatibilityContext(compatibilityContext ?? null),
+    [compatibilityContext],
+  )
 
   useEffect(() => {
     if (!role) {
       setData([])
+      setIssues([])
       setLoading(false)
       setError(null)
       return
@@ -103,13 +116,20 @@ export function useDesignOptions(
         const params = new URLSearchParams()
         params.set('role', currentRole)
         appendDesignStudioParams(params, options)
+        if (serializedCompatibility) {
+          params.set('compat', serializedCompatibility)
+        }
         const response = await fetch(`/api/design-studio/options?${params.toString()}`, { signal: controller.signal })
         if (!response.ok) {
           throw new Error(`Failed to load options (${response.status})`)
         }
-        const payload = (await response.json()) as { options?: DesignStorefrontOption[] }
+        const payload = (await response.json()) as {
+          options?: DesignStorefrontOption[]
+          issues?: CompatibilityIssue[]
+        }
         if (cancelled) return
         setData(payload.options ?? [])
+        setIssues(payload.issues ?? [])
         setError(null)
       } catch (err) {
         if (cancelled || controller.signal.aborted) return
@@ -123,7 +143,7 @@ export function useDesignOptions(
       cancelled = true
       controller.abort()
     }
-  }, [role, options?.shopDomain, options?.themeRequest, options?.themeSectionId])
+  }, [role, options?.shopDomain, options?.themeRequest, options?.themeSectionId, serializedCompatibility])
 
-  return useMemo(() => ({ data, loading, error }), [data, loading, error])
+  return useMemo(() => ({ data, issues, loading, error }), [data, issues, loading, error])
 }

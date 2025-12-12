@@ -70,7 +70,7 @@ describe('api.design-studio.options loader', () => {
     } as LoaderFunctionArgs)
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ options: [] })
+    expect(await response.json()).toEqual({ options: [], issues: [] })
     expect(mockLoadOptions).not.toHaveBeenCalled()
   })
 
@@ -94,7 +94,7 @@ describe('api.design-studio.options loader', () => {
         specs: [],
       },
     ]
-    mockLoadOptions.mockResolvedValue(options)
+    mockLoadOptions.mockResolvedValue({ options, issues: [] })
 
     const response = await loader({
       request: new Request(`${baseUrl}?role=blank&take=100`),
@@ -103,8 +103,39 @@ describe('api.design-studio.options loader', () => {
     } as LoaderFunctionArgs)
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ options })
-    expect(mockLoadOptions).toHaveBeenCalledWith({ access, role: 'blank', take: 60 })
+    expect(await response.json()).toEqual({ options, issues: [] })
+    expect(mockLoadOptions).toHaveBeenCalledWith({ access, role: 'blank', take: 60, compatibilityContext: null })
     expect(mockCors).toHaveBeenCalled()
+  })
+
+  it('passes compatibility context through when provided', async () => {
+    const access = {
+      enabled: true,
+      reason: 'enabled',
+      tier: 'PLUS',
+      shopDomain: 'tenant.myshopify.com',
+      config: null,
+    }
+    mockAccess.mockResolvedValue(access)
+    mockRoleGuard.mockReturnValue(true)
+    mockLoadOptions.mockResolvedValue({ options: [], issues: [] })
+
+    const contextPayload = encodeURIComponent(JSON.stringify({ blank: { buttDiameterIn: 0.9 } }))
+    await loader({
+      request: new Request(`${baseUrl}?role=handle&compat=${contextPayload}`),
+      context: {},
+      params: {},
+    } as LoaderFunctionArgs)
+
+    expect(mockLoadOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access,
+        role: 'handle',
+        take: undefined,
+        compatibilityContext: {
+          blank: expect.objectContaining({ buttDiameterIn: 0.9 }),
+        },
+      }),
+    )
   })
 })

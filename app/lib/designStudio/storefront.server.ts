@@ -10,6 +10,15 @@ import {
   type DesignStorefrontPartRole,
   type DesignStorefrontStep,
 } from './storefront.mock'
+import {
+  augmentCompatibilityFromAttributes,
+  filterOptionsByCompatibility,
+  normalizeDesignStudioCompatibility,
+  type DesignStorefrontCompatibilityContext,
+  type CompatibilityIssue,
+  describeCompatibilityIssue,
+} from './compatibility'
+import { logDesignStudioValidationEvent } from './validation'
 
 const PRODUCT_DB_ENABLED = process.env.PRODUCT_DB_ENABLED === '1'
 const DEFAULT_BASE_PRICE = Number(process.env.DESIGN_STOREFRONT_BASE_PRICE ?? 250)
@@ -70,6 +79,7 @@ const ROLE_SET = new Set<DesignStorefrontPartRole>([
   'component',
   'accessory',
 ])
+// Removed unused ROLE_SET constant
 const DEFAULT_HERO = {
   title: 'Design your Rainshadow build',
   body: 'Work through curated steps to assemble blanks, components, and finishing touches tailored to your tier.',
@@ -95,6 +105,12 @@ type LoadOptionsArgs = {
   access: DesignStudioAccess
   role: DesignStorefrontPartRole | null
   take?: number
+  compatibilityContext?: DesignStorefrontCompatibilityContext | null
+}
+
+export type LoadDesignStorefrontOptionsResult = {
+  options: DesignStorefrontOption[]
+  issues: CompatibilityIssue[]
 }
 
 type ProductPayload = Prisma.ProductGetPayload<{
@@ -105,6 +121,7 @@ type ProductPayload = Prisma.ProductGetPayload<{
     designStudioReady: true
     designStudioFamily: true
     designStudioCoverageNotes: true
+    attributes: true
     supplier: { select: { name: true } }
     latestVersion: {
       select: {
@@ -119,14 +136,6 @@ type ProductPayload = Prisma.ProductGetPayload<{
     }
   }
 }>
-
-type CompatibilityRecord = {
-  lengthIn?: number | null
-  power?: string | null
-  action?: string | null
-  finish?: string | null
-  rodPieces?: number | null
-}
 
 export async function loadDesignStorefrontConfig(access: DesignStudioAccess): Promise<DesignStorefrontConfig> {
   if (!access.enabled) {
@@ -156,15 +165,23 @@ export async function loadDesignStorefrontOptions({
   access,
   role,
   take = 24,
-}: LoadOptionsArgs): Promise<DesignStorefrontOption[]> {
-  if (!access.enabled || !role) return []
+  compatibilityContext,
+}: LoadOptionsArgs): Promise<LoadDesignStorefrontOptionsResult> {
+  if (!access.enabled || !role) {
+    return { options: [], issues: [] }
+  }
   if (!PRODUCT_DB_ENABLED) {
-    return loadMockOptions(role)
+    return { options: await loadMockOptions(role), issues: [] }
   }
 
   const queryRoles = resolveQueryRoles(role)
   if (!queryRoles.length) {
-    return loadMockOptions(role)
+    logStorefrontOptionsTelemetry('no-query-roles', {
+      access,
+      role,
+      reasoning: 'alias-resolution-empty',
+    })
+    return { options: [], issues: [] }
   }
 
   try {
@@ -184,6 +201,7 @@ export async function loadDesignStorefrontOptions({
         designStudioReady: true,
         designStudioFamily: true,
         designStudioCoverageNotes: true,
+        attributes: true,
         supplier: { select: { name: true } },
         latestVersion: {
           select: {
@@ -199,17 +217,82 @@ export async function loadDesignStorefrontOptions({
       },
     })
 
+    if (!products.length) {
+      logStorefrontOptionsTelemetry('zero-results', {
+        access,
+        role,
+        queryRoles,
+        take,
+        reasoning: 'no-products-returned',
+      })
+      return { options: [], issues: [] }
+    }
+
     const mapped = products
       .map(product => mapProductToOption(product, role))
       .filter((option): option is DesignStorefrontOption => option !== null)
 
     if (!mapped.length) {
-      return loadMockOptions(role)
+      logStorefrontOptionsTelemetry('zero-results', {
+        access,
+        role,
+        queryRoles,
+        take,
+        reasoning: 'mapped-filtered-out',
+      })
+      return { options: [], issues: [] }
     }
-    return mapped
+    if (!compatibilityContext || role === 'blank') {
+      return { options: mapped, issues: [] }
+    }
+    const { allowed, rejected, issues } = filterOptionsByCompatibility(mapped, role, compatibilityContext)
+    if (rejected.length) {
+      logStorefrontOptionsTelemetry('compatibility-filter', {
+        access,
+        role,
+        queryRoles,
+        take,
+        reasoning: JSON.stringify(rejected.slice(0, 5)),
+      })
+      rejected.forEach(entry => {
+        const hasMissingData = entry.issues.some(
+          issue => issue.code === 'missing-option' || issue.code === 'missing-measurement',
+        )
+        const eventCode = hasMissingData ? 'missing-compatibility-data' : 'incompatible-selection'
+        logDesignStudioValidationEvent({
+          type: eventCode,
+          code: eventCode,
+          role,
+          optionId: entry.optionId,
+          productId: entry.productId ?? undefined,
+          shopDomain: access.shopDomain ?? undefined,
+          metadata: { issues: entry.issues.map(describeCompatibilityIssue) },
+        })
+      })
+    }
+    if (issues.length) {
+      issues.forEach(issue => {
+        if (issue.code === 'no-compatible-options') {
+          logDesignStudioValidationEvent({
+            type: 'zero-compatible-options',
+            code: 'zero-compatible-options',
+            role: issue.role,
+            shopDomain: access.shopDomain ?? undefined,
+          })
+        }
+      })
+    }
+    return { options: allowed, issues }
   } catch (error) {
     console.warn('[designStudio] Failed to load storefront options', error)
-    return loadMockOptions(role)
+    logStorefrontOptionsTelemetry('load-error', {
+      access,
+      role,
+      queryRoles,
+      take,
+      reasoning: error instanceof Error ? error.message : 'unknown-error',
+    })
+    return { options: [], issues: [] }
   }
 }
 
@@ -332,7 +415,11 @@ function formatWizardLabel(step: DesignStudioWizardStep): string {
 function mapProductToOption(product: ProductPayload, asRole: DesignStorefrontPartRole): DesignStorefrontOption | null {
   const version = product.latestVersion
   if (!version) return null
-  const compatibility = toCompatibility(version.designStudioCompatibility)
+  const compatibility = augmentCompatibilityFromAttributes({
+    role: asRole,
+    base: normalizeDesignStudioCompatibility(version.designStudioCompatibility),
+    attributes: product.attributes ?? null,
+  })
   const specs = buildSpecs(compatibility)
   return {
     id: product.id,
@@ -349,6 +436,7 @@ function mapProductToOption(product: ProductPayload, asRole: DesignStorefrontPar
     badge: product.designStudioFamily ?? undefined,
     family: product.designStudioFamily ?? undefined,
     ready: product.designStudioReady ?? null,
+    compatibility,
   }
 }
 
@@ -397,31 +485,7 @@ function extractImageUrl(value: Prisma.JsonValue | null | undefined): string | n
   return null
 }
 
-function toCompatibility(value: Prisma.JsonValue | null | undefined): CompatibilityRecord {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const record = value as Record<string, unknown>
-  return {
-    lengthIn: toNumber(record.lengthIn),
-    power: toString(record.power),
-    action: toString(record.action),
-    finish: toString(record.finish),
-    rodPieces: toNumber(record.rodPieces),
-  }
-}
-
-function toNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
-
-function toString(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim()) return value
-  return null
-}
+type CompatibilityRecord = ReturnType<typeof normalizeDesignStudioCompatibility>
 
 function formatLength(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return `${value} in`
@@ -490,4 +554,40 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function resolveHeroCopy(copy: { heroTitle: string; heroBody: string }): DesignStorefrontConfig['hero'] {
   return { title: copy.heroTitle || DEFAULT_HERO.title, body: copy.heroBody || DEFAULT_HERO.body }
+}
+
+type StorefrontOptionsTelemetryEvent = 'no-query-roles' | 'zero-results' | 'load-error' | 'compatibility-filter'
+
+function logStorefrontOptionsTelemetry(
+  event: StorefrontOptionsTelemetryEvent,
+  {
+    access,
+    role,
+    queryRoles,
+    take,
+    reasoning,
+  }: {
+    access: DesignStudioAccess
+    role: DesignStorefrontPartRole
+    queryRoles?: string[]
+    take?: number
+    reasoning?: string
+  },
+) {
+  try {
+    console.warn(
+      JSON.stringify({
+        telemetry: 'designStudio.storefront.options',
+        event,
+        role,
+        tier: access.tier,
+        shopDomain: access.shopDomain,
+        queryRoles,
+        take,
+        reasoning,
+      }),
+    )
+  } catch (err) {
+    console.warn('[designStudio] Failed to emit storefront options telemetry', { event, role, err })
+  }
 }

@@ -152,6 +152,7 @@ function buildMetadata(payload: NormalizedStorefrontPayload) {
       label: step.label,
       roles: Array.isArray(step.roles) ? step.roles.filter(isDesignStorefrontPartRole) : [],
     })),
+    validation: payload.validation,
   }
 }
 

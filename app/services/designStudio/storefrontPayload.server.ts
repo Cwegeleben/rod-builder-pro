@@ -1,5 +1,10 @@
 import type { DesignStorefrontPartRole } from '../../lib/designStudio/storefront.mock'
 import { isDesignStorefrontPartRole } from '../../lib/designStudio/storefront.server'
+import {
+  normalizeDesignStudioCompatibility,
+  type DesignStudioCompatibility,
+} from '../../lib/designStudio/compatibility'
+import type { DesignStudioValidationEntry, DesignStudioValidationSeverity } from '../../lib/designStudio/validation'
 
 export type StorefrontOptionSnapshot = {
   id: string
@@ -9,6 +14,7 @@ export type StorefrontOptionSnapshot = {
   vendor?: string | null
   notes?: string | null
   badge?: string | null
+  compatibility?: DesignStudioCompatibility | null
 }
 
 export type StorefrontSelectionSnapshot = {
@@ -41,6 +47,7 @@ export type StorefrontBuildPayload = {
     phone?: string
   }
   notes?: string | null
+  validation?: StorefrontValidationSnapshot | null
 }
 
 export type NormalizedSelection = {
@@ -60,6 +67,13 @@ export type NormalizedStorefrontPayload = {
     phone?: string | null
   }
   notes?: string | null
+  validation: StorefrontValidationSnapshot | null
+}
+
+export type StorefrontValidationSnapshot = {
+  entries: DesignStudioValidationEntry[]
+  hasCompatibilityIssues?: boolean
+  updatedAt?: string | null
 }
 
 type NormalizeOptions = {
@@ -82,6 +96,7 @@ export function normalizeStorefrontPayload(
   const summary = normalizeSummary(payload?.summary)
   const steps = Array.isArray(payload?.steps) ? payload?.steps : []
   const featureFlags = Array.isArray(payload?.featureFlags) ? payload?.featureFlags.filter(isTruthyString) : []
+  const validation = normalizeValidationSnapshot(payload?.validation)
 
   return {
     selections: normalizedSelections,
@@ -95,6 +110,7 @@ export function normalizeStorefrontPayload(
       phone: payload?.customer?.phone ?? null,
     },
     notes: payload?.notes ?? null,
+    validation,
   }
 }
 
@@ -120,6 +136,7 @@ function normalizeSelection(entry: StorefrontSelectionSnapshot | null | undefine
   const title = typeof option.title === 'string' ? option.title.trim() : ''
   if (!title) return null
   const price = Number(option.price)
+  const compatibility = 'compatibility' in option ? normalizeDesignStudioCompatibility(option.compatibility) : null
   return {
     role: roleValue,
     option: {
@@ -130,6 +147,7 @@ function normalizeSelection(entry: StorefrontSelectionSnapshot | null | undefine
       vendor: option.vendor ? truncate(option.vendor, 120) : null,
       notes: option.notes ? truncate(option.notes, 240) : null,
       badge: option.badge ? truncate(option.badge, 60) : null,
+      compatibility,
     },
   }
 }
@@ -152,4 +170,47 @@ function normalizeSummary(summary: StorefrontSummarySnapshot | undefined): Store
 
 function isTruthyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
+}
+
+export function normalizeValidationSnapshot(
+  snapshot: StorefrontValidationSnapshot | null | undefined,
+): StorefrontValidationSnapshot | null {
+  if (!snapshot || !Array.isArray(snapshot.entries)) {
+    return null
+  }
+  const entries = snapshot.entries
+    .map(entry => normalizeValidationEntry(entry))
+    .filter((entry): entry is DesignStudioValidationEntry => entry !== null)
+  return {
+    entries,
+    hasCompatibilityIssues: snapshot.hasCompatibilityIssues ?? entries.length > 0,
+    updatedAt: typeof snapshot.updatedAt === 'string' ? snapshot.updatedAt : null,
+  }
+}
+
+function normalizeValidationEntry(
+  entry: DesignStudioValidationEntry | null | undefined,
+): DesignStudioValidationEntry | null {
+  if (!entry || typeof entry !== 'object') return null
+  const panelId = typeof entry.panelId === 'string' && entry.panelId.trim() ? entry.panelId.trim() : 'design-studio'
+  const severity = normalizeSeverity(entry.severity)
+  const code = typeof entry.code === 'string' && entry.code.trim() ? entry.code.trim() : 'unknown'
+  const message =
+    typeof entry.message === 'string' && entry.message.trim() ? entry.message.trim() : 'Compatibility issue detected.'
+  return {
+    panelId,
+    severity,
+    code,
+    message,
+    role: entry.role ?? null,
+    optionId: entry.optionId ?? null,
+    source: entry.source ?? 'draft',
+  }
+}
+
+function normalizeSeverity(value: DesignStudioValidationSeverity | null | undefined): DesignStudioValidationSeverity {
+  if (value === 'error' || value === 'warning') {
+    return value
+  }
+  return 'info'
 }

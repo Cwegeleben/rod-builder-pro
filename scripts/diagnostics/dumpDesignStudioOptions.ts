@@ -13,9 +13,9 @@ if (!roles.length) {
 async function run(role: string) {
   const fakeRequest = new Request(`http://localhost/api/design-studio/options?role=${role}&shop=${defaultShop}`)
   const access = await getDesignStudioAccess(fakeRequest)
-  const options = await loadDesignStorefrontOptions({ access, role: role as any })
+  const { options, issues } = await loadDesignStorefrontOptions({ access, role: role as any })
   const sample = options[0] || null
-  console.log(JSON.stringify({ role, count: options.length, sample }, null, 2))
+  console.log(JSON.stringify({ role, count: options.length, sample, issues }, null, 2))
 }
 
 for (const role of roles) {

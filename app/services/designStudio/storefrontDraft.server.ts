@@ -12,6 +12,8 @@ import {
   type StorefrontSelectionSnapshot,
   type StorefrontStepSnapshot,
   type StorefrontSummarySnapshot,
+  type StorefrontValidationSnapshot,
+  normalizeValidationSnapshot,
 } from './storefrontPayload.server'
 
 const DRAFT_TTL_DAYS = Math.max(Number(process.env.DESIGN_STOREFRONT_DRAFT_TTL_DAYS || '14'), 1)
@@ -31,6 +33,7 @@ export type StorefrontDraftSnapshot = {
     phone?: string | null
   }
   notes?: string | null
+  validation?: StorefrontValidationSnapshot | null
 }
 
 export async function loadDesignStorefrontDraft({
@@ -150,6 +153,7 @@ function buildDraftData({
       hero: normalized.hero,
       featureFlags: normalized.featureFlags,
       steps: normalized.steps,
+      validation: normalized.validation,
     } as Prisma.InputJsonValue,
     notes: normalized.notes ?? null,
     expiresAt: new Date(Date.now() + DRAFT_TTL_MS),
@@ -166,6 +170,7 @@ function deserializeDraft(record: DraftRecord): StorefrontDraftSnapshot {
     featureFlags: coerceFeatureFlags(metadata?.featureFlags),
     customer: coerceCustomer(record.customer),
     notes: typeof record.notes === 'string' && record.notes.trim() ? record.notes : null,
+    validation: coerceValidation(metadata?.validation),
   }
 }
 
@@ -257,4 +262,9 @@ function coerceCustomer(value: Prisma.JsonValue | null | undefined): StorefrontD
     email: coerce(record.email),
     phone: coerce(record.phone),
   }
+}
+
+function coerceValidation(value: unknown): StorefrontValidationSnapshot | null {
+  if (!value || typeof value !== 'object') return null
+  return normalizeValidationSnapshot(value as StorefrontValidationSnapshot | null | undefined)
 }

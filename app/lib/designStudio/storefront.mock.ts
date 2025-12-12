@@ -1,4 +1,5 @@
 import type { DesignStudioTier } from '@prisma/client'
+import type { DesignStudioCompatibility } from './compatibility'
 export type { DesignStorefrontSummary } from './storefront.summary'
 export { summarizeSelections } from './storefront.summary'
 
@@ -42,6 +43,7 @@ export type DesignStorefrontOption = {
   badge?: string
   family?: string | null
   ready?: boolean | null
+  compatibility?: DesignStudioCompatibility | null
 }
 
 export type DesignStorefrontConfig = {

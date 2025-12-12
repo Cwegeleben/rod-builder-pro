@@ -19,6 +19,7 @@ import {
 import polarisStyles from '@shopify/polaris/build/esm/styles.css?url'
 import polarisTranslations from '@shopify/polaris/locales/en.json'
 import { ClipboardCheckIcon, CartIcon } from '@shopify/polaris-icons'
+import { PanelStatusBadge } from '../components/designStudio/PanelStatusBadge'
 import { getDesignStudioAccess } from '../lib/designStudio/access.server'
 import { summarizeSelections } from '../lib/designStudio/storefront.summary'
 import {
@@ -27,11 +28,26 @@ import {
   type DesignStorefrontStep,
 } from '../lib/designStudio/storefront.mock'
 import {
+  buildCompatibilityContextFromSelections,
+  describeCompatibilityIssue,
+  evaluateOptionCompatibility,
+  type CompatibilityIssue,
+  type DesignStorefrontCompatibilityContext,
+} from '../lib/designStudio/compatibility'
+import {
   appendDesignStudioParams,
   type DesignStorefrontRequestOptions,
   useDesignConfig,
   useDesignOptions,
 } from '../hooks/useDesignStorefront'
+import {
+  logDesignStudioValidationEvent,
+  summarizeValidationEntries,
+  type DesignStudioValidationEntry,
+  type DesignStudioValidationSeverity,
+  type DesignStudioValidationState,
+  type DesignStudioValidationTelemetryEvent,
+} from '../lib/designStudio/validation'
 import type {
   StorefrontBuildPayload,
   StorefrontSelectionSnapshot,
@@ -43,6 +59,11 @@ type SaveFeedback = {
   status: 'idle' | 'success' | 'error'
   reference?: string
   message?: string
+}
+
+type ValidationToast = {
+  message: string
+  tone: 'warning' | 'critical'
 }
 
 type DesignStudioRequestContext = {
@@ -105,9 +126,13 @@ export default function DesignStudioStorefrontRoute() {
   const [selections, setSelections] = useState<
     Partial<Record<DesignStorefrontPartRole, DesignStorefrontOption | null>>
   >({})
+  const [validationEntries, setValidationEntries] = useState<DesignStudioValidationState>([])
+  const [validationUpdatedAt, setValidationUpdatedAt] = useState<string | null>(null)
   const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>({ status: 'idle' })
+  const [statusToast, setStatusToast] = useState<ValidationToast | null>(null)
   const [draftToken, setDraftToken] = useState<string | null>(null)
   const lastDraftPayloadRef = useRef<string | null>(null)
+  const incompatibleSelectionsRef = useRef<Set<string>>(new Set())
   const draftStorageKey = useMemo(
     () => (designStudioAccess.shopDomain ? `ds-draft:${designStudioAccess.shopDomain}` : null),
     [designStudioAccess.shopDomain],
@@ -124,6 +149,49 @@ export default function DesignStudioStorefrontRoute() {
   }, [steps])
 
   const orderedRoles = useMemo(() => steps.flatMap(step => step.roles), [steps])
+
+  useEffect(() => {
+    if (!statusToast) return
+    if (typeof window === 'undefined') return
+    const timeoutId = window.setTimeout(() => setStatusToast(null), 5000)
+    return () => window.clearTimeout(timeoutId)
+  }, [statusToast])
+
+  const compatibilityContext = useMemo<DesignStorefrontCompatibilityContext | null>(
+    () => buildCompatibilityContextFromSelections(selections),
+    [selections],
+  )
+
+  const buildValidationEntries = useCallback(
+    (role: DesignStorefrontPartRole, issues: CompatibilityIssue[], source: 'options' | 'selection') => {
+      if (!issues.length) return [] as DesignStudioValidationEntry[]
+      const panelId = roleStepMap.get(role) ?? role
+      return issues.map(issue => ({
+        panelId,
+        severity: deriveSeverityFromIssue(issue),
+        code: issue.code,
+        message: describeCompatibilityIssue(issue),
+        role,
+        optionId: 'optionId' in issue ? (issue.optionId ?? null) : null,
+        source,
+      }))
+    },
+    [roleStepMap],
+  )
+
+  const upsertValidationEntries = useCallback(
+    (role: DesignStorefrontPartRole, source: 'options' | 'selection', entries: DesignStudioValidationEntry[]) => {
+      setValidationEntries(prev => {
+        const filtered = prev.filter(entry => !(entry.role === role && entry.source === source))
+        const next = entries.length ? [...filtered, ...entries] : filtered
+        if (!areValidationEntryListsEqual(prev, next)) {
+          setValidationUpdatedAt(next.length ? new Date().toISOString() : null)
+        }
+        return next
+      })
+    },
+    [setValidationUpdatedAt],
+  )
 
   useEffect(() => {
     if (!steps.length) return
@@ -157,7 +225,17 @@ export default function DesignStudioStorefrontRoute() {
     })
   }, [orderedRoles])
 
-  const { data: options, loading: optionsLoading } = useDesignOptions(activeRole, requestOptions)
+  const {
+    data: options,
+    issues: optionIssues,
+    loading: optionsLoading,
+  } = useDesignOptions(activeRole, requestOptions, compatibilityContext)
+
+  useEffect(() => {
+    if (!activeRole) return
+    const entries = buildValidationEntries(activeRole, optionIssues, 'options')
+    upsertValidationEntries(activeRole, 'options', entries)
+  }, [activeRole, optionIssues, buildValidationEntries, upsertValidationEntries])
 
   const handleSelectOption = useCallback((option: DesignStorefrontOption) => {
     setSelections(prev => ({ ...prev, [option.role]: option }))
@@ -174,6 +252,68 @@ export default function DesignStudioStorefrontRoute() {
       ),
     [selections, config?.basePrice, steps],
   )
+
+  useEffect(() => {
+    if (!orderedRoles.length) return
+    if (!compatibilityContext?.blank) {
+      orderedRoles.forEach(role => {
+        upsertValidationEntries(role, 'selection', [])
+      })
+      incompatibleSelectionsRef.current = new Set()
+      return
+    }
+    const nextIncompatible = new Set<string>()
+    orderedRoles.forEach(role => {
+      if (role === 'blank') {
+        upsertValidationEntries(role, 'selection', [])
+        return
+      }
+      const option = selections[role] ?? null
+      if (!option) {
+        upsertValidationEntries(role, 'selection', [])
+        return
+      }
+      const evaluation = evaluateOptionCompatibility(option, compatibilityContext)
+      if (!evaluation.compatible) {
+        const selectionIssue: CompatibilityIssue = { code: 'selection-incompatible', role, optionId: option.id }
+        const hasMissingData = evaluation.issues.some(
+          issue => issue.code === 'missing-option' || issue.code === 'missing-measurement',
+        )
+        const entries = buildValidationEntries(role, [selectionIssue, ...evaluation.issues], 'selection')
+        upsertValidationEntries(role, 'selection', entries)
+        if (!incompatibleSelectionsRef.current.has(option.id)) {
+          const eventType: DesignStudioValidationTelemetryEvent['type'] = 'incompatible-selection'
+          const eventCode: DesignStudioValidationTelemetryEvent['code'] = eventType
+          logDesignStudioValidationEvent({
+            type: eventType,
+            code: eventCode,
+            role,
+            optionId: option.id,
+            productId: option.productId ?? option.id,
+            shopDomain: designStudioAccess.shopDomain ?? undefined,
+            metadata: { issues: evaluation.issues.map(describeCompatibilityIssue) },
+          })
+          setStatusToast({
+            tone: hasMissingData ? 'warning' : 'critical',
+            message: hasMissingData
+              ? `${option.title} needs measurements before we can confirm fit.`
+              : `${option.title} might not fit the current blank yet.`,
+          })
+        }
+        nextIncompatible.add(option.id)
+      } else {
+        upsertValidationEntries(role, 'selection', [])
+      }
+    })
+    incompatibleSelectionsRef.current = nextIncompatible
+  }, [
+    orderedRoles,
+    compatibilityContext,
+    selections,
+    upsertValidationEntries,
+    buildValidationEntries,
+    designStudioAccess.shopDomain,
+  ])
 
   const formatCurrency = useCallback(
     (value: number) =>
@@ -197,6 +337,8 @@ export default function DesignStudioStorefrontRoute() {
     [roleStepMap],
   )
 
+  const handleDismissToast = useCallback(() => setStatusToast(null), [])
+
   const selectionSnapshots = useMemo<StorefrontSelectionSnapshot[]>(() => {
     return Object.entries(selections).reduce<StorefrontSelectionSnapshot[]>((acc, [role, option]) => {
       if (!option) return acc
@@ -210,11 +352,32 @@ export default function DesignStudioStorefrontRoute() {
           vendor: option.vendor ?? undefined,
           notes: option.notes ?? undefined,
           badge: option.badge ?? undefined,
+          compatibility: option.compatibility ?? null,
         },
       })
       return acc
     }, [])
   }, [selections])
+
+  const validationSnapshot = useMemo(
+    () => ({
+      entries: validationEntries,
+      hasCompatibilityIssues: validationEntries.length > 0,
+      updatedAt: validationEntries.length ? (validationUpdatedAt ?? new Date().toISOString()) : null,
+    }),
+    [validationEntries, validationUpdatedAt],
+  )
+
+  const validationByRole = useMemo(() => {
+    const map: Partial<Record<DesignStorefrontPartRole, DesignStudioValidationEntry[]>> = {}
+    validationEntries.forEach(entry => {
+      if (!entry.role) return
+      map[entry.role] = [...(map[entry.role] ?? []), entry]
+    })
+    return map
+  }, [validationEntries])
+
+  const roleValidation = validationByRole
 
   const stepSnapshots = useMemo<StorefrontStepSnapshot[]>(
     () => steps.map(step => ({ id: step.id, label: step.label, roles: step.roles })),
@@ -283,8 +446,15 @@ export default function DesignStudioStorefrontRoute() {
           steps: draft.steps,
           hero: draft.hero,
           featureFlags: draft.featureFlags,
+          validation: draft.validation ?? null,
         }),
       )
+      if (draft.validation?.entries?.length) {
+        setValidationEntries(draft.validation.entries.map(entry => ({ ...entry, source: entry.source ?? 'draft' })))
+      } else {
+        setValidationEntries([])
+      }
+      setValidationUpdatedAt(draft.validation?.updatedAt ?? null)
       setSaveFeedback({ status: 'idle' })
     }
     setDraftToken(token ?? null)
@@ -308,6 +478,7 @@ export default function DesignStudioStorefrontRoute() {
       steps: stepSnapshots,
       hero: config.hero,
       featureFlags: config.featureFlags,
+      validation: validationSnapshot,
     })
     const formData = new FormData()
     formData.set('payload', JSON.stringify(payload))
@@ -316,7 +487,7 @@ export default function DesignStudioStorefrontRoute() {
     }
     setSaveFeedback({ status: 'idle' })
     saveFetcher.submit(formData, { method: 'post', action: buildsActionUrl })
-  }, [config, selectionSnapshots, stepSnapshots, summary, buildsActionUrl, saveFetcher, draftToken])
+  }, [config, selectionSnapshots, stepSnapshots, summary, validationSnapshot, buildsActionUrl, saveFetcher, draftToken])
 
   useEffect(() => {
     if (saveFetcher.state !== 'idle' || !saveFetcher.data) return
@@ -346,6 +517,7 @@ export default function DesignStudioStorefrontRoute() {
       steps: stepSnapshots,
       hero: config.hero,
       featureFlags: config.featureFlags,
+      validation: validationSnapshot,
     })
     const serialized = JSON.stringify(payload)
     if (serialized === lastDraftPayloadRef.current) return
@@ -363,7 +535,16 @@ export default function DesignStudioStorefrontRoute() {
       })
     }, 800)
     return () => window.clearTimeout(timeoutId)
-  }, [config, selectionSnapshots, stepSnapshots, summary, draftToken, draftSaveFetcher, draftsActionUrl])
+  }, [
+    config,
+    selectionSnapshots,
+    stepSnapshots,
+    summary,
+    validationSnapshot,
+    draftToken,
+    draftSaveFetcher,
+    draftsActionUrl,
+  ])
 
   if (!designStudioAccess.enabled) {
     return (
@@ -410,6 +591,7 @@ export default function DesignStudioStorefrontRoute() {
                   selections={selections}
                   onSelect={handleSelectOption}
                   formatCurrency={formatCurrency}
+                  roleValidation={validationByRole}
                 />
               </div>
               <div className="hidden w-full max-w-sm md:block">
@@ -423,6 +605,7 @@ export default function DesignStudioStorefrontRoute() {
                   saving={saveFetcher.state !== 'idle'}
                   canSave={canSaveBuild}
                   saveResult={saveFeedback}
+                  roleValidation={roleValidation}
                 />
               </div>
             </div>
@@ -440,7 +623,30 @@ export default function DesignStudioStorefrontRoute() {
           saving={saveFetcher.state !== 'idle'}
           canSave={canSaveBuild}
           saveResult={saveFeedback}
+          roleValidation={roleValidation}
         />
+        {statusToast ? (
+          <div className="fixed right-6 bottom-6 z-40 max-w-sm">
+            <div
+              className={`rounded-2xl px-4 py-3 text-white shadow-lg ${
+                statusToast.tone === 'critical' ? 'bg-rose-600' : 'bg-amber-600'
+              }`}
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex items-start gap-3">
+                <p className="text-sm leading-5 font-medium">{statusToast.message}</p>
+                <button
+                  type="button"
+                  className="text-sm font-semibold underline decoration-white/70 decoration-dotted"
+                  onClick={handleDismissToast}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </PolarisAppProvider>
   )
@@ -494,6 +700,7 @@ type ComponentSelectorProps = {
   selections: Partial<Record<DesignStorefrontPartRole, DesignStorefrontOption | null>>
   onSelect: (option: DesignStorefrontOption) => void
   formatCurrency: (value: number) => string
+  roleValidation: Partial<Record<DesignStorefrontPartRole, DesignStudioValidationEntry[]>>
 }
 
 function ComponentSelector({
@@ -508,6 +715,7 @@ function ComponentSelector({
   selections,
   onSelect,
   formatCurrency,
+  roleValidation,
 }: ComponentSelectorProps) {
   if (!activeStep) {
     return (
@@ -535,7 +743,27 @@ function ComponentSelector({
                 </Text>
               ) : null}
               {activeStep.roles.length > 1 ? (
-                <RoleSelector roles={activeStep.roles} activeRole={activeRole} onRoleChange={onRoleChange} />
+                <RoleSelector
+                  roles={activeStep.roles}
+                  activeRole={activeRole}
+                  onRoleChange={onRoleChange}
+                  roleValidation={roleValidation}
+                />
+              ) : null}
+              {activeRole && (roleValidation[activeRole]?.length ?? 0) ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                  <BlockStack gap="050">
+                    {roleValidation[activeRole]?.map(entry => (
+                      <Text
+                        key={`${entry.code}-${entry.message}`}
+                        as="p"
+                        tone={entry.severity === 'error' ? 'critical' : 'subdued'}
+                      >
+                        {entry.message}
+                      </Text>
+                    ))}
+                  </BlockStack>
+                </div>
               ) : null}
               {optionsLoading || loading ? (
                 <SkeletonBodyText lines={5} />
@@ -599,8 +827,10 @@ function ComponentSelector({
                   })}
                 </BlockStack>
               ) : (
-                <Text as="p" tone="subdued">
-                  No options available for this role yet.
+                <Text as="p" tone={activeRole && (roleValidation[activeRole]?.length ?? 0) ? 'critical' : 'subdued'}>
+                  {activeRole && roleValidation[activeRole]?.[0]?.message
+                    ? roleValidation[activeRole]?.[0]?.message
+                    : 'No options available for this role yet.'}
                 </Text>
               )}
             </BlockStack>
@@ -615,21 +845,29 @@ type RoleSelectorProps = {
   roles: DesignStorefrontPartRole[]
   activeRole: DesignStorefrontPartRole | null
   onRoleChange: (role: DesignStorefrontPartRole) => void
+  roleValidation: Partial<Record<DesignStorefrontPartRole, DesignStudioValidationEntry[]>>
 }
 
-function RoleSelector({ roles, activeRole, onRoleChange }: RoleSelectorProps) {
+function RoleSelector({ roles, activeRole, onRoleChange, roleValidation }: RoleSelectorProps) {
   return (
     <InlineStack gap="100" wrap>
-      {roles.map(role => (
-        <Button
-          key={role}
-          size="slim"
-          variant={role === activeRole ? 'primary' : 'secondary'}
-          onClick={() => onRoleChange(role)}
-        >
-          {formatRoleLabel(role)}
-        </Button>
-      ))}
+      {roles.map(role => {
+        const badge = summarizeValidationEntries(roleValidation[role])
+        return (
+          <span key={role} className="inline-flex items-center gap-2">
+            <Button
+              size="slim"
+              variant={role === activeRole ? 'primary' : 'secondary'}
+              onClick={() => onRoleChange(role)}
+            >
+              {formatRoleLabel(role)}
+            </Button>
+            {badge ? (
+              <PanelStatusBadge severity={badge.severity} count={badge.count} testId={`role-${role}-badge`} />
+            ) : null}
+          </span>
+        )
+      })}
     </InlineStack>
   )
 }
@@ -644,6 +882,7 @@ type BuildDrawerProps = {
   saving: boolean
   canSave: boolean
   saveResult: SaveFeedback
+  roleValidation: Partial<Record<DesignStorefrontPartRole, DesignStudioValidationEntry[]>>
 }
 
 function BuildDrawer({
@@ -656,6 +895,7 @@ function BuildDrawer({
   saving,
   canSave,
   saveResult,
+  roleValidation,
 }: BuildDrawerProps) {
   return (
     <Card>
@@ -677,13 +917,23 @@ function BuildDrawer({
               </Text>
               {step.roles.map(role => {
                 const selection = selections[role]
+                const badge = summarizeValidationEntries(roleValidation[role])
                 return (
                   <div key={`${step.id}-${role}`} className="rounded-xl border border-slate-100 bg-white p-4">
                     <InlineStack align="space-between" wrap>
                       <BlockStack gap="025">
-                        <Text as="span" tone="subdued">
-                          {formatRoleLabel(role)}
-                        </Text>
+                        <InlineStack gap="050" blockAlign="center">
+                          <Text as="span" tone="subdued">
+                            {formatRoleLabel(role)}
+                          </Text>
+                          {badge ? (
+                            <PanelStatusBadge
+                              severity={badge.severity}
+                              count={badge.count}
+                              testId={`drawer-${role}-badge`}
+                            />
+                          ) : null}
+                        </InlineStack>
                         <Text as="p">{selection?.title ?? 'Not selected'}</Text>
                         {selection ? (
                           <Text as="span" tone="subdued">
@@ -783,6 +1033,7 @@ function hydrateSelectionsFromDraft(draft: StorefrontBuildPayload, setter: Selec
           title: selection.option.title,
           price: selection.option.price,
           specs: [],
+          compatibility: selection.option.compatibility ?? null,
         } as DesignStorefrontOption)
       next[selection.role] = {
         ...fallback,
@@ -795,6 +1046,7 @@ function hydrateSelectionsFromDraft(draft: StorefrontBuildPayload, setter: Selec
         notes: selection.option.notes ?? undefined,
         badge: selection.option.badge ?? undefined,
         specs: fallback.specs ?? [],
+        compatibility: selection.option.compatibility ?? fallback.compatibility ?? null,
       }
     })
     return next
@@ -807,12 +1059,14 @@ function buildDraftPayloadSnapshot({
   steps,
   hero,
   featureFlags,
+  validation,
 }: {
   selections: StorefrontSelectionSnapshot[]
   summary: StorefrontBuildPayload['summary']
   steps?: StorefrontStepSnapshot[]
   hero?: StorefrontBuildPayload['hero']
   featureFlags?: string[]
+  validation?: StorefrontBuildPayload['validation']
 }): StorefrontBuildPayload {
   return {
     selections,
@@ -820,6 +1074,7 @@ function buildDraftPayloadSnapshot({
     steps,
     hero,
     featureFlags: Array.isArray(featureFlags) ? featureFlags : [],
+    validation: validation ?? null,
   }
 }
 
@@ -841,4 +1096,34 @@ function formatRoleLabel(role: DesignStorefrontPartRole) {
     accessory: 'Accessory',
   }
   return map[role] || role.replace(/_/g, ' ')
+}
+
+function deriveSeverityFromIssue(issue: CompatibilityIssue): DesignStudioValidationSeverity {
+  if (issue.code === 'no-compatible-options' || issue.code === 'selection-incompatible') {
+    return 'error'
+  }
+  if (issue.code === 'missing-option' || issue.code === 'missing-measurement') {
+    return 'warning'
+  }
+  return 'info'
+}
+
+function areValidationEntryListsEqual(a: DesignStudioValidationEntry[], b: DesignStudioValidationEntry[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) {
+    if (!isSameValidationEntry(a[i], b[i])) return false
+  }
+  return true
+}
+
+function isSameValidationEntry(a: DesignStudioValidationEntry, b: DesignStudioValidationEntry): boolean {
+  return (
+    a.panelId === b.panelId &&
+    a.code === b.code &&
+    a.message === b.message &&
+    a.severity === b.severity &&
+    (a.role ?? null) === (b.role ?? null) &&
+    (a.optionId ?? null) === (b.optionId ?? null) &&
+    (a.source ?? 'options') === (b.source ?? 'options')
+  )
 }
