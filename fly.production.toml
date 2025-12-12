@@ -18,6 +18,7 @@ primary_region = 'sjc'
   HOST = '0.0.0.0'
   SCOPES = 'write_products,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions'
   SHOPIFY_APP_URL = 'https://rbp-app.fly.dev'
+  PUBLIC_APP_URL = 'https://rbp-app.fly.dev'
   # Switch /app/products to read from canonical product_db instead of Shopify Admin API
   PRODUCT_DB_ENABLED = '1'
   # Optional: hide legacy importer UI and redirect those routes to /app/products

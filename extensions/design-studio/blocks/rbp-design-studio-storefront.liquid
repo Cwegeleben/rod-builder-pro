@@ -1,0 +1,168 @@
+{% liquid
+  assign settings = block.settings
+  assign heading = settings.heading
+  assign subheading = settings.subheading
+  assign background = settings.background | default: 'surface'
+  assign show_border = settings.show_border
+  assign loading_text = settings.loading_text | default: 'Loading Design Studio…'
+  assign boot_path = settings.boot_path | default: '/apps/proxy/design/boot'
+  assign query_params = 'shop=' | append: shop.permanent_domain
+  assign query_params = query_params | append: '&rbp_theme=1'
+  assign block_token = block.id | url_encode
+  assign query_params = query_params | append: '&rbp_theme_section=' | append: block_token
+  if request.design_mode
+    assign query_params = query_params | append: '&_fd=0&pb=0'
+    if request.preview_theme_id
+      assign query_params = query_params | append: '&preview_theme_id=' | append: request.preview_theme_id
+    endif
+  endif
+  assign boot_url = boot_path | append: '?' | append: query_params
+  assign loader_asset = 'design-studio-loader.js' | asset_url
+  assign manifest_asset = 'design-studio-ui.manifest.json' | asset_url
+%}
+
+<style>
+  .rbp-design-studio-storefront {
+    width: 100%;
+    padding: 2rem 0;
+  }
+
+  .rbp-design-studio-storefront__inner {
+    margin: 0 auto;
+    max-width: 1200px;
+  }
+
+  .rbp-design-studio-storefront__header {
+    margin-bottom: 1.5rem;
+  }
+
+  .rbp-design-studio-storefront__title {
+    margin: 0 0 0.5rem;
+  }
+
+  .rbp-design-studio-storefront__subheading {
+    margin: 0;
+    color: rgba(0, 0, 0, 0.7);
+  }
+
+  .rbp-design-studio-storefront__root {
+    border-radius: 12px;
+    border: 1px solid transparent;
+    min-height: 480px;
+    position: relative;
+    background: #fff;
+  }
+
+  .rbp-design-studio-storefront--background-muted {
+    background: rgba(15, 23, 42, 0.03);
+  }
+
+  .rbp-design-studio-storefront--background-contrast {
+    background: rgba(15, 23, 42, 0.06);
+  }
+
+  .rbp-design-studio-storefront--border .rbp-design-studio-storefront__root {
+    border-color: rgba(0, 0, 0, 0.08);
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+  }
+
+  .rbp-design-studio-storefront__placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: rgba(15, 23, 42, 0.6);
+    font-size: 1rem;
+    padding: 2rem;
+  }
+
+  .rbp-design-studio-storefront__app {
+    position: relative;
+    z-index: 1;
+    padding: 1.25rem;
+    min-height: 100%;
+  }
+</style>
+
+<div
+  class='rbp-design-studio-storefront rbp-design-studio-storefront--background-{{ background }}{% if show_border %} rbp-design-studio-storefront--border{% endif %}'
+>
+  <div class='rbp-design-studio-storefront__inner'>
+    {% if heading != blank or subheading != blank %}
+      <div class='rbp-design-studio-storefront__header'>
+        {% if heading != blank %}
+          <h2 class='rbp-design-studio-storefront__title'>{{ heading | escape }}</h2>
+        {% endif %}
+        {% if subheading != blank %}
+          <p class='rbp-design-studio-storefront__subheading'>{{ subheading | escape }}</p>
+        {% endif %}
+      </div>
+    {% endif %}
+    <div
+      class='rbp-design-studio-storefront__root'
+      data-rbp-design-studio-root
+      data-rbp-design-studio-boot-url='{{ boot_url }}'
+      data-rbp-design-studio-manifest-url='{{ manifest_asset }}'
+      data-rbp-design-studio-block-id='{{ block.id }}'
+      data-rbp-design-studio-heading='{{ heading | escape }}'
+    >
+      <div class='rbp-design-studio-storefront__placeholder' data-rbp-design-studio-message>{{ loading_text }}</div>
+      <div class='rbp-design-studio-storefront__app' data-rbp-design-studio-app-root></div>
+    </div>
+  </div>
+</div>
+
+<script src='{{ loader_asset }}' defer></script>
+
+{% schema %}
+{
+  "name": "RBP Design Studio",
+  "target": "section",
+  "settings": [
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Rod Design Studio"
+    },
+    {
+      "type": "textarea",
+      "id": "subheading",
+      "label": "Subheading",
+      "default": "Guide shoppers through curated blank, handle, and guide selections."
+    },
+    {
+      "type": "radio",
+      "id": "background",
+      "label": "Background",
+      "default": "surface",
+      "options": [
+        { "value": "surface", "label": "Theme default" },
+        { "value": "muted", "label": "Muted" },
+        { "value": "contrast", "label": "Contrast" }
+      ]
+    },
+    {
+      "type": "checkbox",
+      "id": "show_border",
+      "label": "Show border",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "boot_path",
+      "label": "Boot endpoint",
+      "default": "/apps/proxy/design/boot",
+      "info": "Path to the Design Studio boot JSON endpoint."
+    },
+    {
+      "type": "text",
+      "id": "loading_text",
+      "label": "Loading text",
+      "default": "Loading Design Studio…"
+    }
+  ]
+}
+{% endschema %}

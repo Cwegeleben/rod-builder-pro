@@ -3,6 +3,12 @@ import type { Prisma } from '@prisma/client'
 import type { DesignStorefrontConfig } from '../lib/designStudio/storefront.mock'
 import type { DesignStudioAccess } from '../lib/designStudio/access.server'
 
+const mockPrisma = vi.hoisted(() => ({
+  product: { findMany: vi.fn() },
+}))
+
+vi.mock('../db.server', () => ({ prisma: mockPrisma }))
+
 const { mockGetMockConfig } = vi.hoisted(() => ({
   mockGetMockConfig: vi.fn<() => Promise<DesignStorefrontConfig>>(),
 }))
@@ -19,6 +25,7 @@ vi.mock('../lib/designStudio/storefront.mock', async () => {
 
 describe('loadDesignStorefrontConfig', () => {
   beforeEach(() => {
+    mockPrisma.product.findMany.mockReset()
     mockGetMockConfig.mockResolvedValue({
       hero: { title: 'Mock hero', body: 'Mock body' },
       tier: 'PLUS',

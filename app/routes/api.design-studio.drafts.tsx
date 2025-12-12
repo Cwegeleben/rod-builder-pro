@@ -5,6 +5,15 @@ import { loadDesignStorefrontDraft, saveDesignStorefrontDraft } from '../service
 import type { StorefrontBuildPayload } from '../services/designStudio/storefrontPayload.server'
 import { buildShopifyCorsHeaders } from '../utils/shopifyCors.server'
 
+// <!-- BEGIN RBP GENERATED: design-studio-phase-c-v1 -->
+// Manual sanity checklist (Phase C wiring):
+// 1) Load Design Studio as a tenant user and confirm the builder renders.
+// 2) Create a new draft, make a few changes, and see autosave confirm.
+// 3) Refresh the page and ensure the selections + validation state restore from the draft.
+// 4) Trigger an incompatible selection to confirm compat toasts and badges still surface.
+// 5) Inspect the database to verify a DesignBuild + DesignBuildDraft pair exists and DesignBuild.latestDraftId points to the newest draft.
+// <!-- END RBP GENERATED: design-studio-phase-c-v1 -->
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const headers = buildShopifyCorsHeaders(request)
   const access = await getDesignStudioAccess(request)
@@ -17,8 +26,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return json({ draft: null, token: null }, { headers })
   }
   try {
-    const draft = await loadDesignStorefrontDraft({ access, token })
-    return json({ draft, token: draft ? token : null }, { headers })
+    // <!-- BEGIN RBP GENERATED: design-studio-phase-c-v1 -->
+    const { draft, token: nextToken } = await loadDesignStorefrontDraft({ access, token })
+    return json({ draft, token: draft ? nextToken : null }, { headers })
+    // <!-- END RBP GENERATED: design-studio-phase-c-v1 -->
   } catch (error) {
     console.error('[designStudio] Failed to load storefront draft', error)
     return json({ draft: null, token: null }, { status: 500, headers })

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto'
 import type { DesignStorefrontDraft, Prisma } from '@prisma/client'
 import { DesignStorefrontDraftStatus } from '@prisma/client'
 import { prisma } from '../../db.server'
@@ -7,6 +6,7 @@ import { isDesignStorefrontPartRole } from '../../lib/designStudio/storefront.se
 import type { DesignStorefrontPartRole } from '../../lib/designStudio/storefront.mock'
 import {
   normalizeStorefrontPayload,
+  type NormalizedSelection,
   type NormalizedStorefrontPayload,
   type StorefrontBuildPayload,
   type StorefrontSelectionSnapshot,
@@ -15,11 +15,16 @@ import {
   type StorefrontValidationSnapshot,
   normalizeValidationSnapshot,
 } from './storefrontPayload.server'
+import {
+  createInitialBuildAndDraft,
+  getLatestDraftForTenantAndUser,
+  touchDraft,
+  updateDraft,
+} from './designBuildDraftRepo.server'
 
 const DRAFT_TTL_DAYS = Math.max(Number(process.env.DESIGN_STOREFRONT_DRAFT_TTL_DAYS || '14'), 1)
 const DRAFT_TTL_MS = DRAFT_TTL_DAYS * 24 * 60 * 60 * 1000
 type DraftRecord = DesignStorefrontDraft
-type DraftDataInput = Omit<Prisma.DesignStorefrontDraftUncheckedCreateInput, 'token' | 'shopDomain'>
 
 export type StorefrontDraftSnapshot = {
   selections: StorefrontSelectionSnapshot[]
@@ -35,6 +40,13 @@ export type StorefrontDraftSnapshot = {
   notes?: string | null
   validation?: StorefrontValidationSnapshot | null
 }
+// <!-- BEGIN RBP GENERATED: design-studio-phase-c-v1 -->
+const ACTIVE_DRAFT_STATUS = 'active'
+const INACTIVE_DRAFT_STATUS = 'inactive'
+const SUBMITTED_DRAFT_STATUS = 'submitted'
+
+type LoadDraftResult = { draft: StorefrontDraftSnapshot | null; token: string | null }
+type TenantDraftContext = { tenantId: string; userId: string; shopDomain: string }
 
 export async function loadDesignStorefrontDraft({
   access,
@@ -42,19 +54,46 @@ export async function loadDesignStorefrontDraft({
 }: {
   access: DesignStudioAccess
   token: string | null | undefined
-}): Promise<StorefrontDraftSnapshot | null> {
-  if (!access.enabled || !access.shopDomain || !token) return null
-  const draft = await prisma.designStorefrontDraft.findUnique({ where: { token } })
-  if (!draft || draft.shopDomain !== access.shopDomain) return null
-  if (draft.status !== DesignStorefrontDraftStatus.ACTIVE) return null
-  if (draft.expiresAt && draft.expiresAt.getTime() < Date.now()) {
-    await prisma.designStorefrontDraft.update({
-      where: { id: draft.id },
-      data: { status: DesignStorefrontDraftStatus.EXPIRED },
-    })
-    return null
+}): Promise<LoadDraftResult> {
+  if (!access.enabled || !access.shopDomain) {
+    return { draft: null, token: null }
   }
-  return deserializeDraft(draft)
+  const context = await resolveDraftContext(access)
+  if (!context) {
+    return { draft: null, token: null }
+  }
+
+  const repoDraft = await getLatestDraftForTenantAndUser(context.tenantId, context.userId)
+  if (repoDraft) {
+    if (isDraftExpired(repoDraft.expiresAt)) {
+      await updateDraft(repoDraft.id, { status: 'expired' })
+      return { draft: null, token: null }
+    }
+    if (repoDraft.status === ACTIVE_DRAFT_STATUS) {
+      const snapshot = coerceRepoSnapshot(repoDraft.draftPayload)
+      if (snapshot) {
+        await touchDraft(repoDraft.id)
+        return { draft: snapshot, token: repoDraft.id }
+      }
+    }
+  }
+
+  if (!token) {
+    return { draft: null, token: null }
+  }
+
+  const legacyRecord = await loadLegacyDraftRecord(token, access.shopDomain)
+  if (!legacyRecord) {
+    return { draft: null, token: null }
+  }
+
+  const legacySnapshot = deserializeDraft(legacyRecord)
+  const normalized = normalizeStorefrontPayload(snapshotToPayload(legacySnapshot), {
+    requireSelections: false,
+  })
+  const migratedToken = await persistDraftToRepo({ context, normalized, existingToken: null })
+  await expireLegacyDraft(token, access.shopDomain)
+  return { draft: legacySnapshot, token: migratedToken }
 }
 
 export async function saveDesignStorefrontDraft({
@@ -69,34 +108,34 @@ export async function saveDesignStorefrontDraft({
   if (!access.enabled || !access.shopDomain) {
     throw new Error('Design Studio access disabled for this shop')
   }
+  const context = await resolveDraftContext(access)
+  if (!context) {
+    throw new Error('Unable to resolve tenant context for Design Studio draft')
+  }
+
   const normalized = normalizeStorefrontPayload(payload, { requireSelections: false })
+  const nextTokenCandidate = token && !isLegacyDraftToken(token) ? token : null
+
   if (!normalized.selections.length) {
-    if (token) {
-      await expireDraft(token, access.shopDomain)
+    if (nextTokenCandidate) {
+      await updateDraft(nextTokenCandidate, { status: INACTIVE_DRAFT_STATUS })
+    } else if (token) {
+      await expireLegacyDraft(token, access.shopDomain)
     }
     return { token: null }
   }
-  const data = buildDraftData({ normalized, tier: access.tier })
-  const nextToken = token && (await validateDraftToken(token, access.shopDomain)) ? token : null
-  if (nextToken) {
-    await prisma.designStorefrontDraft.update({
-      where: { token: nextToken },
-      data: {
-        ...data,
-        status: DesignStorefrontDraftStatus.ACTIVE,
-      },
-    })
-    return { token: nextToken }
-  }
-  const createdToken = crypto.randomUUID()
-  await prisma.designStorefrontDraft.create({
-    data: {
-      ...data,
-      token: createdToken,
-      shopDomain: access.shopDomain,
-    },
+
+  const repoToken = await persistDraftToRepo({
+    context,
+    normalized,
+    existingToken: nextTokenCandidate,
   })
-  return { token: createdToken }
+
+  if (token && isLegacyDraftToken(token)) {
+    await expireLegacyDraft(token, access.shopDomain)
+  }
+
+  return { token: repoToken }
 }
 
 export async function linkDraftToBuild({
@@ -109,6 +148,14 @@ export async function linkDraftToBuild({
   shopDomain: string
 }) {
   if (!draftToken) return
+  if (!isLegacyDraftToken(draftToken)) {
+    try {
+      await updateDraft(draftToken, { status: SUBMITTED_DRAFT_STATUS })
+    } catch (error) {
+      console.warn('[designStudio] Unable to mark storefront draft submitted', { draftToken, error })
+    }
+    return
+  }
   const draft = await prisma.designStorefrontDraft.findUnique({ where: { token: draftToken } })
   if (!draft || draft.shopDomain !== shopDomain) return
   await prisma.$transaction([
@@ -123,41 +170,138 @@ export async function linkDraftToBuild({
   ])
 }
 
-async function expireDraft(token: string, shopDomain: string) {
+async function resolveDraftContext(access: DesignStudioAccess): Promise<TenantDraftContext | null> {
+  if (!access.shopDomain) return null
+  const tenant = await prisma.tenantSettings.findUnique({ where: { shopDomain: access.shopDomain } })
+  const tenantId = tenant?.id ?? `shop:${access.shopDomain}`
+  return {
+    tenantId,
+    userId: `${tenantId}:storefront`,
+    shopDomain: access.shopDomain,
+  }
+}
+
+async function persistDraftToRepo({
+  context,
+  normalized,
+  existingToken,
+}: {
+  context: TenantDraftContext
+  normalized: NormalizedStorefrontPayload
+  existingToken: string | null
+}): Promise<string> {
+  const snapshot = buildSnapshotFromNormalized(normalized)
+  const payloadJson = snapshot as Prisma.InputJsonValue
+  const validationJson = snapshot.validation ?? null
+  const expiresAt = computeDraftExpiry()
+
+  if (existingToken) {
+    try {
+      await updateDraft(existingToken, {
+        draftPayload: payloadJson,
+        compatContext: null,
+        validationSnapshot: validationJson,
+        status: ACTIVE_DRAFT_STATUS,
+        expiresAt,
+      })
+      return existingToken
+    } catch (error) {
+      console.warn('[designStudio] Falling back to re-create storefront draft', { existingToken, error })
+    }
+  }
+
+  const { draft } = await createInitialBuildAndDraft({
+    tenantId: context.tenantId,
+    userId: context.userId,
+    shopDomain: context.shopDomain,
+    initialPayload: payloadJson,
+    roleSelections: buildRoleSelections(normalized.selections),
+    compatContext: null,
+    validationSnapshot: validationJson,
+    notes: snapshot.notes ?? null,
+  })
+  await updateDraft(draft.id, { expiresAt })
+  return draft.id
+}
+
+function buildSnapshotFromNormalized(normalized: NormalizedStorefrontPayload): StorefrontDraftSnapshot {
+  return {
+    selections: normalized.selections.map(selection => ({
+      role: selection.role,
+      option: {
+        id: selection.option.id,
+        title: selection.option.title,
+        price: selection.option.price,
+        sku: selection.option.sku,
+        vendor: selection.option.vendor,
+        notes: selection.option.notes,
+        badge: selection.option.badge,
+        compatibility: selection.option.compatibility ?? null,
+      },
+    })),
+    summary: normalized.summary,
+    steps: normalized.steps,
+    hero: normalized.hero ?? null,
+    featureFlags: normalized.featureFlags,
+    customer: normalized.customer,
+    notes: normalized.notes ?? null,
+    validation: normalized.validation,
+  }
+}
+
+function buildRoleSelections(selections: NormalizedSelection[]): Prisma.InputJsonValue {
+  return selections.map(selection => ({
+    role: selection.role,
+    option: {
+      id: selection.option.id,
+      title: selection.option.title,
+      sku: selection.option.sku,
+      price: selection.option.price,
+      vendor: selection.option.vendor,
+      notes: selection.option.notes,
+      badge: selection.option.badge,
+    },
+  })) as Prisma.InputJsonValue
+}
+
+function computeDraftExpiry() {
+  return new Date(Date.now() + DRAFT_TTL_MS)
+}
+
+function isDraftExpired(value: Date | null | undefined) {
+  return Boolean(value && value.getTime() < Date.now())
+}
+
+function coerceRepoSnapshot(value: Prisma.JsonValue | null | undefined): StorefrontDraftSnapshot | null {
+  if (!value || typeof value !== 'object') return null
+  const snapshot = value as StorefrontDraftSnapshot
+  if (!Array.isArray(snapshot.selections) || !snapshot.summary) return null
+  return snapshot
+}
+
+function isLegacyDraftToken(token: string | null | undefined): token is string {
+  return typeof token === 'string' && token.includes('-')
+}
+
+async function loadLegacyDraftRecord(token: string, shopDomain: string) {
+  const draft = await prisma.designStorefrontDraft.findUnique({ where: { token } })
+  if (!draft || draft.shopDomain !== shopDomain) return null
+  if (draft.status !== DesignStorefrontDraftStatus.ACTIVE) return null
+  if (draft.expiresAt && draft.expiresAt.getTime() < Date.now()) {
+    await prisma.designStorefrontDraft.update({
+      where: { id: draft.id },
+      data: { status: DesignStorefrontDraftStatus.EXPIRED },
+    })
+    return null
+  }
+  return draft
+}
+
+async function expireLegacyDraft(token: string, shopDomain: string) {
   await prisma.designStorefrontDraft.updateMany({
     where: { token, shopDomain },
     data: { status: DesignStorefrontDraftStatus.EXPIRED },
   })
-}
-
-async function validateDraftToken(token: string, shopDomain: string) {
-  const draft = await prisma.designStorefrontDraft.findUnique({ where: { token } })
-  if (!draft || draft.shopDomain !== shopDomain) return null
-  return draft
-}
-
-function buildDraftData({
-  normalized,
-  tier,
-}: {
-  normalized: NormalizedStorefrontPayload
-  tier: DesignStudioAccess['tier']
-}): DraftDataInput {
-  return {
-    tier,
-    status: DesignStorefrontDraftStatus.ACTIVE,
-    selections: normalized.selections as Prisma.InputJsonValue,
-    summary: normalized.summary as Prisma.InputJsonValue,
-    customer: normalized.customer as Prisma.InputJsonValue,
-    metadata: {
-      hero: normalized.hero,
-      featureFlags: normalized.featureFlags,
-      steps: normalized.steps,
-      validation: normalized.validation,
-    } as Prisma.InputJsonValue,
-    notes: normalized.notes ?? null,
-    expiresAt: new Date(Date.now() + DRAFT_TTL_MS),
-  }
 }
 
 function deserializeDraft(record: DraftRecord): StorefrontDraftSnapshot {
@@ -173,6 +317,26 @@ function deserializeDraft(record: DraftRecord): StorefrontDraftSnapshot {
     validation: coerceValidation(metadata?.validation),
   }
 }
+
+function snapshotToPayload(snapshot: StorefrontDraftSnapshot): StorefrontBuildPayload {
+  return {
+    selections: snapshot.selections,
+    summary: snapshot.summary,
+    steps: snapshot.steps,
+    hero: snapshot.hero ?? undefined,
+    featureFlags: snapshot.featureFlags,
+    customer: snapshot.customer
+      ? {
+          name: snapshot.customer.name ?? undefined,
+          email: snapshot.customer.email ?? undefined,
+          phone: snapshot.customer.phone ?? undefined,
+        }
+      : undefined,
+    notes: snapshot.notes ?? undefined,
+    validation: snapshot.validation ?? undefined,
+  }
+}
+// <!-- END RBP GENERATED: design-studio-phase-c-v1 -->
 
 function coerceSelections(value: Prisma.JsonValue | null | undefined): StorefrontSelectionSnapshot[] {
   if (!Array.isArray(value)) return []

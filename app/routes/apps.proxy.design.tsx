@@ -89,6 +89,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     {
       headers: buildShopifyCorsHeaders(request, {
         'Content-Security-Policy': `frame-ancestors ${frameAncestors.join(' ')};`,
+        'Cache-Control': 'no-store, must-revalidate',
       }),
     },
   )

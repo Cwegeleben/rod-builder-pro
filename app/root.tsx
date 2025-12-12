@@ -9,15 +9,15 @@ import {
   useLoaderData,
   useRouteLoaderData,
 } from '@remix-run/react'
-import { json, type LinksFunction } from '@remix-run/node'
+import { json, type LinksFunction, type LoaderFunctionArgs } from '@remix-run/node'
 import { useEffect, useState } from 'react'
 import { shouldEnableThemeScrollRestoration } from './lib/theme-scroll-restoration'
+import { resolveAssetBaseUrl } from './utils/assetBase.server'
 import './styles/globals.css'
 import './styles/theme.css'
 
-export const loader = () => {
-  const assetBaseUrl = process.env.SHOPIFY_APP_URL ?? ''
-  return json({ assetBaseUrl })
+export const loader = ({ request }: LoaderFunctionArgs) => {
+  return json({ assetBaseUrl: resolveAssetBaseUrl(request) })
 }
 
 export const links: LinksFunction = () => [
@@ -35,6 +35,7 @@ export default function App() {
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <Meta />
         <Links />
+        <ManifestAbsoluteUrlGuard assetBaseUrl={assetBaseUrl} />
         {/* (Removed) Shopify telemetry suppression scripts */}
       </head>
       <body suppressHydrationWarning>
@@ -118,6 +119,7 @@ export function ErrorBoundary() {
         {assetBaseUrl ? <base href={assetBaseUrl} /> : null}
         <Meta />
         <Links />
+        <ManifestAbsoluteUrlGuard assetBaseUrl={assetBaseUrl} />
         <title>{message}</title>
       </head>
       <body suppressHydrationWarning>
@@ -210,5 +212,53 @@ function ThemeAwareScrollRestoration() {
 
   if (!enabled) return null
   return <ScrollRestoration />
+}
+
+function ManifestAbsoluteUrlGuard({ assetBaseUrl }: { assetBaseUrl: string }) {
+  if (!assetBaseUrl) return null
+  const normalizedBase = assetBaseUrl.endsWith('/') ? assetBaseUrl : `${assetBaseUrl}/`
+  const script = `;(() => {
+    if (typeof window === 'undefined') return;
+    if (window.__RBP_REMIX_MANIFEST_ABSOLUTE__) return;
+    window.__RBP_REMIX_MANIFEST_ABSOLUTE__ = true;
+    const base = ${JSON.stringify(normalizedBase)};
+    const pattern = /^[a-zA-Z][a-zA-Z\d+\-.]*:/;
+    const absolutize = (value) => {
+      if (!value || pattern.test(value)) return value;
+      try { return new URL(value, base).toString(); } catch { return value; }
+    };
+    const patchRoute = (route) => {
+      if (!route || typeof route !== 'object') return;
+      route.module = absolutize(route.module);
+      if (Array.isArray(route.imports)) route.imports = route.imports.map(absolutize);
+      if (Array.isArray(route.css)) route.css = route.css.map(absolutize);
+    };
+    const rewrite = (manifest) => {
+      if (!manifest || typeof manifest !== 'object') return manifest;
+      manifest.publicPath = base;
+      if (manifest.entry && typeof manifest.entry === 'object') {
+        manifest.entry.module = absolutize(manifest.entry.module);
+        if (Array.isArray(manifest.entry.imports)) manifest.entry.imports = manifest.entry.imports.map(absolutize);
+        if (Array.isArray(manifest.entry.css)) manifest.entry.css = manifest.entry.css.map(absolutize);
+      }
+      if (manifest.routes && typeof manifest.routes === 'object') {
+        Object.keys(manifest.routes).forEach((key) => patchRoute(manifest.routes[key]));
+      }
+      if (manifest.url) manifest.url = absolutize(manifest.url);
+      return manifest;
+    };
+    let current = window.__remixManifest;
+    Object.defineProperty(window, '__remixManifest', {
+      configurable: true,
+      get: () => current,
+      set: (value) => {
+        current = value ? rewrite(value) : value;
+      },
+    });
+    if (current) {
+      current = rewrite(current);
+    }
+  })();`
+  return <script dangerouslySetInnerHTML={{ __html: script }} />
 }
 // <!-- END RBP GENERATED: supplier-importer-ui-v1 -->

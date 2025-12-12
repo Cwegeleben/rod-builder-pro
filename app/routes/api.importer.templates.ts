@@ -11,26 +11,24 @@ import { isHqShop } from '../lib/access.server'
 import { listTemplatesSummary } from '../models/specTemplate.server'
 import { listScrapers } from '../services/importer/scrapers.server'
 import { authenticate } from '../shopify.server'
+import { buildShopifyCorsHeaders } from '../utils/shopifyCors.server'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   // CORS: allow Shopify Admin parent frame to fetch when App Bridge proxies
-  const origin = request.headers.get('origin') || ''
-  const allowOrigins = ['https://admin.shopify.com', 'https://rbp-app.fly.dev', 'http://localhost:3000']
-  const allowOrigin = allowOrigins.find(o => origin.startsWith(o)) || '*'
-  const baseHeaders = new Headers({
-    'Access-Control-Allow-Origin': allowOrigin,
+  const baseHeaders = buildShopifyCorsHeaders(request, {
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-    Vary: 'Origin',
   })
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: baseHeaders })
   }
+  const jsonHeaders = new Headers(baseHeaders)
+  jsonHeaders.set('Content-Type', 'application/json')
   const hq = await isHqShop(request)
   if (!hq) {
     return new Response(JSON.stringify({ templates: [], error: 'hq_required' }), {
       status: 403,
-      headers: new Headers({ 'Content-Type': 'application/json', ...Object.fromEntries(baseHeaders) }),
+      headers: jsonHeaders,
     })
   }
   const url = new URL(request.url)
@@ -134,12 +132,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }),
       )
       return new Response(JSON.stringify({ templates: out }), {
-        headers: new Headers({ 'Content-Type': 'application/json', ...Object.fromEntries(baseHeaders) }),
+        headers: jsonHeaders,
       })
     } catch (err) {
       console.warn('[api.importer.templates] failed to list templates; returning empty list:', err)
       return new Response(JSON.stringify({ templates: [] }), {
-        headers: new Headers({ 'Content-Type': 'application/json', ...Object.fromEntries(baseHeaders) }),
+        headers: jsonHeaders,
       })
     }
   }

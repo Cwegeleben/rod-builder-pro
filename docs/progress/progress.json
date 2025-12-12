@@ -66,5 +66,28 @@
     "tests": "N/A",
     "preflight": "PASS",
     "notes": "Replaced Import button; mounted Import Wizard at /app/products/import; HQ-gated; relative links."
+  },
+  {
+    "<!-- BEGIN RBP GENERATED: design-studio-phase-c-v1 -->": true,
+    "date": "2025-12-12",
+    "feature": "Design Studio v1 Phase C",
+    "change": "MODIFY",
+    "sentinel": "design-studio-phase-c-v1",
+    "apps": ["rbp-shopify-app"],
+    "files": [
+      "prisma/schema.prisma",
+      "app/routes/api.design-studio.drafts.tsx",
+      "app/services/designStudio/designBuildDraftRepo.server.ts",
+      "app/services/designStudio/storefrontDraft.server.ts",
+      "app/services/designStudio/__tests__/storefrontDraft.server.unit.test.ts",
+      "scripts/migrateLegacyDesignStudioDrafts.ts",
+      "scripts/verifyDesignStudioPhaseC.ts",
+      "package.json",
+      "docs/progress/progress.json"
+    ],
+    "tests": "PASS",
+    "preflight": "N/A",
+    "notes": "Legacy draft migration + verification scripts shipped for Phase C.",
+    "<!-- END RBP GENERATED: design-studio-phase-c-v1 -->": true
   }
 ]

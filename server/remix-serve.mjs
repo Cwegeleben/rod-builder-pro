@@ -16,20 +16,19 @@ const HOST = process.env.HOST ?? '0.0.0.0'
 const MODE = process.env.NODE_ENV ?? 'production'
 const publicPath = build.publicPath ?? '/build/'
 const assetsDir = build.assetsBuildDirectory ?? path.resolve(process.cwd(), 'build/client')
+const assetPrefix = deriveAssetPrefix(publicPath, build.entry?.module)
 
 const app = express()
 app.disable('x-powered-by')
 app.use(compression())
-console.log(`[rbp-app] serving static assets from ${publicPath} -> ${assetsDir}`)
+console.log(`[rbp-app] serving static assets from ${assetPrefix} -> ${assetsDir}`)
 
-app.use(publicPath, withShopifyCors, express.static(assetsDir, { immutable: true, maxAge: '1y' }))
+app.use(assetPrefix, withShopifyCors, express.static(assetsDir, { immutable: true, maxAge: '1y' }))
 app.use(express.static('public', { maxAge: '1h' }))
 app.use(morgan('tiny'))
 
 const requestHandler = createRequestHandler({ build, mode: MODE })
-app.all('*', (req, res, next) => {
-  withShopifyCors(req, res, () => requestHandler(req, res, next))
-})
+app.all('*', (req, res, next) => requestHandler(req, res, next))
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`[rbp-app] listening on http://${HOST}:${PORT}`)
@@ -37,4 +36,35 @@ const server = app.listen(PORT, HOST, () => {
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.once(signal, () => server.close(() => process.exit(0)))
+}
+
+function deriveAssetPrefix(publicPathValue, entryModule) {
+  const normalized = normalizePrefix(publicPathValue)
+  if (normalized && normalized !== '/') return normalized
+  if (typeof entryModule === 'string' && entryModule.length) {
+    try {
+      const prefix = path.posix.dirname(new URL(entryModule, 'https://rbp-app.local').pathname)
+      const normalizedEntry = normalizePrefix(prefix)
+      if (normalizedEntry && normalizedEntry !== '/') return normalizedEntry
+    } catch {
+      const normalizedEntry = normalizePrefix(path.posix.dirname(entryModule))
+      if (normalizedEntry && normalizedEntry !== '/') return normalizedEntry
+    }
+  }
+  return '/build'
+}
+
+function normalizePrefix(value) {
+  if (!value) return ''
+  let out = value
+  try {
+    out = new URL(value, 'https://rbp-app.local').pathname
+  } catch {
+    out = value
+  }
+  if (!out.startsWith('/')) out = `/${out}`
+  if (out.length > 1 && out.endsWith('/')) {
+    out = out.slice(0, -1)
+  }
+  return out
 }

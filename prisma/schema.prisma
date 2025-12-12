@@ -556,6 +556,18 @@ enum DesignStorefrontDraftStatus {
   EXPIRED
 }
 
+// <!-- BEGIN RBP GENERATED: design-studio-phase-c-v1 -->
+enum Role {
+  BLANK
+  GUIDE
+  TIP_TOP
+  REEL_SEAT
+  HANDLE
+  BUTT_CAP
+  COMPONENT
+}
+// <!-- END RBP GENERATED: design-studio-phase-c-v1 -->
+
 /// ProductVersion: immutable snapshot of normalized content
 model ProductVersion {
   id                          String                        @id @default(cuid())
@@ -645,6 +657,20 @@ model DesignBuild {
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
 
+  // <!-- BEGIN RBP GENERATED: design-studio-phase-c-v1 -->
+  tenantId           String?
+  customerId         String?
+  createdByUserId    String?
+  roleSelections     Json?
+  compatContext      Json?
+  validationSnapshot Json?
+  latestDraftId      String?
+  telemetryVersion   String?
+  notes              String?
+  legacyBuildId      String?
+  drafts             DesignBuildDraft[]
+  // <!-- END RBP GENERATED: design-studio-phase-c-v1 -->
+
   events      DesignBuildEvent[]
   attachments DesignBuildAttachment[]
 
@@ -652,6 +678,28 @@ model DesignBuild {
   @@index([tier])
   @@index([storefrontDraftId])
 }
+
+// <!-- BEGIN RBP GENERATED: design-studio-phase-c-v1 -->
+model DesignBuildDraft {
+  id                 String       @id @default(cuid())
+  buildId            String
+  tenantId           String
+  createdByUserId    String
+  version            Int
+  draftPayload       Json
+  compatContext      Json?
+  validationSnapshot Json?
+  status             String
+  lastTouchedAt      DateTime     @default(now())
+  importedFromExternalId String?
+  expiresAt          DateTime?
+
+  build DesignBuild @relation(fields: [buildId], references: [id])
+
+  @@index([buildId])
+  @@unique([buildId, version])
+}
+// <!-- END RBP GENERATED: design-studio-phase-c-v1 -->
 
 model DesignStorefrontDraft {
   id          String                      @id @default(cuid())
@@ -681,6 +729,13 @@ model DesignBuildEvent {
   payload     Json?
   performedBy String?
   createdAt   DateTime             @default(now())
+  // <!-- BEGIN RBP GENERATED: design-studio-phase-c-v1 -->
+  tenantId    String?
+  occurredAt  DateTime?            @default(now())
+  actorUserId String?
+  details     Json?
+  visibility  String?
+  // <!-- END RBP GENERATED: design-studio-phase-c-v1 -->
 
   @@index([buildId, createdAt])
 }

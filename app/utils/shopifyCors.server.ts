@@ -29,12 +29,23 @@ function appendVary(headers: Headers, value: string) {
   }
 }
 
-export function buildShopifyCorsHeaders(request: Request, extraHeaders?: HeadersInit): Headers {
-  const headers = new Headers(extraHeaders)
+function applyCorsOrigin(request: Request, headers: Headers) {
   const origin = request.headers.get('origin')
-  if (isAllowedShopifyOrigin(origin)) {
-    headers.set('Access-Control-Allow-Origin', origin)
-    appendVary(headers, 'Origin')
+  if (!isAllowedShopifyOrigin(origin)) return
+  headers.set('Access-Control-Allow-Origin', origin)
+  appendVary(headers, 'Origin')
+}
+
+export function ensureShopifyCorsHeaders(request: Request, target: Headers, extraHeaders?: HeadersInit): Headers {
+  if (extraHeaders) {
+    new Headers(extraHeaders).forEach((value, key) => target.set(key, value))
   }
+  applyCorsOrigin(request, target)
+  return target
+}
+
+export function buildShopifyCorsHeaders(request: Request, extraHeaders?: HeadersInit): Headers {
+  const headers = new Headers()
+  ensureShopifyCorsHeaders(request, headers, extraHeaders)
   return headers
 }
