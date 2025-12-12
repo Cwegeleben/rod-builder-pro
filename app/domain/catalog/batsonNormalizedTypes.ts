@@ -1,4 +1,8 @@
+import type { NormalizedTipTopSpec } from '../../../packages/importer/src/lib/tipTop'
+
 export type AvailabilityState = 'inStock' | 'outOfStock' | 'discontinued' | 'preorder'
+
+export type BatsonProductCategory = 'blank' | 'guide' | 'tipTop' | 'grip' | 'reelSeat' | 'trim' | 'endCap'
 
 interface NormalizedUniversal<F extends string> {
   brand: string
@@ -9,6 +13,9 @@ interface NormalizedUniversal<F extends string> {
   msrp?: number
   availability?: AvailabilityState
   color?: string
+  category?: BatsonProductCategory
+  designStudioRole?: string
+  imageUrl?: string | null
 }
 
 export type BlankFamily =
@@ -90,11 +97,13 @@ export interface NormalizedTipTop extends NormalizedUniversal<TipTopFamily> {
   ringSize: number
   tubeSize: number
   tipTopType: 'Standard' | 'Heavy Duty' | 'Medium Duty' | 'Boat' | 'Fly' | 'Micro'
+  loopStyle: string
   displayName: string
   weightOz?: number
   height_mm?: number
   notes?: string
   pricingTier?: string
+  tipTop?: NormalizedTipTopSpec
 }
 
 export type GripFamily =
@@ -116,6 +125,7 @@ export interface NormalizedGrip extends NormalizedUniversal<GripFamily> {
   frontODIn: number
   rearODIn: number
   profileShape: string
+  gripPosition: 'rear' | 'fore' | 'full' | 'butt' | 'ice' | 'switch'
   weight_g?: number
   urethaneFilled?: boolean
   winnPattern?: string
@@ -184,6 +194,8 @@ export interface NormalizedEndCap extends NormalizedUniversal<EndCapFamily> {
   endCapDepthIn?: number
   weightOz?: number
   hardwareInterface?: string
+  capStyle?: string
+  isGimbal?: boolean
   notes?: string
 }
 

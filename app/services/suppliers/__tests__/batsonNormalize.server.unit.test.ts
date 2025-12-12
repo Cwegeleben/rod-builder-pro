@@ -31,6 +31,7 @@ describe('batsonNormalize blank', () => {
       rawSpecs: { ...baseRawSpecs },
       availability: 'In Stock',
       priceMsrp: 189.99,
+      images: ['https://example.com/blank.jpg'],
     })
     expect(normalized.family).toBe('castingBlank')
     expect(normalized.itemTotalLengthIn).toBe(84)
@@ -38,6 +39,36 @@ describe('batsonNormalize blank', () => {
     expect(normalized.lineRating).toContain('10-17')
     expect(normalized.tipOD_mm).toBeCloseTo(4.5, 2)
     expect(normalized.materialConstruction).toContain('RX7')
+    expect(normalized.category).toBe('blank')
+    expect(normalized.designStudioRole).toBe('BLANK')
+    expect(normalized.imageUrl).toBe('https://example.com/blank.jpg')
+  })
+})
+
+describe('batsonNormalize guide', () => {
+  it('emits Design Studio metadata for guides', () => {
+    const normalized = normalizeBatsonGuide({
+      externalId: 'MXN5',
+      partType: 'Guide',
+      title: 'ALPS MXN5 Single Foot Guide',
+      description: 'Size 5 running guide',
+      rawSpecs: {
+        ring_size: '5',
+        frame_material: 'SS316',
+        ring_material: 'SIC',
+        finish: 'TiChrome',
+        height_mm: '15',
+        weight_oz: '0.05',
+        foot_type: 'single',
+      },
+      priceMsrp: 5.25,
+      images: ['https://cdn.rbp.dev/samples/mxn-5.jpg'],
+    })
+    expect(normalized.category).toBe('guide')
+    expect(normalized.designStudioRole).toBe('GUIDE')
+    expect(normalized.imageUrl).toBe('https://cdn.rbp.dev/samples/mxn-5.jpg')
+    expect(normalized.frameMaterial).toMatch(/316/i)
+    expect(normalized.ringMaterial).toMatch(/carbide/i)
   })
 })
 
@@ -58,7 +89,13 @@ describe('batsonNormalize tip tops', () => {
     expect(normalized.tubeSize).toBeCloseTo(4.5, 1)
     expect(normalized.ringSize).toBe(6)
     expect(normalized.displayName).toMatch(/Tip Top/)
-    expect(normalized.frameMaterial).toContain('316')
+    expect(normalized.frameMaterial).toMatch(/316/i)
+    expect(normalized.category).toBe('tipTop')
+    expect(normalized.designStudioRole).toBe('TIP_TOP')
+    expect(normalized.loopStyle).toBe('fly')
+    expect(normalized.family).toBe('flyTipTop')
+    expect(normalized.tipTop?.tubeSizeMm).toBeCloseTo(4.5, 1)
+    expect(normalized.tipTop?.ringSize).toBe(6)
   })
 })
 

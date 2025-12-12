@@ -16,12 +16,7 @@ import {
   TipTopFamily,
   TrimFamily,
 } from '../../domain/catalog/batsonNormalizedTypes'
-import {
-  normalizeTipTop,
-  expandFrameMaterial,
-  expandRingMaterial,
-  getTipTopType,
-} from '../../../packages/importer/src/lib/tipTop'
+import { normalizeTipTop, expandFrameMaterial, expandRingMaterial } from '../../../packages/importer/src/lib/tipTop'
 
 export type BatsonRawProduct = {
   externalId: string
@@ -31,6 +26,8 @@ export type BatsonRawProduct = {
   rawSpecs: Record<string, unknown>
   availability?: string | null
   priceMsrp?: number | null
+  images?: string[]
+  imageUrl?: string | null
 }
 
 type UniversalOverrides = {
@@ -164,6 +161,13 @@ const buildUniversal = <F extends string>(family: F, input: BatsonRawProduct, ov
   }
 }
 
+const pickPrimaryImage = (input: BatsonRawProduct, specs: Record<string, unknown>): string | undefined => {
+  const explicit = input.imageUrl || input.images?.find(url => typeof url === 'string' && url.trim().length)
+  if (explicit) return explicit
+  const fromSpecs = stringFrom(specs, 'image_url', 'image', 'hero_image')
+  return fromSpecs
+}
+
 const detectBlankFamily = (input: BatsonRawProduct): BlankFamily => {
   const blob =
     `${input.title} ${input.description || ''} ${stringFrom(input.rawSpecs, 'applications', 'series', 'line') || ''}`.toLowerCase()
@@ -191,15 +195,14 @@ const detectGuideFamily = (input: BatsonRawProduct): GuideFamily => {
   return 'singleFootGuide'
 }
 
-const detectTipTopFamily = (input: BatsonRawProduct, type: string): TipTopFamily => {
+const detectTipTopFamily = (input: BatsonRawProduct, fallback: TipTopFamily): TipTopFamily => {
   const blob = `${input.title} ${input.description || ''}`.toLowerCase()
   if (/roller/.test(blob)) return 'rollerTipTop'
   if (/fly/.test(blob)) return 'flyTipTop'
   if (/micro/.test(blob)) return 'microTipTop'
   if (/boat|offshore/.test(blob)) return 'boatTipTop'
-  if (type === 'Heavy Duty') return 'castingTipTop'
   if (/spin/i.test(blob)) return 'spinningTipTop'
-  return 'castingTipTop'
+  return fallback
 }
 
 const detectGripFamily = (input: BatsonRawProduct): GripFamily => {
@@ -215,6 +218,20 @@ const detectGripFamily = (input: BatsonRawProduct): GripFamily => {
   if (/ice/.test(blob)) return 'iceGrip'
   if (/winn/.test(blob)) return 'winnGrip'
   return 'splitGrip'
+}
+
+const deriveGripPosition = (family: GripFamily, input: BatsonRawProduct): NormalizedGrip['gripPosition'] => {
+  const blob =
+    `${input.title} ${input.description || ''} ${stringFrom(input.rawSpecs, 'grip_type', 'profile') || ''}`.toLowerCase()
+  const has = (pattern: RegExp) => pattern.test(blob)
+  if (family === 'foreGrip' || has(/\bfore(?:\s|$|grip)/)) return 'fore'
+  if (family === 'fullWells' || family === 'halfWells' || family === 'switchGrip' || has(/\bfull\s?wells/))
+    return 'full'
+  if (family === 'fightingButt' || has(/fighting\s+butt|\bbutt(?!on)/)) return 'butt'
+  if (family === 'iceGrip' || has(/\bice\b/)) return 'ice'
+  if (has(/\bswitch\b/)) return 'switch'
+  if (has(/\brear\b/)) return 'rear'
+  return 'rear'
 }
 
 const detectSeatFamily = (input: BatsonRawProduct): ReelSeatFamily => {
@@ -252,6 +269,18 @@ const detectEndCapFamily = (input: BatsonRawProduct): EndCapFamily => {
   return 'buttCap'
 }
 
+const deriveCapStyle = (family: EndCapFamily, input: BatsonRawProduct): { capStyle: string; isGimbal: boolean } => {
+  const blob = `${input.title} ${input.description || ''}`.toLowerCase()
+  if (family === 'gimbal' || /gimbal/.test(blob)) return { capStyle: 'gimbal', isGimbal: true }
+  if (family === 'fightingButtCap' || /fighting/.test(blob)) return { capStyle: 'fightingButt', isGimbal: false }
+  if (family === 'carbonButtCap') return { capStyle: 'carbonCap', isGimbal: false }
+  if (family === 'aluminumCap') return { capStyle: 'aluminumCap', isGimbal: false }
+  if (family === 'pvcCap') return { capStyle: 'pvcCap', isGimbal: false }
+  if (family === 'evaCap') return { capStyle: 'evaCap', isGimbal: false }
+  if (family === 'rubberCap') return { capStyle: 'rubberCap', isGimbal: false }
+  return { capStyle: 'buttCap', isGimbal: false }
+}
+
 const detectSeatOrientation = (input: BatsonRawProduct): 'upLock' | 'downLock' | 'trigger' | 'pistol' => {
   const blob = `${input.title} ${stringFrom(input.rawSpecs, 'seat_type') || ''}`.toLowerCase()
   if (/downlock/.test(blob)) return 'downLock'
@@ -278,9 +307,13 @@ export function normalizeBatsonBlank(input: BatsonRawProduct): NormalizedBlank {
   const tipOD_mm = ensureNumber(numberFrom(specs.tip_top_size))
   const buttOD_mm = ensureNumber(inchesToMm(numberFrom(specs.butt_dia_in)) ?? numberFrom(specs.butt_dia_mm))
   const blankWeightOz = ensureNumber(numberFrom(specs.weight_oz))
+  const imageUrl = pickPrimaryImage(input, specs)
 
   return {
     ...base,
+    category: 'blank',
+    designStudioRole: 'BLANK',
+    imageUrl: imageUrl || null,
     itemTotalLengthIn,
     numberOfPieces,
     power,
@@ -310,13 +343,18 @@ export function normalizeBatsonGuide(input: BatsonRawProduct): NormalizedGuide {
   const family = detectGuideFamily(input)
   const frameMaterialCode = stringFrom(specs, 'frame_material')
   const ringMaterialCode = stringFrom(specs, 'ring_material', 'ring_type')
+  const imageUrl = pickPrimaryImage(input, specs)
+  const base = buildUniversal(family, input, {
+    material: frameMaterialCode ? expandFrameMaterial(frameMaterialCode) : undefined,
+  })
   const height_mm = ensureNumber(numberFrom(specs.height_mm) ?? inchesToMm(numberFrom(specs.height_in)))
   const weightOz = ensureNumber(numberFrom(specs.weight_oz) ?? numberFrom(specs.weight))
 
   return {
-    ...buildUniversal(family, input, {
-      material: frameMaterialCode ? expandFrameMaterial(frameMaterialCode) : undefined,
-    }),
+    ...base,
+    category: 'guide',
+    designStudioRole: 'GUIDE',
+    imageUrl: imageUrl || null,
     frameMaterial: frameMaterialCode ? expandFrameMaterial(frameMaterialCode) : 'Unknown',
     frameMaterialCode: frameMaterialCode,
     frameFinish: stringFrom(specs, 'finish', 'frame_finish', 'color') || 'Standard',
@@ -337,7 +375,6 @@ export function normalizeBatsonGuide(input: BatsonRawProduct): NormalizedGuide {
 export function normalizeBatsonTipTop(input: BatsonRawProduct): NormalizedTipTop {
   const specs = input.rawSpecs
   const sku = input.externalId
-  const tipTopType = getTipTopType({ sku, title: input.title, description: input.description })
   const normalized = normalizeTipTop({
     sku,
     title: input.title,
@@ -348,12 +385,19 @@ export function normalizeBatsonTipTop(input: BatsonRawProduct): NormalizedTipTop
     ringSize: specs.ring_size,
     series: stringFrom(specs, 'series'),
   })
-  const family = detectTipTopFamily(input, tipTopType)
+  const fallbackFamily = (normalized.familyHint as TipTopFamily) || 'castingTipTop'
+  const family = detectTipTopFamily(input, fallbackFamily)
+  const imageUrl = pickPrimaryImage(input, specs)
+  const base = buildUniversal(family, input, {
+    material: normalized.frameMaterialLong || expandFrameMaterial(normalized.frameMaterialCode || undefined),
+  })
 
   return {
-    ...buildUniversal(family, input, {
-      material: normalized.frameMaterialLong || expandFrameMaterial(normalized.frameMaterialCode || undefined),
-    }),
+    ...base,
+    category: 'tipTop',
+    designStudioRole: 'TIP_TOP',
+    imageUrl: imageUrl || null,
+    loopStyle: normalized.loopStyle,
     frameMaterial:
       normalized.frameMaterialLong || expandFrameMaterial(normalized.frameMaterialCode || undefined) || 'Unknown',
     frameMaterialCode: normalized.frameMaterialCode ?? undefined,
@@ -361,29 +405,36 @@ export function normalizeBatsonTipTop(input: BatsonRawProduct): NormalizedTipTop
     ringMaterial:
       normalized.ringMaterialLong || expandRingMaterial(normalized.ringMaterialCode || undefined) || 'Unknown',
     ringMaterialCode: normalized.ringMaterialCode ?? undefined,
-    ringSize: ensureNumber(normalized.ringSizeNormalized ?? numberFrom(specs.ring_size)),
-    tubeSize: ensureNumber(normalized.tubeSizeNormalized ?? numberFrom(specs.tube_size)),
-    tipTopType: tipTopType as NormalizedTipTop['tipTopType'],
+    ringSize: ensureNumber(normalized.ringSize ?? numberFrom(specs.ring_size)),
+    tubeSize: ensureNumber(normalized.tubeSizeMm ?? numberFrom(specs.tube_size)),
+    tipTopType: normalized.tipTopType,
     displayName: normalized.title,
     weightOz: numberFrom(specs.weight_oz),
     height_mm: numberFrom(specs.height_mm) ?? inchesToMm(numberFrom(specs.height_in)),
     notes: stringFrom(specs, 'notes'),
     pricingTier: stringFrom(specs, 'pricing_tier'),
+    tipTop: normalized,
   }
 }
 
 export function normalizeBatsonGrip(input: BatsonRawProduct): NormalizedGrip {
   const specs = input.rawSpecs
   const family = detectGripFamily(input)
+  const imageUrl = pickPrimaryImage(input, specs)
+  const gripPosition = deriveGripPosition(family, input)
   return {
     ...buildUniversal(family, input),
+    category: 'grip',
+    designStudioRole: 'HANDLE',
+    imageUrl: imageUrl || null,
+    gripPosition,
     itemLengthIn: ensureNumber(numberFrom(specs.length_in) ?? numberFrom(specs.overall_length)),
     insideDiameterIn: ensureNumber(numberFrom(specs.inner_diameter) ?? numberFrom(specs.id_in)),
     frontODIn: ensureNumber(numberFrom(specs.front_od_in) ?? numberFrom(specs.od_front)),
     rearODIn: ensureNumber(
       numberFrom(specs.rear_od_in) ?? numberFrom(specs.od_rear) ?? numberFrom(specs.outer_diameter),
     ),
-    profileShape: stringFrom(specs, 'grip_type', 'profile', 'shape') || 'straight',
+    profileShape: stringFrom(specs, 'profile', 'shape', 'grip_type') || 'straight',
     weight_g: numberFrom(specs.weight_g) ?? numberFrom(specs.weight),
     urethaneFilled: stringFrom(specs, 'urethane_filled') === 'yes',
     winnPattern: stringFrom(specs, 'winn_pattern'),
@@ -397,14 +448,26 @@ export function normalizeBatsonReelSeat(input: BatsonRawProduct): NormalizedReel
   const family = detectSeatFamily(input)
   const hoodOdIn = numberFrom(specs.hood_od_in)
   const hoodOdMm = numberFrom(specs.hood_od_mm)
+  const imageUrl = pickPrimaryImage(input, specs)
+  const seatSize = stringFrom(specs, 'seat_size', 'size', 'designation') || '16'
+  const seatSizeNumeric = numberFrom(seatSize)
+  const inferredBoreIn = seatSizeNumeric != null ? mmToInches(seatSizeNumeric) : undefined
+  const insideDiameterIn =
+    numberFrom(specs.inside_diameter) ?? numberFrom(specs.bore_id) ?? numberFrom(specs.tube_size) ?? inferredBoreIn
+  const bodyOutsideDiameterIn =
+    numberFrom(specs.body_od_in) ??
+    numberFrom(specs.outer_diameter) ??
+    (insideDiameterIn != null ? Math.round((insideDiameterIn + 0.2) * 100) / 100 : undefined)
+  const itemLengthIn = numberFrom(specs.length_in) ?? numberFrom(specs.overall_length) ?? 4.5
   return {
     ...buildUniversal(family, input),
-    seatSize: stringFrom(specs, 'seat_size', 'size', 'designation') || '16',
-    itemLengthIn: ensureNumber(numberFrom(specs.length_in) ?? numberFrom(specs.overall_length)),
-    insideDiameterIn: ensureNumber(
-      numberFrom(specs.inside_diameter) ?? numberFrom(specs.bore_id) ?? numberFrom(specs.tube_size),
-    ),
-    bodyOutsideDiameterIn: ensureNumber(numberFrom(specs.body_od_in) ?? numberFrom(specs.outer_diameter)),
+    category: 'reelSeat',
+    designStudioRole: 'REEL_SEAT',
+    imageUrl: imageUrl || null,
+    seatSize,
+    itemLengthIn: ensureNumber(itemLengthIn),
+    insideDiameterIn: ensureNumber(insideDiameterIn),
+    bodyOutsideDiameterIn: ensureNumber(bodyOutsideDiameterIn),
     seatOrientation: detectSeatOrientation(input),
     hoodOutsideDiameterIn: hoodOdIn ?? (hoodOdMm != null ? mmToInches(hoodOdMm) : undefined),
     insertMaterial: stringFrom(specs, 'insert_material'),
@@ -417,8 +480,12 @@ export function normalizeBatsonReelSeat(input: BatsonRawProduct): NormalizedReel
 export function normalizeBatsonTrim(input: BatsonRawProduct): NormalizedTrim {
   const specs = input.rawSpecs
   const family = detectTrimFamily(input)
+  const imageUrl = pickPrimaryImage(input, specs)
   return {
     ...buildUniversal(family, input),
+    category: 'trim',
+    designStudioRole: 'COMPONENT',
+    imageUrl: imageUrl || null,
     itemLengthIn: ensureNumber(numberFrom(specs.length_in) ?? numberFrom(specs.height_in)),
     insideDiameterIn: ensureNumber(numberFrom(specs.inside_diameter) ?? numberFrom(specs.id_in)),
     outsideDiameterIn: ensureNumber(numberFrom(specs.outer_diameter) ?? numberFrom(specs.od_in)),
@@ -433,14 +500,21 @@ export function normalizeBatsonTrim(input: BatsonRawProduct): NormalizedTrim {
 export function normalizeBatsonEndCap(input: BatsonRawProduct): NormalizedEndCap {
   const specs = input.rawSpecs
   const family = detectEndCapFamily(input)
+  const imageUrl = pickPrimaryImage(input, specs)
+  const { capStyle, isGimbal } = deriveCapStyle(family, input)
   return {
     ...buildUniversal(family, input),
+    category: 'endCap',
+    designStudioRole: 'BUTT_CAP',
+    imageUrl: imageUrl || null,
     itemLengthIn: ensureNumber(numberFrom(specs.length_in) ?? numberFrom(specs.height_in)),
     insideDiameterIn: ensureNumber(numberFrom(specs.inside_diameter) ?? numberFrom(specs.id_in)),
     outsideDiameterIn: ensureNumber(numberFrom(specs.outer_diameter) ?? numberFrom(specs.od_in)),
     endCapDepthIn: numberFrom(specs.depth_in),
     weightOz: numberFrom(specs.weight_oz) ?? numberFrom(specs.weight),
     hardwareInterface: stringFrom(specs, 'interface', 'hardware'),
+    capStyle,
+    isGimbal,
     notes: stringFrom(specs, 'notes'),
   }
 }

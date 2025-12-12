@@ -1,5 +1,15 @@
 const EN_DASH = '\u2013'
 
+export type TipTopType = 'Standard' | 'Heavy Duty' | 'Medium Duty' | 'Boat' | 'Fly' | 'Micro'
+
+export type TipTopFamilyHint =
+  | 'castingTipTop'
+  | 'spinningTipTop'
+  | 'flyTipTop'
+  | 'rollerTipTop'
+  | 'microTipTop'
+  | 'boatTipTop'
+
 export const FRAME_MATERIAL_MAP: Record<string, string> = {
   SS316: '316 Stainless Steel',
   SS304: '304 Stainless Steel',
@@ -17,13 +27,31 @@ export const RING_MATERIAL_MAP: Record<string, string> = {
   LS: 'Light Stone',
 }
 
-const TIP_TOP_TYPE_MAP: Record<string, string> = {
+const TIP_TOP_TYPE_MAP: Record<string, TipTopType> = {
   H: 'Heavy Duty',
   M: 'Medium Duty',
   B: 'Boat',
   U: 'Standard',
   F: 'Fly',
   Y: 'Micro',
+}
+
+const TIP_TOP_TYPE_TO_FAMILY: Record<TipTopType, TipTopFamilyHint> = {
+  Standard: 'spinningTipTop',
+  'Heavy Duty': 'castingTipTop',
+  'Medium Duty': 'castingTipTop',
+  Boat: 'boatTipTop',
+  Fly: 'flyTipTop',
+  Micro: 'microTipTop',
+}
+
+const LOOP_STYLE_LABEL: Record<TipTopType, string> = {
+  Standard: 'standard',
+  'Heavy Duty': 'heavy-duty',
+  'Medium Duty': 'medium-duty',
+  Boat: 'boat',
+  Fly: 'fly',
+  Micro: 'micro',
 }
 
 type TipTopContext = {
@@ -42,13 +70,15 @@ export type TipTopNormalizationInput = TipTopContext & {
 }
 
 export type NormalizedTipTopSpec = {
-  type: string
+  tipTopType: TipTopType
+  familyHint: TipTopFamilyHint
+  loopStyle: string
   frameMaterialCode?: string | null
   frameMaterialLong?: string | null
   ringMaterialCode?: string | null
   ringMaterialLong?: string | null
-  tubeSizeNormalized?: number | null
-  ringSizeNormalized?: number | null
+  tubeSizeMm?: number | null
+  ringSize?: number | null
   title: string
 }
 
@@ -78,7 +108,10 @@ export function expandMaterial(code: string | null | undefined, map: Record<stri
   if (normalized && map[normalized]) return map[normalized]
   const fallback = code.trim()
   if (!fallback) return ''
-  return /^[a-z0-9]+$/i.test(fallback) ? fallback.toUpperCase() : titleCase(fallback)
+  if (/^[a-z0-9]+$/i.test(fallback)) {
+    return fallback.length <= 4 ? fallback.toUpperCase() : titleCase(fallback)
+  }
+  return titleCase(fallback)
 }
 
 export function expandFrameMaterial(code?: string | null): string {
@@ -99,7 +132,7 @@ const stripForecastPrefix = (value: string): string => {
   return value
 }
 
-function typeFromSku(sku?: string | null): string | null {
+function typeFromSku(sku?: string | null): TipTopType | null {
   if (!sku) return null
   const trimmed = sku.trim()
   if (!trimmed) return null
@@ -110,7 +143,7 @@ function typeFromSku(sku?: string | null): string | null {
   return TIP_TOP_TYPE_MAP[candidate] || null
 }
 
-const textBasedType = (ctx: TipTopContext): string | null => {
+const textBasedType = (ctx: TipTopContext): TipTopType | null => {
   const blob = [ctx.description, ctx.title, ctx.series, ctx.family]
     .filter(Boolean)
     .map(part => part!.toLowerCase())
@@ -124,7 +157,7 @@ const textBasedType = (ctx: TipTopContext): string | null => {
   return null
 }
 
-export function getTipTopType(ctx: TipTopContext): string {
+export function getTipTopType(ctx: TipTopContext): TipTopType {
   const fromSku = typeFromSku(ctx.sku)
   if (fromSku) return fromSku
   const fromText = textBasedType(ctx)
@@ -189,7 +222,8 @@ const formatTubeDisplay = (value?: number | null): string => {
 }
 
 export function normalizeTipTop(input: TipTopNormalizationInput): NormalizedTipTopSpec {
-  const type = getTipTopType(input)
+  const tipTopType = getTipTopType(input)
+  const familyHint = TIP_TOP_TYPE_TO_FAMILY[tipTopType]
   const frameMaterialCode = sanitizeMaterialCode(input.frameMaterial) || input.frameMaterial || null
   const ringMaterialCode = sanitizeMaterialCode(input.ringMaterial) || input.ringMaterial || null
   const frameMaterialLong = expandFrameMaterial(frameMaterialCode || undefined)
@@ -201,7 +235,7 @@ export function normalizeTipTop(input: TipTopNormalizationInput): NormalizedTipT
     tubeFromText(input.description),
     tubeFromText(input.title),
   ]
-  const tubeSizeNormalized = tubeCandidates.find(value => value != null) ?? null
+  const tubeSizeMm = tubeCandidates.find(value => value != null) ?? null
 
   const ringCandidates: Array<number | null> = [
     parseNumber(input.ringSize),
@@ -209,12 +243,14 @@ export function normalizeTipTop(input: TipTopNormalizationInput): NormalizedTipT
     ringFromText(input.description),
     ringFromText(input.title),
   ]
-  const ringSizeNormalized = ringCandidates.find(value => value != null) ?? null
+  const ringSize = ringCandidates.find(value => value != null) ?? null
 
-  const tubeDisplay = formatTubeDisplay(tubeSizeNormalized)
-  const ringDisplay = ringSizeNormalized != null ? Math.round(ringSizeNormalized).toString() : ''
+  const tubeDisplay = formatTubeDisplay(tubeSizeMm)
+  const ringDisplay = ringSize != null ? Math.round(ringSize).toString() : ''
 
-  const leftParts = [`${type} Tip Top`, frameMaterialLong, tubeDisplay ? `${tubeDisplay} Tube` : ''].filter(Boolean)
+  const leftParts = [`${tipTopType} Tip Top`, frameMaterialLong, tubeDisplay ? `${tubeDisplay} Tube` : ''].filter(
+    Boolean,
+  )
   const leftLabel = leftParts.join(' ').replace(/\s+/g, ' ').trim()
 
   const rightParts = [ringMaterialLong, ringDisplay ? `${ringDisplay} Ring` : ''].filter(Boolean)
@@ -222,13 +258,15 @@ export function normalizeTipTop(input: TipTopNormalizationInput): NormalizedTipT
   const title = rightLabel ? `${leftLabel} ${EN_DASH} ${rightLabel}` : leftLabel
 
   return {
-    type,
+    tipTopType,
+    familyHint,
+    loopStyle: LOOP_STYLE_LABEL[tipTopType],
     frameMaterialCode,
     frameMaterialLong,
     ringMaterialCode,
     ringMaterialLong,
-    tubeSizeNormalized,
-    ringSizeNormalized,
+    tubeSizeMm,
+    ringSize,
     title,
   }
 }
@@ -243,14 +281,13 @@ export function extractTipTopReadinessContext(specs?: Record<string, unknown> | 
     const tipTopRecord = tipTop as Record<string, unknown>
     return {
       tubeSize: parseNumber(
-        tipTopRecord['tubeSizeNormalized'] ??
+        tipTopRecord['tubeSizeMm'] ??
           tipTopRecord['tubeSize'] ??
           (specs as Record<string, unknown>)['tube_size'] ??
           (specs as Record<string, unknown>)['tubeSize'],
       ),
       ringSize: parseNumber(
-        tipTopRecord['ringSizeNormalized'] ??
-          tipTopRecord['ringSize'] ??
+        tipTopRecord['ringSize'] ??
           (specs as Record<string, unknown>)['ring_size'] ??
           (specs as Record<string, unknown>)['ringSize'],
       ),

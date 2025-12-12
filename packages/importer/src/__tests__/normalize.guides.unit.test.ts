@@ -22,8 +22,8 @@ describe('normalize pipeline for guides/tip-tops', () => {
     expect(Number(res.specs.tube_size)).toBeCloseTo(6.0)
     expect(res.specs.is_kit).toBeTruthy()
     expect(res.specs.tipTop).toMatchObject({
-      type: 'Standard',
-      tubeSizeNormalized: 6,
+      tipTopType: 'Standard',
+      tubeSizeMm: 6,
       title: expect.stringContaining('Tip Top'),
     })
   })

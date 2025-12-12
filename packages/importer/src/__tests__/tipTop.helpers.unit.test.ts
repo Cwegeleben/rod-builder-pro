@@ -20,11 +20,12 @@ describe('tip-top helpers', () => {
       ringSize: '8',
     })
     expect(normalized).toMatchObject({
-      type: 'Boat',
+      tipTopType: 'Boat',
       frameMaterialLong: FRAME_MATERIAL_MAP.SS316,
       ringMaterialLong: RING_MATERIAL_MAP.HRA,
-      tubeSizeNormalized: 5.5,
-      ringSizeNormalized: 8,
+      tubeSizeMm: 5.5,
+      ringSize: 8,
+      familyHint: 'boatTipTop',
       title: 'Boat Tip Top 316 Stainless Steel 5.5 Tube – Hardloy 8 Ring',
     })
   })

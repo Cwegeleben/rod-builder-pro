@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client'
+import { Prisma, ProductStatus } from '@prisma/client'
 import { resolve } from 'node:path'
 import { prisma } from '../../app/db.server'
 import type { ProductDiff } from '../../app/domain/imports/diffTypes'
@@ -140,7 +140,7 @@ async function seedCanonicalProducts() {
     material: 'Stainless Steel',
     color: 'Gunmetal',
     designPartType: 'GUIDE',
-    status: 'READY',
+    status: ProductStatus.READY,
     title: 'Smoke QA Existing',
     description: 'Existing catalog entry',
     images: ['https://example.com/existing.jpg'],

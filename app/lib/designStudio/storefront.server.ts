@@ -433,7 +433,8 @@ function formatLength(value: number): string {
 
 function rolesForAlias(role: DesignStorefrontPartRole): string[] {
   if (role === 'accessory') return ['accessory', 'component']
-  if (role === 'rear_grip' || role === 'fore_grip' || role === 'butt_cap') return ['handle']
+  if (role === 'rear_grip' || role === 'fore_grip') return ['handle']
+  if (role === 'butt_cap') return ['butt_cap', 'handle']
   if (role === 'tip_top') return ['guide_tip']
   if (role === 'winding_check' || role === 'decal') return ['accessory', 'component']
   if (role === 'handle') return ['handle']

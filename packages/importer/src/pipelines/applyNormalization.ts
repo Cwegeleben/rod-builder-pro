@@ -4,12 +4,19 @@ import { prisma } from '../../../../app/db.server'
 import { normalize } from './normalize'
 import { normalizeBatsonProduct } from '../../../../app/services/suppliers/batsonNormalize.server'
 
+const extractImageUrls = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string' && !!entry)
+}
+
 export async function applyNormalizationToStaging(supplierId: string) {
   const rows = await prisma.partStaging.findMany({ where: { supplierId } })
   for (const r of rows) {
     const rawSpecs = (r.rawSpecs as unknown as Record<string, unknown>) || {}
     const description = r.description || ''
     const isBatsonSupplier = supplierId.toLowerCase().includes('batson')
+    const images = extractImageUrls(r.images)
+    const heroImage = images.length ? images[0] : null
     const normSpecs = isBatsonSupplier
       ? (normalizeBatsonProduct({
           externalId: r.externalId,
@@ -19,6 +26,8 @@ export async function applyNormalizationToStaging(supplierId: string) {
           rawSpecs,
           availability: r.availability || null,
           priceMsrp: (r.priceMsrp as number | null) ?? null,
+          images,
+          imageUrl: heroImage,
         }) as Record<string, unknown> | null)
       : normalize({
           title: r.title,
@@ -35,7 +44,7 @@ export async function applyNormalizationToStaging(supplierId: string) {
       title: r.title,
       partType: r.partType,
       description: r.description || '',
-      images: (r.images as unknown as string[]) || [],
+      images,
       rawSpecs: (r.rawSpecs as unknown as Record<string, unknown>) || {},
       normSpecs: normSpecs || {},
     })

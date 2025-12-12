@@ -49,6 +49,7 @@ const buildBatsonNormalizationInput = (payload: {
   rawSpecs: Record<string, unknown>
   availability?: string | null
   priceMsrp?: number | null
+  images?: string[]
 }): BatsonRawProduct => ({
   externalId: payload.externalId,
   partType: payload.partType,
@@ -57,6 +58,8 @@ const buildBatsonNormalizationInput = (payload: {
   rawSpecs: payload.rawSpecs || {},
   availability: payload.availability ?? null,
   priceMsrp: payload.priceMsrp ?? null,
+  images: payload.images || [],
+  imageUrl: payload.images && payload.images.length ? payload.images[0] : null,
 })
 
 function isOnDomain(href: string) {
@@ -337,6 +340,7 @@ export async function crawlBatson(
                 rawSpecs: row.rawSpecs,
                 availability: row.availability ?? null,
                 priceMsrp: row.priceMsrp ?? null,
+                images: row.images || [],
               })
               const canonicalSpecs = normalizeBatsonProduct(normalizationInput)
               const toStage = {
@@ -391,6 +395,7 @@ export async function crawlBatson(
               rawSpecs: rec.rawSpecs,
               availability: rec.availability ?? null,
               priceMsrp: rec.priceMsrp ?? null,
+              images: rec.images || [],
             })
             const canonicalSpecs = normalizeBatsonProduct(normalizationInput)
             const toStage = {
@@ -429,6 +434,7 @@ export async function crawlBatson(
                 rawSpecs: rec.rawSpecs,
                 availability: rec.availability ?? null,
                 priceMsrp: rec.priceMsrp ?? null,
+                images: rec.images || [],
               })
               const canonicalSpecs = normalizeBatsonProduct(normalizationInput)
               const toStage = {

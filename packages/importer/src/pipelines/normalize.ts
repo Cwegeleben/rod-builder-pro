@@ -68,15 +68,17 @@ export function normalize(rec: {
         ringSize: specs.ring_size,
       })
       specs.tipTop = {
-        type: tipTop.type,
+        tipTopType: tipTop.tipTopType,
+        familyHint: tipTop.familyHint,
+        loopStyle: tipTop.loopStyle,
         frameMaterialLong: tipTop.frameMaterialLong,
         ringMaterialLong: tipTop.ringMaterialLong,
-        tubeSizeNormalized: tipTop.tubeSizeNormalized,
-        ringSizeNormalized: tipTop.ringSizeNormalized,
+        tubeSizeMm: tipTop.tubeSizeMm,
+        ringSize: tipTop.ringSize,
         title: tipTop.title,
       }
-      if (tipTop.tubeSizeNormalized != null) specs.tube_size = tipTop.tubeSizeNormalized
-      if (tipTop.ringSizeNormalized != null) specs.ring_size = tipTop.ringSizeNormalized
+      if (tipTop.tubeSizeMm != null) specs.tube_size = tipTop.tubeSizeMm
+      if (tipTop.ringSize != null) specs.ring_size = tipTop.ringSize
       if (tipTop.frameMaterialCode) specs.frame_material = tipTop.frameMaterialCode
       if (tipTop.ringMaterialCode) specs.ring_material = tipTop.ringMaterialCode
     }
