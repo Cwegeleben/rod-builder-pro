@@ -176,6 +176,62 @@ Codify a repeatable playbook now that the foundation is stable.
 
 The 2025 edition confirms the importer + product_db foundations are done. Focus now shifts to Step 8 (live loaders + draft persistence), Prisma migrations, refreshed backfills, and the admin/storefront deliverables that take Design Studio V1 to launch.
 
+## 13. Phase 3 — Interactive Design Studio (Draft-first)
+
+Phase 2 is closed: Shopify delivery, Theme App Extension + App Proxy coexistence, no-JS fallback, Theme Editor smoke, and infrastructure discovery are all satisfied and stable. Phase 3 turns Design Studio from a validated preview into a merchant-facing drafting environment anchored on authoritative drafts.
+
+### Phase 3 goals
+
+- Deliver a draft-first canvas where merchants capture every design decision with product_db-backed parts and see immediate validation feedback.
+- Give customers confidence that their in-progress builds persist safely across sessions without committing to checkout.
+- Provide operations with a single source of truth draft artifact that can later convert into DesignBuild records once publishing phases resume.
+
+### Merchant & customer problem solved
+
+- Merchants currently juggle screenshots, emails, and spreadsheet trackers to explain builds; Phase 3 consolidates those choices into a living draft that never loses context.
+- Customers lack a trustworthy way to iterate on premium rod builds asynchronously; Draft-first lets them explore combinations, understand compatibility, and return later knowing their work is intact.
+
+### How Phase 3 differs from Phase 2
+
+- Phase 2 validated platform constraints; Phase 3 assumes that groundwork and focuses on day-to-day usability and retention.
+- Phase 2 emphasized loader fidelity; Phase 3 emphasizes interaction, recovery, and ownership semantics around drafts.
+- Phase 2 tolerated manual fallback paths; Phase 3 requires predictable autosave and recovery so the experience is self-serve.
+
+### Draft lifecycle (authoritative)
+
+1. **Creation** — A draft is created the moment a merchant enters the builder (storefront or admin) and selects any actionable control; the system assigns a draft ID before submission flows exist.
+2. **Updates** — Every selection change, compatibility warning dismissal, or note entry updates the draft payload and advances a monotonic revision counter to keep telemetry traceable.
+3. **Autosave** — Autosave triggers on field blur, significant selection changes, and every 15 seconds of inactivity, showing an inline "Saved" state when the last revision lands; network failures surface non-blocking toasts with retry messaging.
+4. **Ownership** — Drafts bind to the initiating session plus optional shop customer identity. Merchants can re-open tenant-owned drafts regardless of customer cookie state, but customers only see drafts they authored or that merchants explicitly shared.
+5. **Expiration** — Drafts remain active for 30 days of inactivity; archival keeps metadata for analytics but hides expired drafts from customer pickers, ensuring the list stays curated.
+
+### Interaction model (Draft-first scope)
+
+- **Selectable/Editable** — Roles documented in Section 11 (blank, handle, reel seat, guides, tip top, butt cap, component) plus build name, notes, quantity, and finish preferences. Users can reorder components within allowed slots, toggle inspiration reference visibility, and reset individual panels.
+- **Read-only** — Pricing, availability flags, fulfillment estimates, and importer provenance remain read-only callouts so Phase 3 stays draft-centric.
+- **Scope limits** — No checkout, cart, or fulfillment handoff screens. No attachment uploads beyond a single inspiration link placeholder. Publishing to storefront pages or customer accounts is deferred.
+
+### UX principles
+
+- **Immediate feedback** — Component pickers respond within 200 ms via optimistic UI; compatibility failures inline-highlight affected roles with exact reasons and suggested fixes.
+- **Failure + retry** — All saves surface deterministic retry affordances; offline or API errors never eject users from the flow and always explain what persisted vs. what needs reapplying.
+- **Clear saved state** — The builder header shows "All changes saved" with a timestamp, turns to "Saving…" during in-flight work, and "Save failed" with retry CTA when persistence misses.
+- **No surprise navigation** — Every flow stays inside the builder shell; outbound links open in new tabs and any attempted exit prompts users to confirm leaving unsaved work.
+
+### Explicit non-goals
+
+- Cart, checkout, payment, fulfillment automation, and post-Draft publishing logic remain out of scope.
+- Multi-channel draft sharing, attachment uploads beyond simple inspiration notes, and automation of approvals/notifications stay deferred to later phases.
+- Theme customization, metafield publishing, and tenant-level feature flag dashboards are not part of Phase 3.
+
+### Success criteria
+
+- ≥90% of builder interactions result in persisted drafts that can be reloaded within 2 seconds on the same tenant.
+- Merchants can open an existing draft, make changes, and see autosave confirmation without manual refresh in ≥3 consecutive cycles.
+- Customers returning via the same session see their draft list without re-entering selections, confirming ownership rules hold.
+- Operations can export draft metadata (ID, last revision, role completeness, outstanding warnings) for readiness reviews even before DesignBuild records exist.
+- A go/no-go review confirms Draft-first confines are met and no checkout/publishing assumptions leaked in, unlocking future implementation work.
+
 ## Addendum: Acceptance Criteria, Risks, Dependencies, and Role Definitions
 
 ### A. Acceptance Criteria (Per Phase)

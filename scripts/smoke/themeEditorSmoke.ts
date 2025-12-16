@@ -1,4 +1,4 @@
-import { chromium, Browser } from 'playwright'
+import { chromium, Browser, BrowserContext, Page } from 'playwright'
 import { spawn, ChildProcess } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -8,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const projectRoot = path.resolve(__dirname, '..', '..')
 const ENV_PROFILE = path.join(projectRoot, '.env.theme-editor-smoke')
+const SMOKE_DEBUG = process.env.THEME_EDITOR_SMOKE_DEBUG === '1'
 
 type SmokeResult = {
   name: string
@@ -83,6 +84,14 @@ function summarizeDraftRequests(requests: string[]) {
   )
 }
 
+async function waitForDraftIndicator(page: Page, text: string, testId = 'blank-draft-status') {
+  await page.getByTestId(testId).getByText(text).first().waitFor({ timeout: 10000 })
+}
+
+async function waitForDraftSaved(page: Page, testId = 'blank-draft-status') {
+  await waitForDraftIndicator(page, 'Draft saved', testId)
+}
+
 function startServer(): ChildProcess {
   const child = spawn('npm', ['run', '-s', 'start'], {
     cwd: projectRoot,
@@ -141,6 +150,8 @@ async function runChecks(browser: Browser): Promise<SmokeResult[]> {
   }
 
   await capture('Blank autosave flow', () => runBlankDraftFlow(browser))
+  await capture('Blank persistence refresh', () => runBlankDraftPersistence(browser))
+  await capture('Reel seat persistence refresh', () => runReelSeatDraftPersistence(browser))
   await capture('Blank autosave error recovery', () => runBlankDraftError(browser))
   await capture('Timeline renders', () => runTimelineHappy(browser))
   await capture('Timeline error + retry', () => runTimelineRetry(browser))
@@ -155,6 +166,7 @@ async function runChecks(browser: Browser): Promise<SmokeResult[]> {
 
 async function runTimelineHappy(browser: Browser): Promise<string> {
   const context = await browser.newContext()
+  attachPageDebugLogging(context, 'timeline-happy')
   try {
     const page = await context.newPage()
     await page.goto(designUrl, { waitUntil: 'networkidle' })
@@ -174,6 +186,7 @@ async function runBlankDraftFlow(browser: Browser): Promise<string> {
   const context = await browser.newContext()
   context.addInitScript(() => window.localStorage.clear())
   const draftRequests: string[] = []
+  attachPageDebugLogging(context, 'blank-flow')
   context.on('request', request => {
     if (request.url().includes('/api/design-studio/drafts')) {
       draftRequests.push(request.method())
@@ -189,9 +202,9 @@ async function runBlankDraftFlow(browser: Browser): Promise<string> {
       throw new Error('Need at least two blank options to validate autosave flow')
     }
     await options.first().click()
-    await page.getByText('Draft saved').waitFor({ timeout: 10000 })
+    await waitForDraftSaved(page)
     await options.nth(1).click()
-    await page.getByText('Draft saved').waitFor({ timeout: 10000 })
+    await waitForDraftSaved(page)
     const summary = summarizeDraftRequests(draftRequests)
     if (summary.post !== 1 || summary.put < 1) {
       throw new Error(`Unexpected draft calls (POST=${summary.post}, PUT=${summary.put})`)
@@ -210,6 +223,7 @@ async function runBlankDraftFlow(browser: Browser): Promise<string> {
 async function runBlankDraftError(browser: Browser): Promise<string> {
   const context = await browser.newContext()
   context.addInitScript(() => window.localStorage.clear())
+  attachPageDebugLogging(context, 'blank-error')
   let shouldFailNext = true
   await context.route('**/api/design-studio/drafts**', async route => {
     const method = route.request().method()
@@ -225,15 +239,189 @@ async function runBlankDraftError(browser: Browser): Promise<string> {
     const options = page.locator('[data-blank-option]')
     await options.first().waitFor({ timeout: 15000 })
     await options.first().click()
-    await page.getByText('Draft saved').waitFor({ timeout: 10000 })
+    await waitForDraftSaved(page)
     if ((await options.count()) < 2) {
       throw new Error('Need at least two blank options for error retry test')
     }
     await options.nth(1).click()
-    await page.getByText('Unable to save draft. Retry?').waitFor({ timeout: 10000 })
-    await page.getByRole('button', { name: 'Retry draft save' }).click()
-    await page.getByText('Draft saved').waitFor({ timeout: 10000 })
+    await waitForDraftIndicator(page, 'Unable to save draft. Retry?', 'blank-draft-status')
+    await page.getByTestId('blank-draft-status').getByRole('button', { name: 'Retry draft save' }).click()
+    await waitForDraftSaved(page)
     return 'error->retry recovered'
+  } finally {
+    await context.close()
+  }
+}
+
+async function runBlankDraftPersistence(browser: Browser): Promise<string> {
+  const context = await browser.newContext()
+  const draftRequests: string[] = []
+  attachPageDebugLogging(context, 'blank-persist')
+  context.on('request', request => {
+    if (request.url().includes('/api/design-studio/drafts')) {
+      draftRequests.push(request.method())
+    }
+  })
+  const summarize = () => summarizeDraftRequests([...draftRequests])
+  try {
+    const page = await context.newPage()
+    await page.goto(designUrl, { waitUntil: 'networkidle' })
+    const options = page.locator('[data-blank-option]')
+    await options.first().waitFor({ timeout: 15000 })
+    const optionCount = await options.count()
+    if (optionCount < 2) {
+      throw new Error('Need at least two blank options for persistence checks')
+    }
+    const firstOptionId = await options.first().getAttribute('data-blank-option')
+    const secondOptionId = await options.nth(1).getAttribute('data-blank-option')
+    if (!firstOptionId || !secondOptionId) {
+      throw new Error('Unable to resolve blank option identifiers')
+    }
+    const optionById = (id: string) => page.locator(`[data-blank-option="${id}"]`)
+
+    const initialCounts = summarize()
+    if (initialCounts.post !== 0 || initialCounts.put !== 0) {
+      throw new Error(`Draft calls fired before selection (POST=${initialCounts.post}, PUT=${initialCounts.put})`)
+    }
+
+    await optionById(firstOptionId).click()
+    await waitForDraftSaved(page)
+    const afterInitialSelect = summarize()
+    if (afterInitialSelect.post !== 1 || afterInitialSelect.put !== 0) {
+      throw new Error(
+        `Initial blank select should POST once (POST=${afterInitialSelect.post}, PUT=${afterInitialSelect.put})`,
+      )
+    }
+
+    await page.reload({ waitUntil: 'networkidle' })
+    await optionById(firstOptionId).waitFor({ timeout: 15000 })
+    await page.waitForFunction(
+      locatorId =>
+        document.querySelector(`[data-blank-option="${locatorId}"]`)?.getAttribute('data-selected') === 'true',
+      firstOptionId,
+      { timeout: 1500 },
+    )
+    const afterReload = summarize()
+    if (afterReload.post !== afterInitialSelect.post || afterReload.put !== afterInitialSelect.put) {
+      throw new Error('Draft writes occurred during reload hydration')
+    }
+
+    await optionById(secondOptionId).click()
+    await waitForDraftSaved(page)
+    const afterChange = summarize()
+    const putDelta = afterChange.put - afterReload.put
+    if (afterChange.post !== afterReload.post || putDelta !== 1) {
+      throw new Error(
+        `Changing blanks should emit exactly one PUT (POST=${afterChange.post - afterReload.post}, PUT Δ=${putDelta})`,
+      )
+    }
+
+    await optionById(secondOptionId).click()
+    await page.waitForTimeout(1500)
+    const afterDuplicateClick = summarize()
+    if (afterDuplicateClick.put !== afterChange.put) {
+      throw new Error('Clicking already-selected blank emitted extra PUT')
+    }
+
+    return `phase3 persistence OK (POST=${afterDuplicateClick.post}, PUT=${afterDuplicateClick.put})`
+  } finally {
+    await context.close()
+  }
+}
+
+async function runReelSeatDraftPersistence(browser: Browser): Promise<string> {
+  const context = await browser.newContext()
+  context.addInitScript(() => window.localStorage.clear())
+  const draftRequests: string[] = []
+  attachPageDebugLogging(context, 'reelseat-persist')
+  context.on('request', request => {
+    if (request.url().includes('/api/design-studio/drafts')) {
+      draftRequests.push(request.method())
+    }
+  })
+  const summarize = () => summarizeDraftRequests([...draftRequests])
+  try {
+    const page = await context.newPage()
+    await page.goto(designUrl, { waitUntil: 'networkidle' })
+    const blankOptions = page.locator('[data-blank-option]')
+    const reelSeatOptions = page.locator('[data-reel-seat-option]')
+    await blankOptions.first().waitFor({ timeout: 15000 })
+    await reelSeatOptions.first().waitFor({ timeout: 15000 })
+    if ((await reelSeatOptions.count()) < 2) {
+      throw new Error('Need at least two reel seat options for persistence check')
+    }
+
+    const firstBlankId = await blankOptions.first().getAttribute('data-blank-option')
+    if (!firstBlankId) {
+      throw new Error('Unable to resolve blank identifier')
+    }
+
+    const initialCounts = summarize()
+    if (initialCounts.post !== 0 || initialCounts.put !== 0) {
+      throw new Error(`Draft calls fired before selections (POST=${initialCounts.post}, PUT=${initialCounts.put})`)
+    }
+
+    await blankOptions.first().click()
+    await waitForDraftSaved(page)
+    const afterBlank = summarize()
+    if (afterBlank.post !== 1 || afterBlank.put !== 0) {
+      throw new Error(`Blank pick should POST once (POST=${afterBlank.post}, PUT=${afterBlank.put})`)
+    }
+
+    const firstReelSeatId = await reelSeatOptions.first().getAttribute('data-reel-seat-option')
+    const secondReelSeatId = await reelSeatOptions.nth(1).getAttribute('data-reel-seat-option')
+    if (!firstReelSeatId || !secondReelSeatId) {
+      throw new Error('Unable to resolve reel seat identifiers')
+    }
+    const optionById = (id: string) => page.locator(`[data-reel-seat-option="${id}"]`)
+
+    const beforeReelSelect = summarize()
+    await optionById(firstReelSeatId).click()
+    await waitForDraftSaved(page, 'reelseat-draft-status')
+    const afterReelSelect = summarize()
+    const reelPostDelta = afterReelSelect.post - beforeReelSelect.post
+    const reelPutDelta = afterReelSelect.put - beforeReelSelect.put
+    const validFirstReelWrite =
+      (reelPostDelta === 0 && reelPutDelta === 1) || (reelPostDelta === 1 && reelPutDelta === 0)
+    if (!validFirstReelWrite) {
+      throw new Error(`Selecting reel seat should write once (POST Δ${reelPostDelta}, PUT Δ${reelPutDelta})`)
+    }
+
+    await page.reload({ waitUntil: 'networkidle' })
+    await optionById(firstReelSeatId).waitFor({ timeout: 15000 })
+    await page.waitForFunction(
+      ({ blankId, reelId }: { blankId: string; reelId: string }) => {
+        const blankSelected =
+          document.querySelector(`[data-blank-option="${blankId}"]`)?.getAttribute('data-selected') === 'true'
+        const reelSelected =
+          document.querySelector(`[data-reel-seat-option="${reelId}"]`)?.getAttribute('data-selected') === 'true'
+        return blankSelected && reelSelected
+      },
+      { blankId: firstBlankId, reelId: firstReelSeatId },
+      { timeout: 2000 },
+    )
+    const afterReload = summarize()
+    if (afterReload.post !== afterReelSelect.post || afterReload.put !== afterReelSelect.put) {
+      throw new Error('Draft writes occurred during reload hydration for reel seat')
+    }
+
+    await optionById(secondReelSeatId).click()
+    await waitForDraftSaved(page, 'reelseat-draft-status')
+    const afterChange = summarize()
+    const changePostDelta = afterChange.post - afterReload.post
+    const changePutDelta = afterChange.put - afterReload.put
+    if (!(changePostDelta === 0 && changePutDelta === 1)) {
+      throw new Error(`Changing reel seat should PUT once (POST Δ${changePostDelta}, PUT Δ${changePutDelta})`)
+    }
+
+    await optionById(secondReelSeatId).click()
+    await page.waitForTimeout(1500)
+    const afterDuplicate = summarize()
+    if (afterDuplicate.put !== afterChange.put || afterDuplicate.post !== afterChange.post) {
+      throw new Error('Clicking selected reel seat emitted extra drafts traffic')
+    }
+
+    return `phase3 reel seat OK (POST=${afterDuplicate.post}, PUT=${afterDuplicate.put})`
   } finally {
     await context.close()
   }
@@ -241,6 +429,7 @@ async function runBlankDraftError(browser: Browser): Promise<string> {
 
 async function runTimelineRetry(browser: Browser): Promise<string> {
   const context = await browser.newContext()
+  attachPageDebugLogging(context, 'timeline-retry')
   try {
     let intercepted = false
     await context.route('**/api/design-studio/builds**', async route => {
@@ -285,3 +474,30 @@ main().catch(error => {
   console.error('[theme-editor:smoke] Unhandled error', error)
   process.exitCode = 1
 })
+
+function attachPageDebugLogging(context: BrowserContext, label: string) {
+  if (!SMOKE_DEBUG) return
+  context.addInitScript(() => {
+    ;(globalThis as { __ENABLE_DS_DEBUG__?: boolean }).__ENABLE_DS_DEBUG__ = true
+  })
+  context.on('page', page => {
+    page.on('console', message => {
+      const type = message.type().toUpperCase()
+      console.log(`[theme-editor:debug:${label}] console:${type}`, message.text())
+    })
+    page.on('request', request => {
+      console.log(`[theme-editor:debug:${label}] request +`, request.method(), request.url())
+    })
+    page.on('requestfinished', request => {
+      console.log(`[theme-editor:debug:${label}] request -`, request.method(), request.url())
+    })
+    page.on('requestfailed', request => {
+      console.warn(
+        `[theme-editor:debug:${label}] request x`,
+        request.method(),
+        request.url(),
+        request.failure()?.errorText ?? 'unknown-error',
+      )
+    })
+  })
+}

@@ -109,18 +109,21 @@ type DraftSaveResponse = {
 
 type BlankDraftFingerprintArgs = {
   blankOptionId: string | null
+  reelSeatOptionId?: string | null
   draftToken: string | null
   compatibilityKey?: string | null
 }
 
 function buildBlankDraftFingerprint({
   blankOptionId,
+  reelSeatOptionId = null,
   draftToken,
   compatibilityKey = null,
 }: BlankDraftFingerprintArgs): string | null {
   if (!blankOptionId) return null
   return JSON.stringify({
     blankOptionId,
+    reelSeatOptionId,
     draftToken: draftToken ?? null,
     compatibilityKey,
   })
@@ -128,6 +131,7 @@ function buildBlankDraftFingerprint({
 
 type BlankDraftFingerprintPayload = {
   blankOptionId: string | null
+  reelSeatOptionId: string | null
   draftToken: string | null
   compatibilityKey: string | null
 }
@@ -138,18 +142,23 @@ function parseBlankDraftFingerprint(value: string | null): BlankDraftFingerprint
     const parsed = JSON.parse(value) as Record<string, unknown>
     const blankOptionId = typeof parsed.blankOptionId === 'string' ? parsed.blankOptionId : null
     const draftToken = typeof parsed.draftToken === 'string' ? parsed.draftToken : null
+    const reelSeatOptionId = typeof parsed.reelSeatOptionId === 'string' ? parsed.reelSeatOptionId : null
     const compatibilityRaw = parsed.compatibilityKey
     const compatibilityKey = typeof compatibilityRaw === 'string' ? compatibilityRaw : null
-    return { blankOptionId, draftToken, compatibilityKey }
+    return { blankOptionId, reelSeatOptionId, draftToken, compatibilityKey }
   } catch {
     return null
   }
 }
 
 function extractBlankOptionIdFromDraft(draft: StorefrontBuildPayload | null): string | null {
+  return extractOptionIdFromDraft(draft, BLANK_ROLE)
+}
+
+function extractOptionIdFromDraft(draft: StorefrontBuildPayload | null, role: DesignStorefrontPartRole): string | null {
   if (!draft?.selections?.length) return null
-  const blankSelection = draft.selections.find(selection => selection.role === BLANK_ROLE)
-  return blankSelection?.option?.id ?? null
+  const selection = draft.selections.find(entry => entry.role === role)
+  return selection?.option?.id ?? null
 }
 
 declare global {
@@ -165,6 +174,7 @@ type BuildSaveResponse = {
 }
 
 const BLANK_ROLE: DesignStorefrontPartRole = 'blank'
+const REEL_SEAT_ROLE: DesignStorefrontPartRole = 'reel_seat'
 
 const DEFAULT_HERO_CONTENT = {
   title: 'Design Studio',
@@ -208,9 +218,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const frameAncestors = buildFrameAncestors(designStudioAccess.shopDomain)
   const storefrontBlankDraftEnabled = process.env.DESIGN_STUDIO_PHASE3_BLANK === '1'
+  const storefrontReelSeatDraftEnabled = process.env.DESIGN_STUDIO_PHASE3_REEL_SEAT === '1'
   console.warn('[designStudio] storefront blank loader flag', {
     storefrontBlankDraftEnabled,
     phase3Env: process.env.DESIGN_STUDIO_PHASE3_BLANK,
+  })
+  console.warn('[designStudio] storefront reel seat loader flag', {
+    storefrontReelSeatDraftEnabled,
+    phase32Env: process.env.DESIGN_STUDIO_PHASE3_REEL_SEAT,
   })
   return json(
     {
@@ -218,6 +233,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       requestContext,
       initialStorefront,
       storefrontBlankDraftEnabled,
+      storefrontReelSeatDraftEnabled,
     },
     {
       headers: buildShopifyCorsHeaders(request, {
@@ -239,8 +255,13 @@ function buildFrameAncestors(shopDomain: string | null): string[] {
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: polarisStyles }]
 
 export default function DesignStudioStorefrontRoute() {
-  const { designStudioAccess, requestContext, initialStorefront, storefrontBlankDraftEnabled } =
-    useLoaderData<typeof loader>()
+  const {
+    designStudioAccess,
+    requestContext,
+    initialStorefront,
+    storefrontBlankDraftEnabled,
+    storefrontReelSeatDraftEnabled,
+  } = useLoaderData<typeof loader>()
   console.log('[designStudio] access payload', {
     shopDomain: designStudioAccess.shopDomain,
     enabled: designStudioAccess.enabled,
@@ -248,6 +269,7 @@ export default function DesignStudioStorefrontRoute() {
   })
   const themeRequest = requestContext.source === 'theme-extension'
   const blankDraftMode = storefrontBlankDraftEnabled
+  const reelSeatDraftEnabled = blankDraftMode && storefrontReelSeatDraftEnabled
   const hydrated = useHydrationReady()
   const requestOptions = useMemo<DesignStorefrontRequestOptions>(
     () => ({
@@ -257,6 +279,13 @@ export default function DesignStudioStorefrontRoute() {
     }),
     [designStudioAccess.shopDomain, themeRequest, requestContext.themeSectionId],
   )
+  const phase3DraftRoles = useMemo(() => {
+    const roles = new Set<DesignStorefrontPartRole>([BLANK_ROLE])
+    if (reelSeatDraftEnabled) {
+      roles.add(REEL_SEAT_ROLE)
+    }
+    return roles
+  }, [reelSeatDraftEnabled])
   const draftStorageKey = designStudioAccess.shopDomain ? `ds-draft:${designStudioAccess.shopDomain}` : null
   const draftPayloadStorageKey = draftStorageKey ? `${draftStorageKey}:payload` : null
   const { data: config, loading: configLoading } = useDesignConfig(requestOptions)
@@ -325,6 +354,18 @@ export default function DesignStudioStorefrontRoute() {
     [selections],
   )
 
+  const { data: options, loading: optionsLoading } = useDesignOptions(
+    blankDraftMode ? BLANK_ROLE : activeRole,
+    requestOptions,
+    blankDraftMode ? null : compatibilityContext,
+  )
+
+  const { data: reelSeatOptions, loading: reelSeatOptionsLoading } = useDesignOptions(
+    reelSeatDraftEnabled ? REEL_SEAT_ROLE : null,
+    requestOptions,
+    reelSeatDraftEnabled ? compatibilityContext : null,
+  )
+
   const buildValidationEntries = useCallback(
     (role: DesignStorefrontPartRole, issues: CompatibilityIssue[], source: 'options' | 'selection') => {
       if (!issues.length) return [] as DesignStudioValidationEntry[]
@@ -373,51 +414,9 @@ export default function DesignStudioStorefrontRoute() {
     }
   }, [activeStep, activeRole])
 
-  useEffect(() => {
-    if (!orderedRoles.length) return
-    setSelections(prev => {
-      const next = { ...prev }
-      let changed = false
-      orderedRoles.forEach(role => {
-        if (!(role in next)) {
-          next[role] = null
-          changed = true
-        }
-      })
-      return changed ? next : prev
-    })
-  }, [orderedRoles])
-
-  useEffect(() => {
-    if (!blankDraftMode) return
-    setActiveRole(BLANK_ROLE)
-  }, [blankDraftMode])
-
-  useEffect(() => {
-    return () => {
-      if (typeof window === 'undefined') return
-      if (autosaveStatusResetRef.current) {
-        window.clearTimeout(autosaveStatusResetRef.current)
-        autosaveStatusResetRef.current = null
-      }
-    }
-  }, [])
-
-  const {
-    data: options,
-    issues: optionIssues,
-    loading: optionsLoading,
-  } = useDesignOptions(activeRole, requestOptions, compatibilityContext)
-
-  useEffect(() => {
-    if (!activeRole) return
-    const entries = buildValidationEntries(activeRole, optionIssues, 'options')
-    upsertValidationEntries(activeRole, 'options', entries)
-  }, [activeRole, optionIssues, buildValidationEntries, upsertValidationEntries])
-
   const handleSelectOption = useCallback(
     (option: DesignStorefrontOption) => {
-      if (blankDraftMode && option.role !== BLANK_ROLE) {
+      if (blankDraftMode && !phase3DraftRoles.has(option.role as DesignStorefrontPartRole)) {
         return
       }
       setSelections(prev => ({ ...prev, [option.role]: option }))
@@ -426,7 +425,7 @@ export default function DesignStudioStorefrontRoute() {
       }
       setSaveFeedback(current => (current.status === 'idle' ? current : { status: 'idle' }))
     },
-    [blankDraftMode],
+    [blankDraftMode, phase3DraftRoles],
   )
 
   const summary = useMemo(
@@ -440,13 +439,15 @@ export default function DesignStudioStorefrontRoute() {
   )
 
   const blankSelection = (selections[BLANK_ROLE] ?? null) as DesignStorefrontOption | null
+  const reelSeatSelection = (selections[REEL_SEAT_ROLE] ?? null) as DesignStorefrontOption | null
   const blankDraftFingerprint = useMemo(() => {
     if (!blankDraftMode) return null
     return buildBlankDraftFingerprint({
       blankOptionId: blankSelection?.id ?? null,
+      reelSeatOptionId: reelSeatDraftEnabled ? (reelSeatSelection?.id ?? null) : null,
       draftToken,
     })
-  }, [blankDraftMode, blankSelection?.id, draftToken])
+  }, [blankDraftMode, blankSelection?.id, draftToken, reelSeatDraftEnabled, reelSeatSelection?.id])
 
   useEffect(() => {
     if (!orderedRoles.length) return
@@ -562,10 +563,63 @@ export default function DesignStudioStorefrontRoute() {
     setDraftAutosaveStatus({ state: 'error', message })
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!draftStorageKey) {
+      setDraftHydrated(true)
+      draftLoadInitKeyRef.current = 'no-store'
+      return
+    }
+    const storedToken = window.sessionStorage.getItem(draftStorageKey) ?? window.localStorage.getItem(draftStorageKey)
+    const storedPayload = draftPayloadStorageKey ? window.localStorage.getItem(draftPayloadStorageKey) : null
+    const loadContextKey = `boot:${draftStorageKey}`
+    const canBootstrapFromStorage = !draftLoadRequestedRef.current
+    if (storedPayload) {
+      lastDraftPayloadRef.current = storedPayload
+      if (blankDraftMode && canBootstrapFromStorage) {
+        try {
+          const parsedSnapshot = JSON.parse(storedPayload) as StorefrontBuildPayload
+          const hydrated = hydratePhase3SelectionsFromSnapshot(
+            parsedSnapshot,
+            setSelections,
+            Array.from(phase3DraftRoles),
+          )
+          if (hydrated) {
+            markAutosaveSuccess()
+          }
+        } catch {
+          // Ignore invalid payloads; network load will refresh state
+        }
+      }
+    }
+    if (draftLoadInitKeyRef.current === loadContextKey || draftLoadRequestedRef.current) {
+      return
+    }
+    draftLoadInitKeyRef.current = loadContextKey
+    if (!storedToken) {
+      if (draftPayloadStorageKey && storedPayload) {
+        window.localStorage.removeItem(draftPayloadStorageKey)
+      }
+      setDraftHydrated(true)
+      return
+    }
+    draftLoadRequestedRef.current = true
+    setDraftHydrated(false)
+    setDraftToken(storedToken)
+    const params = new URLSearchParams()
+    appendDesignStudioParams(params, requestOptions)
+    params.set('token', storedToken)
+    draftLoadFetcher.load(`/api/design-studio/drafts?${params.toString()}`)
+    // `useFetcher` objects change identity as their state updates; including the fetcher
+    // in this dependency array causes an infinite load loop. We only care about the
+    // derived storage keys and request params here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blankDraftMode, draftStorageKey, draftPayloadStorageKey, markAutosaveSuccess, phase3DraftRoles, requestOptions])
+
   const selectionSnapshots = useMemo<StorefrontSelectionSnapshot[]>(() => {
     return Object.entries(selections).reduce<StorefrontSelectionSnapshot[]>((acc, [role, option]) => {
       if (!option) return acc
-      if (blankDraftMode && role !== BLANK_ROLE) {
+      if (blankDraftMode && !phase3DraftRoles.has(role as DesignStorefrontPartRole)) {
         return acc
       }
       acc.push({
@@ -583,7 +637,7 @@ export default function DesignStudioStorefrontRoute() {
       })
       return acc
     }, [])
-  }, [blankDraftMode, selections])
+  }, [blankDraftMode, phase3DraftRoles, selections])
 
   const validationSnapshot = useMemo(
     () => ({
@@ -684,9 +738,11 @@ export default function DesignStudioStorefrontRoute() {
           }
           const pendingFingerprintPayload = parseBlankDraftFingerprint(submission.fingerprint)
           const fingerprintBlankOptionId = pendingFingerprintPayload?.blankOptionId ?? null
+          const fingerprintReelSeatOptionId = pendingFingerprintPayload?.reelSeatOptionId ?? null
           const savedFingerprint = fingerprintBlankOptionId
             ? buildBlankDraftFingerprint({
                 blankOptionId: fingerprintBlankOptionId,
+                reelSeatOptionId: fingerprintReelSeatOptionId,
                 draftToken: nextToken,
                 compatibilityKey: pendingFingerprintPayload?.compatibilityKey ?? null,
               })
@@ -800,8 +856,10 @@ export default function DesignStudioStorefrontRoute() {
       setSaveFeedback({ status: 'idle' })
       if (blankDraftMode) {
         const loadedBlankOptionId = extractBlankOptionIdFromDraft(draft)
+        const loadedReelSeatOptionId = reelSeatDraftEnabled ? extractOptionIdFromDraft(draft, REEL_SEAT_ROLE) : null
         const loadedFingerprint = buildBlankDraftFingerprint({
           blankOptionId: loadedBlankOptionId,
+          reelSeatOptionId: loadedReelSeatOptionId,
           draftToken: token ?? null,
         })
         lastSavedFingerprintRef.current = loadedFingerprint
@@ -811,7 +869,7 @@ export default function DesignStudioStorefrontRoute() {
     setDraftToken(token ?? null)
     draftLoadRequestedRef.current = true
     setDraftHydrated(true)
-  }, [blankDraftMode, draftLoadFetcher.state, draftLoadFetcher.data, draftStorageKey])
+  }, [blankDraftMode, draftLoadFetcher.state, draftLoadFetcher.data, draftStorageKey, reelSeatDraftEnabled])
 
   const handleSaveBuild = useCallback(() => {
     if (!selectionSnapshots.length) {
@@ -994,16 +1052,31 @@ export default function DesignStudioStorefrontRoute() {
               onRetry={refreshTimeline}
             />
             {blankDraftMode ? (
-              <BlankSelectionCard
-                hydrated={hydrated}
-                loading={configLoading || optionsLoading}
-                options={options}
-                selectedOptionId={blankSelection?.id ?? null}
-                onSelect={handleSelectOption}
-                autosaveStatus={draftAutosaveStatus}
-                onRetry={handleRetryAutosave}
-                formatCurrency={formatCurrency}
-              />
+              <BlockStack gap="400">
+                <BlankSelectionCard
+                  hydrated={hydrated}
+                  loading={configLoading || optionsLoading}
+                  options={options}
+                  selectedOptionId={blankSelection?.id ?? null}
+                  onSelect={handleSelectOption}
+                  autosaveStatus={draftAutosaveStatus}
+                  onRetry={handleRetryAutosave}
+                  formatCurrency={formatCurrency}
+                />
+                {reelSeatDraftEnabled ? (
+                  <ReelSeatSelectionCard
+                    hydrated={hydrated}
+                    loading={configLoading || reelSeatOptionsLoading}
+                    options={reelSeatOptions}
+                    selectedOptionId={reelSeatSelection?.id ?? null}
+                    onSelect={handleSelectOption}
+                    autosaveStatus={draftAutosaveStatus}
+                    onRetry={handleRetryAutosave}
+                    formatCurrency={formatCurrency}
+                    blankSelected={Boolean(blankSelection)}
+                  />
+                ) : null}
+              </BlockStack>
             ) : (
               <>
                 <InlineStack align="end">
@@ -1556,7 +1629,7 @@ function BlankSelectionCard({
             Choose a blank to start your draft. Autosave runs immediately after you pick one.
           </Text>
         </BlockStack>
-        <DraftAutosaveIndicator status={autosaveStatus} onRetry={onRetry} />
+        <DraftAutosaveIndicator status={autosaveStatus} onRetry={onRetry} testId="blank-draft-status" />
         {blankOptions.length ? (
           <BlockStack gap="100">
             {blankOptions.map(option => {
@@ -1607,36 +1680,171 @@ function BlankSelectionCard({
   )
 }
 
+type ReelSeatSelectionCardProps = {
+  hydrated: boolean
+  loading: boolean
+  options: DesignStorefrontOption[]
+  selectedOptionId: string | null
+  onSelect: (option: DesignStorefrontOption) => void
+  autosaveStatus: DraftAutosaveStatus
+  onRetry: () => void
+  formatCurrency: (value: number) => string
+  blankSelected: boolean
+}
+
+function ReelSeatSelectionCard({
+  hydrated,
+  loading,
+  options,
+  selectedOptionId,
+  onSelect,
+  autosaveStatus,
+  onRetry,
+  formatCurrency,
+  blankSelected,
+}: ReelSeatSelectionCardProps) {
+  if (!hydrated) {
+    return (
+      <Card>
+        <BlockStack gap="100">
+          <Text as="h2" variant="headingMd">
+            Add a reel seat
+          </Text>
+          <Text as="p" tone="subdued">
+            Enable JavaScript to select supporting components for this draft.
+          </Text>
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <BlockStack gap="150">
+          <Text as="h2" variant="headingMd">
+            Add a reel seat
+          </Text>
+          <SkeletonBodyText lines={3} />
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  const reelSeatOptions = options.filter(option => option.role === REEL_SEAT_ROLE)
+  const selectionLocked = !blankSelected
+
+  return (
+    <Card>
+      <BlockStack gap="150">
+        <BlockStack gap="025">
+          <Text as="h2" variant="headingMd">
+            Add a reel seat
+          </Text>
+          <Text as="p" tone="subdued">
+            Pick a reel seat once your blank is saved. Draft autosave keeps blank and reel seat in the same token.
+          </Text>
+        </BlockStack>
+        <DraftAutosaveIndicator status={autosaveStatus} onRetry={onRetry} testId="reelseat-draft-status" />
+        {selectionLocked ? (
+          <Text as="p" tone="subdued" variant="bodySm">
+            Select a blank first to unlock reel seat choices.
+          </Text>
+        ) : null}
+        {reelSeatOptions.length ? (
+          <BlockStack gap="100">
+            {reelSeatOptions.map(option => {
+              const selected = option.id === selectedOptionId
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  data-reel-seat-option={option.id}
+                  data-selected={selected ? 'true' : 'false'}
+                  disabled={selectionLocked}
+                  className={`w-full rounded-2xl border px-4 py-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 ${
+                    selectionLocked
+                      ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400'
+                      : selected
+                        ? 'border-emerald-500 bg-white shadow-sm'
+                        : 'border-slate-200 bg-white/80 hover:border-emerald-200'
+                  }`}
+                  aria-pressed={selected}
+                  onClick={() => onSelect(option)}
+                >
+                  <BlockStack gap="025">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="span" variant="headingSm" tone={selected ? undefined : 'subdued'}>
+                        {option.title}
+                      </Text>
+                      {selected ? (
+                        <Badge tone="success" icon={ClipboardCheckIcon}>
+                          Draft selection
+                        </Badge>
+                      ) : null}
+                    </InlineStack>
+                    {option.sku ? (
+                      <Text as="span" tone="subdued">
+                        {option.sku}
+                      </Text>
+                    ) : null}
+                    {typeof option.price === 'number' ? (
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        MSRP {formatCurrency(option.price)}
+                      </Text>
+                    ) : null}
+                  </BlockStack>
+                </button>
+              )
+            })}
+          </BlockStack>
+        ) : (
+          <Text as="p" tone="subdued">
+            No reel seats available yet.
+          </Text>
+        )}
+      </BlockStack>
+    </Card>
+  )
+}
+
 type DraftAutosaveIndicatorProps = {
   status: DraftAutosaveStatus
   onRetry: () => void
+  testId?: string
 }
 
-function DraftAutosaveIndicator({ status, onRetry }: DraftAutosaveIndicatorProps) {
+function DraftAutosaveIndicator({ status, onRetry, testId }: DraftAutosaveIndicatorProps) {
   if (status.state === 'saving') {
     return (
-      <Text as="p" tone="subdued" variant="bodySm">
-        Saving draft…
-      </Text>
+      <div data-testid={testId}>
+        <Text as="p" tone="subdued" variant="bodySm">
+          Saving draft…
+        </Text>
+      </div>
     )
   }
   if (status.state === 'success') {
     return (
-      <Text as="p" tone="success" variant="bodySm">
-        Draft saved
-      </Text>
+      <div data-testid={testId}>
+        <Text as="p" tone="success" variant="bodySm">
+          Draft saved
+        </Text>
+      </div>
     )
   }
   if (status.state === 'error') {
     return (
-      <InlineStack gap="200" blockAlign="center" wrap>
-        <Text as="p" tone="critical" variant="bodySm">
-          {status.message}
-        </Text>
-        <Button size="slim" onClick={onRetry} variant="secondary">
-          Retry draft save
-        </Button>
-      </InlineStack>
+      <div data-testid={testId}>
+        <InlineStack gap="200" blockAlign="center" wrap>
+          <Text as="p" tone="critical" variant="bodySm">
+            {status.message}
+          </Text>
+          <Button size="slim" onClick={onRetry} variant="secondary">
+            Retry draft save
+          </Button>
+        </InlineStack>
+      </div>
     )
   }
   return null
@@ -1990,6 +2198,45 @@ function hydrateSelectionsFromDraft(draft: StorefrontBuildPayload, setter: Selec
     })
     return next
   })
+}
+
+function hydratePhase3SelectionsFromSnapshot(
+  snapshot: StorefrontBuildPayload | null,
+  setter: SelectionStateSetter,
+  roles: DesignStorefrontPartRole[],
+): boolean {
+  if (!snapshot?.selections?.length || !roles.length) return false
+  let hydrated = false
+  setter(prev => {
+    let nextState = prev
+    roles.forEach(role => {
+      const entry = snapshot.selections?.find(selection => selection.role === role)
+      if (!entry?.option) {
+        return
+      }
+      hydrated = true
+      const fallback = nextState[role]
+      const nextOption: DesignStorefrontOption = {
+        id: entry.option.id,
+        role,
+        title: entry.option.title,
+        price: entry.option.price,
+        sku: entry.option.sku ?? undefined,
+        vendor: entry.option.vendor ?? undefined,
+        notes: entry.option.notes ?? undefined,
+        badge: entry.option.badge ?? undefined,
+        specs: fallback?.specs ?? [],
+        compatibility: entry.option.compatibility ?? fallback?.compatibility ?? null,
+        subtitle: fallback?.subtitle ?? undefined,
+      }
+      nextState = {
+        ...nextState,
+        [role]: nextOption,
+      }
+    })
+    return hydrated ? nextState : prev
+  })
+  return hydrated
 }
 
 function buildDraftPayloadSnapshot({
