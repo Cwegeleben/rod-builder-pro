@@ -93,6 +93,8 @@ type PendingDraftSubmission = {
   payload: string
   method: 'POST' | 'PUT'
   token: string | null
+  fingerprint: string | null
+  submissionId: number
 }
 
 type DraftLoadResponse = {
@@ -103,6 +105,57 @@ type DraftLoadResponse = {
 type DraftSaveResponse = {
   ok: boolean
   token?: string | null
+}
+
+type BlankDraftFingerprintArgs = {
+  blankOptionId: string | null
+  draftToken: string | null
+  compatibilityKey?: string | null
+}
+
+function buildBlankDraftFingerprint({
+  blankOptionId,
+  draftToken,
+  compatibilityKey = null,
+}: BlankDraftFingerprintArgs): string | null {
+  if (!blankOptionId) return null
+  return JSON.stringify({
+    blankOptionId,
+    draftToken: draftToken ?? null,
+    compatibilityKey,
+  })
+}
+
+type BlankDraftFingerprintPayload = {
+  blankOptionId: string | null
+  draftToken: string | null
+  compatibilityKey: string | null
+}
+
+function parseBlankDraftFingerprint(value: string | null): BlankDraftFingerprintPayload | null {
+  if (!value) return null
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    const blankOptionId = typeof parsed.blankOptionId === 'string' ? parsed.blankOptionId : null
+    const draftToken = typeof parsed.draftToken === 'string' ? parsed.draftToken : null
+    const compatibilityRaw = parsed.compatibilityKey
+    const compatibilityKey = typeof compatibilityRaw === 'string' ? compatibilityRaw : null
+    return { blankOptionId, draftToken, compatibilityKey }
+  } catch {
+    return null
+  }
+}
+
+function extractBlankOptionIdFromDraft(draft: StorefrontBuildPayload | null): string | null {
+  if (!draft?.selections?.length) return null
+  const blankSelection = draft.selections.find(selection => selection.role === BLANK_ROLE)
+  return blankSelection?.option?.id ?? null
+}
+
+declare global {
+  interface Window {
+    __ENABLE_DS_DEBUG__?: boolean
+  }
 }
 
 type BuildSaveResponse = {
@@ -154,12 +207,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     initialStorefront.activeBuildResolved = activeBuildResult.resolved
   }
   const frameAncestors = buildFrameAncestors(designStudioAccess.shopDomain)
+  const storefrontBlankDraftEnabled = process.env.DESIGN_STUDIO_PHASE3_BLANK === '1'
+  console.warn('[designStudio] storefront blank loader flag', {
+    storefrontBlankDraftEnabled,
+    phase3Env: process.env.DESIGN_STUDIO_PHASE3_BLANK,
+  })
   return json(
     {
       designStudioAccess,
       requestContext,
       initialStorefront,
-      storefrontBlankDraftEnabled: process.env.DESIGN_STUDIO_DRAFTS_V1 === '1',
+      storefrontBlankDraftEnabled,
     },
     {
       headers: buildShopifyCorsHeaders(request, {
@@ -189,7 +247,7 @@ export default function DesignStudioStorefrontRoute() {
     tier: designStudioAccess.tier,
   })
   const themeRequest = requestContext.source === 'theme-extension'
-  const blankDraftMode = themeRequest && storefrontBlankDraftEnabled
+  const blankDraftMode = storefrontBlankDraftEnabled
   const hydrated = useHydrationReady()
   const requestOptions = useMemo<DesignStorefrontRequestOptions>(
     () => ({
@@ -215,14 +273,24 @@ export default function DesignStudioStorefrontRoute() {
   const [draftToken, setDraftToken] = useState<string | null>(null)
   const [draftHydrated, setDraftHydrated] = useState(() => !draftStorageKey)
   const [draftAutosaveStatus, setDraftAutosaveStatus] = useState<DraftAutosaveStatus>({ state: 'idle' })
-  const autosaveStatusResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autosaveStatusResetRef = useRef<number | null>(null)
   const incompatibleSelectionsRef = useRef<Set<string>>(new Set())
   const pendingDraftSubmissionRef = useRef<PendingDraftSubmission | null>(null)
+  const lastSavedFingerprintRef = useRef<string | null>(null)
+  const lastSubmittedFingerprintRef = useRef<string | null>(null)
+  const lastSubmissionIdRef = useRef(0)
   const lastDraftPayloadRef = useRef<string | null>(null)
   const draftLoadRequestedRef = useRef(false)
+  const draftLoadInitKeyRef = useRef<string | null>(null)
   const saveFetcher = useFetcher<BuildSaveResponse>()
-  const draftSaveFetcher = useFetcher<DraftSaveResponse>()
   const draftLoadFetcher = useFetcher<DraftLoadResponse>()
+  const [draftSaveBusy, setDraftSaveBusy] = useState(false)
+  const draftSaveAbortControllerRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    draftLoadRequestedRef.current = false
+    draftLoadInitKeyRef.current = null
+  }, [draftStorageKey])
+
   const {
     data: activeBuild,
     loading: activeBuildLoading,
@@ -349,6 +417,9 @@ export default function DesignStudioStorefrontRoute() {
 
   const handleSelectOption = useCallback(
     (option: DesignStorefrontOption) => {
+      if (blankDraftMode && option.role !== BLANK_ROLE) {
+        return
+      }
       setSelections(prev => ({ ...prev, [option.role]: option }))
       if (!blankDraftMode) {
         setDrawerOpen(true)
@@ -369,6 +440,13 @@ export default function DesignStudioStorefrontRoute() {
   )
 
   const blankSelection = (selections[BLANK_ROLE] ?? null) as DesignStorefrontOption | null
+  const blankDraftFingerprint = useMemo(() => {
+    if (!blankDraftMode) return null
+    return buildBlankDraftFingerprint({
+      blankOptionId: blankSelection?.id ?? null,
+      draftToken,
+    })
+  }, [blankDraftMode, blankSelection?.id, draftToken])
 
   useEffect(() => {
     if (!orderedRoles.length) return
@@ -457,8 +535,12 @@ export default function DesignStudioStorefrontRoute() {
   const handleDismissToast = useCallback(() => setStatusToast(null), [])
 
   const markAutosaveSuccess = useCallback(() => {
-    setDraftAutosaveStatus({ state: 'success', timestamp: Date.now() })
+    const timestamp = Date.now()
+    setDraftAutosaveStatus({ state: 'success', timestamp })
     if (typeof window === 'undefined') return
+    if (window.__ENABLE_DS_DEBUG__) {
+      console.log('[designStudio] blank autosave status -> success', { timestamp })
+    }
     if (autosaveStatusResetRef.current) {
       window.clearTimeout(autosaveStatusResetRef.current)
     }
@@ -474,12 +556,18 @@ export default function DesignStudioStorefrontRoute() {
       window.clearTimeout(autosaveStatusResetRef.current)
       autosaveStatusResetRef.current = null
     }
+    if (window.__ENABLE_DS_DEBUG__) {
+      console.log('[designStudio] blank autosave status -> error', { message })
+    }
     setDraftAutosaveStatus({ state: 'error', message })
   }, [])
 
   const selectionSnapshots = useMemo<StorefrontSelectionSnapshot[]>(() => {
     return Object.entries(selections).reduce<StorefrontSelectionSnapshot[]>((acc, [role, option]) => {
       if (!option) return acc
+      if (blankDraftMode && role !== BLANK_ROLE) {
+        return acc
+      }
       acc.push({
         role: role as DesignStorefrontPartRole,
         option: {
@@ -495,7 +583,7 @@ export default function DesignStudioStorefrontRoute() {
       })
       return acc
     }, [])
-  }, [selections])
+  }, [blankDraftMode, selections])
 
   const validationSnapshot = useMemo(
     () => ({
@@ -539,20 +627,85 @@ export default function DesignStudioStorefrontRoute() {
   }, [requestOptions.shopDomain, requestOptions.themeRequest, requestOptions.themeSectionId])
 
   const submitDraftPayload = useCallback(
-    (serialized: string, method: 'POST' | 'PUT', token: string | null) => {
+    (serialized: string, method: 'POST' | 'PUT', token: string | null, options?: { fingerprint?: string | null }) => {
       const formData = new FormData()
       formData.set('payload', serialized)
       if (token) {
         formData.set('token', token)
       }
-      pendingDraftSubmissionRef.current = { payload: serialized, method, token }
-      draftSaveFetcher.submit(formData, {
-        method: method.toLowerCase() as 'post' | 'put',
-        action: draftsActionUrl,
-        preventScrollReset: true,
+      const fingerprint = options?.fingerprint ?? null
+      const submissionId = (lastSubmissionIdRef.current += 1)
+      const submission: PendingDraftSubmission = {
+        payload: serialized,
+        method,
+        token,
+        fingerprint,
+        submissionId,
+      }
+      pendingDraftSubmissionRef.current = submission
+      lastSubmittedFingerprintRef.current = fingerprint
+
+      draftSaveAbortControllerRef.current?.abort()
+      const controller = new AbortController()
+      draftSaveAbortControllerRef.current = controller
+      setDraftSaveBusy(true)
+
+      const finalize = () => {
+        if (draftSaveAbortControllerRef.current === controller) {
+          draftSaveAbortControllerRef.current = null
+        }
+        setDraftSaveBusy(false)
+      }
+
+      fetch(draftsActionUrl, {
+        method,
+        body: formData,
+        signal: controller.signal,
+        credentials: 'same-origin',
       })
+        .then(async response => {
+          const contentType = response.headers.get('Content-Type') ?? ''
+          const isJson = contentType.includes('application/json')
+          const result = isJson ? ((await response.json()) as DraftSaveResponse) : null
+          if (!response.ok || !result?.ok) {
+            throw new Error('Draft save failed')
+          }
+          return result
+        })
+        .then(result => {
+          if (pendingDraftSubmissionRef.current?.submissionId !== submissionId) {
+            return
+          }
+          const nextToken = result.token ?? null
+          setDraftToken(nextToken)
+          pendingDraftSubmissionRef.current = null
+          if (!blankDraftMode) {
+            return
+          }
+          const pendingFingerprintPayload = parseBlankDraftFingerprint(submission.fingerprint)
+          const fingerprintBlankOptionId = pendingFingerprintPayload?.blankOptionId ?? null
+          const savedFingerprint = fingerprintBlankOptionId
+            ? buildBlankDraftFingerprint({
+                blankOptionId: fingerprintBlankOptionId,
+                draftToken: nextToken,
+                compatibilityKey: pendingFingerprintPayload?.compatibilityKey ?? null,
+              })
+            : null
+          lastSavedFingerprintRef.current = savedFingerprint
+          lastSubmittedFingerprintRef.current = savedFingerprint
+          markAutosaveSuccess()
+        })
+        .catch(error => {
+          if ((error as DOMException)?.name === 'AbortError') {
+            return
+          }
+          if (blankDraftMode) {
+            markAutosaveError('Unable to save draft. Retry?')
+          }
+        })
+        .finally(finalize)
     },
-    [draftSaveFetcher, draftsActionUrl],
+    [blankDraftMode, draftsActionUrl, markAutosaveError, markAutosaveSuccess, setDraftToken],
   )
 
   const handleRetryAutosave = useCallback(() => {
@@ -561,19 +714,34 @@ export default function DesignStudioStorefrontRoute() {
     if (blankDraftMode) {
       setDraftAutosaveStatus({ state: 'saving' })
     }
-    submitDraftPayload(pending.payload, pending.method, pending.token)
+    submitDraftPayload(pending.payload, pending.method, pending.token, {
+      fingerprint: pending.fingerprint,
+    })
   }, [blankDraftMode, submitDraftPayload])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
     if (!draftStorageKey) {
       setDraftHydrated(true)
+      draftLoadInitKeyRef.current = 'no-store'
       return
     }
     const storedToken = window.sessionStorage.getItem(draftStorageKey) ?? window.localStorage.getItem(draftStorageKey)
+    const storedPayload = draftPayloadStorageKey ? window.localStorage.getItem(draftPayloadStorageKey) : null
+    const loadContextKey = `boot:${draftStorageKey}`
+    if (draftLoadInitKeyRef.current === loadContextKey || draftLoadRequestedRef.current) {
+      return
+    }
+    draftLoadInitKeyRef.current = loadContextKey
     if (!storedToken) {
+      if (draftPayloadStorageKey && storedPayload) {
+        window.localStorage.removeItem(draftPayloadStorageKey)
+      }
       setDraftHydrated(true)
       return
+    }
+    if (storedPayload) {
+      lastDraftPayloadRef.current = storedPayload
     }
     draftLoadRequestedRef.current = true
     setDraftHydrated(false)
@@ -581,12 +749,12 @@ export default function DesignStudioStorefrontRoute() {
     const params = new URLSearchParams()
     appendDesignStudioParams(params, requestOptions)
     params.set('token', storedToken)
-    console.log('[designStudio] requesting draft load', {
-      tokenLength: storedToken.length,
-      params: params.toString(),
-    })
     draftLoadFetcher.load(`/api/design-studio/drafts?${params.toString()}`)
-  }, [draftStorageKey, draftLoadFetcher, requestOptions])
+    // `useFetcher` objects change identity as their state updates; including the fetcher
+    // in this dependency array causes an infinite load loop. We only care about the
+    // derived storage keys and request params here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftStorageKey, draftPayloadStorageKey, requestOptions])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !draftStorageKey) return
@@ -603,34 +771,9 @@ export default function DesignStudioStorefrontRoute() {
   }, [draftStorageKey, draftPayloadStorageKey, draftToken])
 
   useEffect(() => {
-    if (draftSaveFetcher.state !== 'idle') return
-    const pendingSubmission = pendingDraftSubmissionRef.current
-    const result = draftSaveFetcher.data
-    if (result && result.ok) {
-      setDraftToken(result.token ?? null)
-      pendingDraftSubmissionRef.current = null
-      if (blankDraftMode) {
-        markAutosaveSuccess()
-      }
-      return
-    }
-    if (!result && !pendingSubmission) {
-      return
-    }
-    if (blankDraftMode) {
-      markAutosaveError('Unable to save draft. Retry?')
-    }
-  }, [draftSaveFetcher.state, draftSaveFetcher.data, blankDraftMode, markAutosaveError, markAutosaveSuccess])
-
-  useEffect(() => {
     if (draftLoadFetcher.state !== 'idle') return
     if (!draftLoadRequestedRef.current && !draftLoadFetcher.data) return
     const { draft, token } = draftLoadFetcher.data ?? { draft: null, token: null }
-    console.log('[designStudio] draft load effect', {
-      state: draftLoadFetcher.state,
-      hasData: Boolean(draftLoadFetcher.data),
-      hasDraft: Boolean(draft?.selections?.length),
-    })
     if (draft && Array.isArray(draft.selections)) {
       hydrateSelectionsFromDraft(draft, setSelections)
       lastDraftPayloadRef.current = JSON.stringify(
@@ -655,11 +798,20 @@ export default function DesignStudioStorefrontRoute() {
       }
       setValidationUpdatedAt(draft.validation?.updatedAt ?? null)
       setSaveFeedback({ status: 'idle' })
+      if (blankDraftMode) {
+        const loadedBlankOptionId = extractBlankOptionIdFromDraft(draft)
+        const loadedFingerprint = buildBlankDraftFingerprint({
+          blankOptionId: loadedBlankOptionId,
+          draftToken: token ?? null,
+        })
+        lastSavedFingerprintRef.current = loadedFingerprint
+        lastSubmittedFingerprintRef.current = loadedFingerprint
+      }
     }
     setDraftToken(token ?? null)
-    draftLoadRequestedRef.current = false
+    draftLoadRequestedRef.current = true
     setDraftHydrated(true)
-  }, [draftLoadFetcher.state, draftLoadFetcher.data])
+  }, [blankDraftMode, draftLoadFetcher.state, draftLoadFetcher.data, draftStorageKey])
 
   const handleSaveBuild = useCallback(() => {
     if (!selectionSnapshots.length) {
@@ -696,6 +848,8 @@ export default function DesignStudioStorefrontRoute() {
       setSaveFeedback({ status: 'success', reference: saveFetcher.data.reference })
       setDraftToken(null)
       lastDraftPayloadRef.current = null
+      lastSavedFingerprintRef.current = null
+      lastSubmittedFingerprintRef.current = null
     } else {
       setSaveFeedback({ status: 'error', message: saveFetcher.data.error ?? 'Unable to save build.' })
     }
@@ -707,6 +861,10 @@ export default function DesignStudioStorefrontRoute() {
     const hasSelections = selectionSnapshots.length > 0
     if (!hasSelections && !draftToken) {
       lastDraftPayloadRef.current = null
+      if (blankDraftMode) {
+        lastSavedFingerprintRef.current = null
+        lastSubmittedFingerprintRef.current = null
+      }
       return
     }
     const payload = buildDraftPayloadSnapshot({
@@ -721,7 +879,28 @@ export default function DesignStudioStorefrontRoute() {
       validation: validationSnapshot,
     })
     const serialized = JSON.stringify(payload)
-    if (serialized === lastDraftPayloadRef.current) return
+    if (serialized === lastDraftPayloadRef.current) {
+      return
+    }
+
+    const fingerprint = blankDraftMode ? blankDraftFingerprint : null
+    if (blankDraftMode) {
+      if (!fingerprint) {
+        return
+      }
+      const pendingFingerprint = lastSubmittedFingerprintRef.current
+      const awaitingInitialPost = !draftToken && !lastSavedFingerprintRef.current
+      const fetcherBusy = draftSaveBusy
+      if (draftAutosaveStatus.state === 'error' && pendingDraftSubmissionRef.current?.fingerprint === fingerprint) {
+        return
+      }
+      if (fetcherBusy && pendingFingerprint === fingerprint) {
+        return
+      }
+      if (!awaitingInitialPost && fingerprint === lastSavedFingerprintRef.current) {
+        return
+      }
+    }
 
     const runAutosave = () => {
       lastDraftPayloadRef.current = serialized
@@ -729,10 +908,19 @@ export default function DesignStudioStorefrontRoute() {
         window.localStorage.setItem(draftPayloadStorageKey, serialized)
       }
       const method: 'POST' | 'PUT' = draftToken ? 'PUT' : 'POST'
+      if (window.__ENABLE_DS_DEBUG__) {
+        console.log('[designStudio] autosave run', {
+          method,
+          blankDraftMode,
+          selectionCount: selectionSnapshots.length,
+          hasToken: Boolean(draftToken),
+        })
+      }
       if (blankDraftMode) {
         setDraftAutosaveStatus({ state: 'saving' })
       }
-      submitDraftPayload(serialized, method, draftToken ?? null)
+      const submissionOptions = blankDraftMode ? { fingerprint } : undefined
+      submitDraftPayload(serialized, method, draftToken ?? null, submissionOptions)
     }
 
     if (blankDraftMode) {
@@ -753,6 +941,10 @@ export default function DesignStudioStorefrontRoute() {
     blankDraftMode,
     draftPayloadStorageKey,
     draftHydrated,
+    draftSaveBusy,
+    draftAutosaveStatus.state,
+    blankDraftFingerprint,
+    blankSelection?.id,
   ])
 
   if (!designStudioAccess.enabled) {
@@ -1231,7 +1423,7 @@ function PublishedBuildTimelineCard({ loading, error, builds, onRetry }: Publish
 }
 
 function useHydrationReady(): boolean {
-  const [hydrated, setHydrated] = useState(() => typeof window !== 'undefined')
+  const [hydrated, setHydrated] = useState(false)
   useEffect(() => {
     setHydrated(true)
   }, [])
