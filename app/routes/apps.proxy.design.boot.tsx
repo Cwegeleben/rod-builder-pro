@@ -6,6 +6,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const isThemeRequest = url.searchParams.get('rbp_theme') === '1'
   const themeSectionId = url.searchParams.get('rbp_theme_section') ?? null
+  console.info('[designStudio] proxy boot request', {
+    url: url.toString(),
+    pathname: url.pathname,
+    search: url.search,
+    forwardedHost: request.headers.get('x-forwarded-host'),
+    forwardedProto: request.headers.get('x-forwarded-proto'),
+    flyOriginalPath: request.headers.get('fly-original-path'),
+    flyHost: request.headers.get('fly-original-host'),
+  })
   const access = await getDesignStudioAccess(request)
   const draftStorageKey = access.shopDomain ? `ds-draft:${access.shopDomain}` : null
 

@@ -61,25 +61,15 @@ function ensureManifestAssetsUseAbsoluteUrls(manifest: MutableAssetsManifest) {
   const base = manifest.publicPath
   if (!base) return
 
-  type AssetWithCss = { css?: string[] }
-
   manifest.entry.module = absolutizeSpecifier(manifest.entry.module, base)
   if (Array.isArray(manifest.entry.imports)) {
     manifest.entry.imports = manifest.entry.imports.map((specifier: string) => absolutizeSpecifier(specifier, base))
   }
-  const entryWithCss = manifest.entry as typeof manifest.entry & AssetWithCss
-  if (Array.isArray(entryWithCss.css)) {
-    entryWithCss.css = entryWithCss.css.map((href: string) => absolutizeSpecifier(href, base))
-  }
 
   Object.values(manifest.routes).forEach(route => {
-    const routeWithCss = route as typeof route & AssetWithCss
-    routeWithCss.module = absolutizeSpecifier(routeWithCss.module, base)
-    if (Array.isArray(routeWithCss.imports)) {
-      routeWithCss.imports = routeWithCss.imports.map((specifier: string) => absolutizeSpecifier(specifier, base))
-    }
-    if (Array.isArray(routeWithCss.css)) {
-      routeWithCss.css = routeWithCss.css.map((href: string) => absolutizeSpecifier(href, base))
+    route.module = absolutizeSpecifier(route.module, base)
+    if (Array.isArray(route.imports)) {
+      route.imports = route.imports.map((specifier: string) => absolutizeSpecifier(specifier, base))
     }
   })
 

@@ -23,7 +23,7 @@
 
   async function fetchBootPayload(bootUrl) {
     const response = await fetch(bootUrl, {
-      credentials: 'include',
+      credentials: 'omit',
       headers: { Accept: 'application/json' },
     })
     if (!response.ok) {

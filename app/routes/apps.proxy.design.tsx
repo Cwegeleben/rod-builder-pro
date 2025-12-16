@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs, LinksFunction } from '@remix-run/node'
+import type { LoaderFunctionArgs, LinksFunction, SerializeFrom } from '@remix-run/node'
 import { json } from '@remix-run/node'
 import { useFetcher, useLoaderData } from '@remix-run/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -83,6 +83,14 @@ type InitialStorefrontSnapshot = {
   activeBuildResolved: boolean
 }
 
+type ThemeExtensionAssets = {
+  loaderUrl: string
+  manifestUrl: string
+  bootUrl: string
+  configUrl: string
+  debugEnabled: boolean
+}
+
 type DraftAutosaveStatus =
   | { state: 'idle' }
   | { state: 'saving' }
@@ -106,6 +114,8 @@ type DraftSaveResponse = {
   ok: boolean
   token?: string | null
 }
+
+type DesignStudioLoaderData = SerializeFrom<typeof loader>
 
 type BlankDraftFingerprintArgs = {
   blankOptionId: string | null
@@ -193,6 +203,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     source: isThemeRequest ? 'theme-extension' : 'app-proxy',
     themeSectionId: url.searchParams.get('rbp_theme_section'),
   }
+  const themeAssets = isThemeRequest ? buildThemeExtensionAssets(url) : null
   const initialStorefront: InitialStorefrontSnapshot = {
     hero: null,
     activeBuild: null,
@@ -234,6 +245,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       initialStorefront,
       storefrontBlankDraftEnabled,
       storefrontReelSeatDraftEnabled,
+      themeAssets,
     },
     {
       headers: buildShopifyCorsHeaders(request, {
@@ -252,16 +264,82 @@ function buildFrameAncestors(shopDomain: string | null): string[] {
   return Array.from(ancestors)
 }
 
+const SHOP_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i
+
+function buildThemeExtensionAssets(url: URL): ThemeExtensionAssets {
+  const params = new URLSearchParams(url.search)
+  const pathPrefixParam = params.get('path_prefix')
+  const query = params.toString()
+  const suffix = query ? `?${query}` : ''
+  const proxyBase = normalizeThemeProxyPrefix(pathPrefixParam)
+  const designBase = `${proxyBase}/design`
+  const shopOrigin = normalizeShopOrigin(url.searchParams.get('shop'))
+  const bootPath = `${designBase}/boot${suffix}`
+  const configPath = `${designBase}/config${suffix}`
+  return {
+    loaderUrl: '/resources/design-studio/assets/design-studio-loader.js',
+    manifestUrl: '/resources/design-studio/assets/design-studio-ui.manifest.json',
+    bootUrl: shopOrigin ? `${shopOrigin}${bootPath}` : bootPath,
+    configUrl: shopOrigin ? `${shopOrigin}${configPath}` : configPath,
+    debugEnabled: url.searchParams.get('ds_debug') === '1',
+  }
+}
+
+function normalizeThemeProxyPrefix(rawValue: string | null): string {
+  const fallback = '/apps/proxy'
+  if (!rawValue) return fallback
+  let decoded: string = rawValue
+  try {
+    decoded = decodeURIComponent(rawValue)
+  } catch {
+    decoded = rawValue
+  }
+  if (!decoded.startsWith('/')) {
+    decoded = `/${decoded}`
+  }
+  decoded = decoded.replace(/\/+/g, '/')
+  if (decoded.length > 1 && decoded.endsWith('/')) {
+    decoded = decoded.replace(/\/+$/, '')
+  }
+  return decoded || fallback
+}
+
+function normalizeShopOrigin(shopDomain: string | null): string | null {
+  if (!shopDomain) return null
+  const trimmed = shopDomain.trim()
+  if (!SHOP_DOMAIN_PATTERN.test(trimmed)) {
+    return null
+  }
+  return `https://${trimmed.toLowerCase()}`
+}
+
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: polarisStyles }]
 
 export default function DesignStudioStorefrontRoute() {
+  const loaderData = useLoaderData<typeof loader>()
+  const themeRequest = loaderData.requestContext.source === 'theme-extension'
+  if (themeRequest && loaderData.themeAssets) {
+    const hero = loaderData.initialStorefront.hero ?? DEFAULT_HERO_CONTENT
+    return (
+      <ThemeExtensionShell
+        designStudioAccess={loaderData.designStudioAccess}
+        requestContext={loaderData.requestContext}
+        hero={hero}
+        themeAssets={loaderData.themeAssets}
+      />
+    )
+  }
+  return <DesignStudioInteractiveApp loaderData={loaderData} />
+}
+
+function DesignStudioInteractiveApp({ loaderData }: { loaderData: DesignStudioLoaderData }) {
   const {
     designStudioAccess,
     requestContext,
     initialStorefront,
     storefrontBlankDraftEnabled,
     storefrontReelSeatDraftEnabled,
-  } = useLoaderData<typeof loader>()
+  } = loaderData
   console.log('[designStudio] access payload', {
     shopDomain: designStudioAccess.shopDomain,
     enabled: designStudioAccess.enabled,
@@ -1565,6 +1643,140 @@ type ComponentSelectorProps = {
   onSelect: (option: DesignStorefrontOption) => void
   formatCurrency: (value: number) => string
   roleValidation: Partial<Record<DesignStorefrontPartRole, DesignStudioValidationEntry[]>>
+}
+
+type ThemeExtensionShellProps = {
+  designStudioAccess: DesignStudioLoaderData['designStudioAccess']
+  requestContext: DesignStudioLoaderData['requestContext']
+  hero: { title: string; body: string }
+  themeAssets: ThemeExtensionAssets
+}
+
+function ThemeExtensionShell({ designStudioAccess, requestContext, hero, themeAssets }: ThemeExtensionShellProps) {
+  const heroTitle = hero?.title ?? DEFAULT_HERO_CONTENT.title
+  const heroBody = hero?.body ?? DEFAULT_HERO_CONTENT.body
+  const placeholderMessage = designStudioAccess.enabled
+    ? 'Loading Design Studio preview…'
+    : 'Design Studio is unavailable for this shop. Contact RBP support to enable storefront access.'
+  const sectionId = requestContext.themeSectionId ?? 'app-proxy'
+  return (
+    <div className="ds-theme-shell" data-ds-theme-request>
+      <ThemeShellStyles />
+      <section className="ds-theme-shell__frame" aria-live="polite">
+        <header className="ds-theme-shell__header">
+          <p className="ds-theme-shell__eyebrow">Rod Building Preview</p>
+          <h1 className="ds-theme-shell__title">{heroTitle}</h1>
+          <p className="ds-theme-shell__subtitle">{heroBody}</p>
+        </header>
+        <div className="ds-theme-shell__root-wrapper">
+          <div
+            className="ds-theme-shell__root"
+            data-rbp-design-studio-root="true"
+            data-rbp-design-studio-boot-url={themeAssets.bootUrl}
+            data-rbp-design-studio-manifest-url={themeAssets.manifestUrl}
+            data-rbp-design-studio-loader-src={themeAssets.loaderUrl}
+            data-rbp-design-studio-config-url={themeAssets.configUrl}
+            data-rbp-design-studio-section-id={sectionId}
+            data-rbp-design-studio-state="server"
+            data-rbp-design-studio-debug={themeAssets.debugEnabled ? '1' : '0'}
+          >
+            <div className="ds-theme-shell__placeholder" data-rbp-design-studio-message>
+              {placeholderMessage}
+            </div>
+            <div className="ds-theme-shell__app-root" data-rbp-design-studio-app-root />
+            <noscript>
+              <div className="ds-theme-shell__noscript">
+                Enable JavaScript in your browser to interact with Design Studio.
+              </div>
+            </noscript>
+          </div>
+        </div>
+      </section>
+      {themeAssets.debugEnabled ? (
+        <>
+          <ThemeDiagnosticsPanel
+            designStudioAccess={designStudioAccess}
+            requestContext={requestContext}
+            themeAssets={themeAssets}
+          />
+          <EnableThemeDebugFlag />
+        </>
+      ) : null}
+      <script src={themeAssets.loaderUrl} defer data-rbp-design-studio-loader />
+    </div>
+  )
+}
+
+type ThemeDiagnosticsPanelProps = {
+  designStudioAccess: DesignStudioLoaderData['designStudioAccess']
+  requestContext: DesignStudioLoaderData['requestContext']
+  themeAssets: ThemeExtensionAssets
+}
+
+function ThemeDiagnosticsPanel({ designStudioAccess, requestContext, themeAssets }: ThemeDiagnosticsPanelProps) {
+  const rows: Array<{ label: string; value: string }> = [
+    { label: 'Shop domain', value: designStudioAccess.shopDomain ?? 'unknown' },
+    { label: 'Access enabled', value: designStudioAccess.enabled ? 'true' : 'false' },
+    { label: 'Theme section id', value: requestContext.themeSectionId ?? 'app-proxy' },
+    { label: 'Loader asset', value: themeAssets.loaderUrl },
+    { label: 'Manifest asset', value: themeAssets.manifestUrl },
+    { label: 'Boot endpoint', value: themeAssets.bootUrl },
+  ]
+  return (
+    <aside className="ds-theme-shell__debug" data-rbp-design-studio-debug-panel>
+      <h2>Design Studio diagnostics</h2>
+      <p>
+        Showing because <code>ds_debug=1</code> is present.
+      </p>
+      <dl>
+        {rows.map(row => (
+          <div key={row.label} className="ds-theme-shell__debug-row">
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="ds-theme-shell__debug-note">
+        Loader state changes update <code>data-rbp-design-studio-state</code> on the root. Watch for
+        <q>mounted</q> to confirm the Shopify bundle took over.
+      </p>
+    </aside>
+  )
+}
+
+function EnableThemeDebugFlag() {
+  return <script dangerouslySetInnerHTML={{ __html: 'window.__ENABLE_DS_DEBUG__ = true;' }} />
+}
+
+const THEME_SHELL_STYLES = `
+.ds-theme-shell { background: #f8fafc; color: #0f172a; min-height: 100vh; }
+.ds-theme-shell__frame { max-width: 960px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+.ds-theme-shell__header { margin-bottom: 1.5rem; }
+.ds-theme-shell__eyebrow { margin: 0 0 0.5rem; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.8rem; color: rgba(15,23,42,0.6); }
+.ds-theme-shell__title { margin: 0; font-size: 2.25rem; line-height: 1.2; }
+.ds-theme-shell__subtitle { margin: 0.75rem 0 0; color: rgba(15,23,42,0.75); max-width: 48ch; }
+.ds-theme-shell__root-wrapper { background: #fff; border-radius: 20px; border: 1px solid rgba(15,23,42,0.08); box-shadow: 0 20px 50px rgba(15,23,42,0.12); padding: 1.25rem; }
+.ds-theme-shell__root { position: relative; min-height: 420px; border-radius: 16px; border: 1px dashed rgba(15,23,42,0.15); overflow: hidden; }
+.ds-theme-shell__placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 2rem; font-size: 1rem; color: rgba(15,23,42,0.6); background: linear-gradient(135deg, rgba(148,163,184,0.12), rgba(241,245,249,0.65)); }
+.ds-theme-shell__app-root { position: relative; min-height: 100%; z-index: 1; }
+.ds-theme-shell__noscript { padding: 1rem; background: #fffaf0; color: #92400e; font-weight: 600; }
+.ds-theme-shell__debug { max-width: 960px; margin: 1.5rem auto 3rem; padding: 1.25rem 1.5rem; border-radius: 16px; border: 1px solid rgba(99,102,241,0.35); background: rgba(99,102,241,0.08); }
+.ds-theme-shell__debug h2 { margin: 0 0 0.5rem; font-size: 1.15rem; }
+.ds-theme-shell__debug dl { margin: 0; display: grid; grid-template-columns: minmax(0, 160px) 1fr; gap: 0.35rem 1rem; }
+.ds-theme-shell__debug-row { display: contents; }
+.ds-theme-shell__debug dt { font-weight: 600; color: rgba(15,23,42,0.85); }
+.ds-theme-shell__debug dd { margin: 0; color: rgba(15,23,42,0.75); word-break: break-all; }
+.ds-theme-shell__debug-note { margin: 0.75rem 0 0; font-size: 0.9rem; color: rgba(15,23,42,0.75); }
+@media (max-width: 640px) {
+  .ds-theme-shell__frame { padding: 2rem 1rem 3rem; }
+  .ds-theme-shell__title { font-size: 1.75rem; }
+  .ds-theme-shell__root-wrapper { padding: 1rem; }
+  .ds-theme-shell__debug dl { grid-template-columns: 1fr; }
+}
+`
+
+function ThemeShellStyles() {
+  return <style dangerouslySetInnerHTML={{ __html: THEME_SHELL_STYLES }} />
 }
 
 type BlankSelectionCardProps = {

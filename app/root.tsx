@@ -231,7 +231,6 @@ function ManifestAbsoluteUrlGuard({ assetBaseUrl }: { assetBaseUrl: string }) {
       if (!route || typeof route !== 'object') return;
       route.module = absolutize(route.module);
       if (Array.isArray(route.imports)) route.imports = route.imports.map(absolutize);
-      if (Array.isArray(route.css)) route.css = route.css.map(absolutize);
     };
     const rewrite = (manifest) => {
       if (!manifest || typeof manifest !== 'object') return manifest;
@@ -239,7 +238,6 @@ function ManifestAbsoluteUrlGuard({ assetBaseUrl }: { assetBaseUrl: string }) {
       if (manifest.entry && typeof manifest.entry === 'object') {
         manifest.entry.module = absolutize(manifest.entry.module);
         if (Array.isArray(manifest.entry.imports)) manifest.entry.imports = manifest.entry.imports.map(absolutize);
-        if (Array.isArray(manifest.entry.css)) manifest.entry.css = manifest.entry.css.map(absolutize);
       }
       if (manifest.routes && typeof manifest.routes === 'object') {
         Object.keys(manifest.routes).forEach((key) => patchRoute(manifest.routes[key]));
