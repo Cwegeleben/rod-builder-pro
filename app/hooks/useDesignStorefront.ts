@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { DesignBuildStatus } from '@prisma/client'
 import type {
   DesignStorefrontConfig,
   DesignStorefrontOption,
@@ -40,6 +41,44 @@ export type UseDesignOptionsResult = {
   issues: CompatibilityIssue[]
   loading: boolean
   error: Error | null
+}
+
+export type DesignStorefrontActiveBuild = {
+  reference: string
+  status: DesignBuildStatus
+  submittedAt: string | null
+  updatedAt: string
+  blankTitle: string | null
+  blankSku: string | null
+  pricing: {
+    subtotal: number
+    basePrice: number
+    selectedParts: number
+    totalParts: number
+  }
+  components: Array<{ title: string | null; role: string | null; price: number }>
+}
+
+export type UseDesignActiveBuildResult = {
+  data: DesignStorefrontActiveBuild | null
+  loading: boolean
+  error: Error | null
+  refresh: () => void
+}
+
+export type DesignStorefrontTimelineBuild = {
+  id: string
+  reference: string
+  status: DesignBuildStatus
+  blankSku: string | null
+  updatedAt: string
+}
+
+export type UseDesignBuildTimelineResult = {
+  data: DesignStorefrontTimelineBuild[]
+  loading: boolean
+  error: Error | null
+  refresh: () => void
 }
 
 export function useDesignConfig(options?: DesignStorefrontRequestOptions): UseDesignConfigResult {
@@ -146,4 +185,100 @@ export function useDesignOptions(
   }, [role, options?.shopDomain, options?.themeRequest, options?.themeSectionId, serializedCompatibility])
 
   return useMemo(() => ({ data, issues, loading, error }), [data, issues, loading, error])
+}
+
+export function useDesignActiveBuild(options?: DesignStorefrontRequestOptions): UseDesignActiveBuildResult {
+  const [data, setData] = useState<DesignStorefrontActiveBuild | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+  const [refreshToken, setRefreshToken] = useState(0)
+
+  const endpoint = useMemo(() => {
+    const params = new URLSearchParams()
+    appendDesignStudioParams(params, options)
+    const query = params.toString()
+    return query ? `/api/design-studio/builds/active?${query}` : '/api/design-studio/builds/active'
+  }, [options?.shopDomain, options?.themeRequest, options?.themeSectionId])
+
+  useEffect(() => {
+    let cancelled = false
+    const controller = new AbortController()
+    async function fetchActiveBuild() {
+      setLoading(true)
+      try {
+        const response = await fetch(endpoint, { signal: controller.signal })
+        if (!response.ok) {
+          throw new Error(`Failed to load active build (${response.status})`)
+        }
+        const payload = (await response.json()) as { build?: DesignStorefrontActiveBuild | null }
+        if (cancelled) return
+        setData(payload.build ?? null)
+        setError(null)
+      } catch (err) {
+        if (cancelled || controller.signal.aborted) return
+        setError(err instanceof Error ? err : new Error('Unable to load build summary'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void fetchActiveBuild()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [endpoint, refreshToken])
+
+  const refresh = useCallback(() => setRefreshToken(token => token + 1), [])
+
+  return useMemo(() => ({ data, loading, error, refresh }), [data, loading, error, refresh])
+}
+
+const TIMELINE_STATUS_PARAMS: DesignBuildStatus[] = ['APPROVED', 'SCHEDULED', 'IN_PROGRESS', 'FULFILLED']
+
+export function useDesignBuildTimeline(options?: DesignStorefrontRequestOptions): UseDesignBuildTimelineResult {
+  const [data, setData] = useState<DesignStorefrontTimelineBuild[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+  const [refreshToken, setRefreshToken] = useState(0)
+
+  const endpoint = useMemo(() => {
+    const params = new URLSearchParams()
+    appendDesignStudioParams(params, options)
+    TIMELINE_STATUS_PARAMS.forEach(status => params.append('status', status))
+    params.set('limit', '3')
+    const query = params.toString()
+    return query ? `/api/design-studio/builds?${query}` : '/api/design-studio/builds'
+  }, [options?.shopDomain, options?.themeRequest, options?.themeSectionId])
+
+  useEffect(() => {
+    let cancelled = false
+    const controller = new AbortController()
+    async function fetchTimeline() {
+      setLoading(true)
+      try {
+        const response = await fetch(endpoint, { signal: controller.signal })
+        if (!response.ok) {
+          throw new Error(`Failed to load build timeline (${response.status})`)
+        }
+        const payload = (await response.json()) as { builds?: DesignStorefrontTimelineBuild[] }
+        if (cancelled) return
+        setData(payload.builds ?? [])
+        setError(null)
+      } catch (err) {
+        if (cancelled || controller.signal.aborted) return
+        setError(err instanceof Error ? err : new Error('Unable to load build timeline'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void fetchTimeline()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [endpoint, refreshToken])
+
+  const refresh = useCallback(() => setRefreshToken(token => token + 1), [])
+
+  return useMemo(() => ({ data, loading, error, refresh }), [data, loading, error, refresh])
 }

@@ -22,6 +22,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const url = new URL(request.url)
   const token = url.searchParams.get('token')
+  console.log('[designStudio] drafts loader', {
+    shop: access.shopDomain,
+    token,
+  })
   if (!token) {
     return json({ draft: null, token: null }, { headers })
   }
@@ -37,7 +41,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  if (request.method.toUpperCase() !== 'POST') {
+  const method = request.method.toUpperCase()
+  if (method !== 'POST' && method !== 'PUT' && method !== 'PATCH') {
     return json({ error: 'METHOD_NOT_ALLOWED' }, { status: 405, headers: buildShopifyCorsHeaders(request) })
   }
   const access = await getDesignStudioAccess(request)
@@ -47,6 +52,11 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   const formData = await request.formData()
   const rawPayload = formData.get('payload')
+  console.log('[designStudio] drafts action', {
+    shop: access.shopDomain,
+    method,
+    hasPayload: typeof rawPayload === 'string',
+  })
   if (typeof rawPayload !== 'string' || !rawPayload.trim()) {
     return json({ ok: false, error: 'INVALID_PAYLOAD' }, { status: 400, headers })
   }
@@ -58,6 +68,9 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   const tokenValue = formData.get('token')
   const token = typeof tokenValue === 'string' && tokenValue.trim() ? tokenValue.trim() : null
+  if ((method === 'PUT' || method === 'PATCH') && !token) {
+    return json({ ok: false, error: 'TOKEN_REQUIRED' }, { status: 400, headers })
+  }
   try {
     const result = await saveDesignStorefrontDraft({ access, token, payload })
     return json({ ok: true, token: result.token }, { headers })

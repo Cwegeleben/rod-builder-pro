@@ -1,0 +1,287 @@
+import { chromium, Browser } from 'playwright'
+import { spawn, ChildProcess } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+import fs from 'node:fs'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const projectRoot = path.resolve(__dirname, '..', '..')
+const ENV_PROFILE = path.join(projectRoot, '.env.theme-editor-smoke')
+
+type SmokeResult = {
+  name: string
+  ok: boolean
+  notes?: string
+}
+
+loadEnvProfile()
+
+const baseUrl = stripTrailingSlash(process.env.SHOPIFY_APP_URL ?? 'http://127.0.0.1:3100')
+const shopDomain = process.env.THEME_EDITOR_SMOKE_SHOP ?? 'core-sandbox.myshopify.com'
+const designUrl = `${baseUrl}/apps/proxy/design?shop=${encodeURIComponent(shopDomain)}&rbp_theme=1`
+
+async function main() {
+  const server = startServer()
+  try {
+    await waitForServerReady(server)
+    const browser = await chromium.launch()
+    try {
+      const results = await runChecks(browser)
+      console.table(results)
+      if (results.some(result => !result.ok)) {
+        throw new Error('Theme Editor smoke failed')
+      }
+      console.log('[theme-editor:smoke] PASS')
+    } finally {
+      await browser.close()
+    }
+  } catch (error) {
+    console.error('[theme-editor:smoke] ERROR', error)
+    process.exitCode = 1
+  } finally {
+    await shutdownServer(server)
+  }
+}
+
+function loadEnvProfile() {
+  if (!fs.existsSync(ENV_PROFILE)) {
+    console.warn(`[theme-editor:smoke] Env profile missing at ${ENV_PROFILE}`)
+    return
+  }
+  const lines = fs.readFileSync(ENV_PROFILE, 'utf8').split(/\r?\n/)
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) continue
+    const separatorIndex = line.indexOf('=')
+    if (separatorIndex === -1) continue
+    const key = line.slice(0, separatorIndex).trim()
+    let value = line.slice(separatorIndex + 1).trim()
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1)
+    }
+    if (!key || value.length === 0) continue
+    if (!(key in process.env)) {
+      process.env[key] = value
+    }
+  }
+  console.log(`[theme-editor:smoke] Loaded env profile from ${ENV_PROFILE}`)
+}
+
+function stripTrailingSlash(value: string): string {
+  return value.endsWith('/') ? value.slice(0, -1) : value
+}
+
+function summarizeDraftRequests(requests: string[]) {
+  return requests.reduce(
+    (acc, method) => {
+      if (method === 'POST') acc.post += 1
+      if (method === 'PUT' || method === 'PATCH') acc.put += 1
+      return acc
+    },
+    { post: 0, put: 0 },
+  )
+}
+
+function startServer(): ChildProcess {
+  const child = spawn('npm', ['run', '-s', 'start'], {
+    cwd: projectRoot,
+    env: { ...process.env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  child.stderr.on('data', chunk => process.stderr.write(chunk))
+  return child
+}
+
+function waitForServerReady(child: ChildProcess): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const handleData = (chunk: Buffer) => {
+      const text = chunk.toString()
+      process.stdout.write(text)
+      if (text.includes('listening on')) {
+        cleanup()
+        resolve()
+      }
+    }
+    const handleExit = (code: number | null) => {
+      cleanup()
+      reject(new Error(`Server exited before ready (code ${code ?? 'null'})`))
+    }
+    const cleanup = () => {
+      child.stdout?.off('data', handleData)
+      child.off('exit', handleExit)
+    }
+    child.stdout?.on('data', handleData)
+    child.once('exit', handleExit)
+  })
+}
+
+function shutdownServer(child: ChildProcess | undefined | null): Promise<void> {
+  if (!child || child.killed) {
+    return Promise.resolve()
+  }
+  return new Promise(resolve => {
+    child.once('exit', () => resolve())
+    child.kill('SIGTERM')
+  })
+}
+
+async function runChecks(browser: Browser): Promise<SmokeResult[]> {
+  const results: SmokeResult[] = []
+  let failed = false
+
+  async function capture(name: string, fn: () => Promise<string | void>) {
+    try {
+      const note = await fn()
+      results.push({ name, ok: true, notes: note ?? undefined })
+    } catch (error) {
+      failed = true
+      results.push({ name, ok: false, notes: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  await capture('Blank autosave flow', () => runBlankDraftFlow(browser))
+  await capture('Blank autosave error recovery', () => runBlankDraftError(browser))
+  await capture('Timeline renders', () => runTimelineHappy(browser))
+  await capture('Timeline error + retry', () => runTimelineRetry(browser))
+  await capture('No-JS SSR fallback', () => runNoJs(browser))
+
+  if (failed) {
+    console.error('[theme-editor:smoke] One or more checks failed')
+  }
+
+  return results
+}
+
+async function runTimelineHappy(browser: Browser): Promise<string> {
+  const context = await browser.newContext()
+  try {
+    const page = await context.newPage()
+    await page.goto(designUrl, { waitUntil: 'networkidle' })
+    await page.getByRole('heading', { name: 'Published build timeline' }).waitFor({ timeout: 15000 })
+    await page.getByText('Latest approved and in-progress builds for this shop.').waitFor({ timeout: 15000 })
+    const rows = await page.locator('text=TE-TIMELINE-').allTextContents()
+    if (rows.length < 3) {
+      throw new Error(`Expected >=3 timeline rows, saw ${rows.length}`)
+    }
+    return `rows=${rows.length}`
+  } finally {
+    await context.close()
+  }
+}
+
+async function runBlankDraftFlow(browser: Browser): Promise<string> {
+  const context = await browser.newContext()
+  context.addInitScript(() => window.localStorage.clear())
+  const draftRequests: string[] = []
+  context.on('request', request => {
+    if (request.url().includes('/api/design-studio/drafts')) {
+      draftRequests.push(request.method())
+    }
+  })
+  try {
+    const page = await context.newPage()
+    await page.goto(designUrl, { waitUntil: 'networkidle' })
+    const options = page.locator('[data-blank-option]')
+    await options.first().waitFor({ timeout: 15000 })
+    const optionCount = await options.count()
+    if (optionCount < 2) {
+      throw new Error('Need at least two blank options to validate autosave flow')
+    }
+    await options.first().click()
+    await page.getByText('Draft saved').waitFor({ timeout: 10000 })
+    await options.nth(1).click()
+    await page.getByText('Draft saved').waitFor({ timeout: 10000 })
+    const summary = summarizeDraftRequests(draftRequests)
+    if (summary.post !== 1 || summary.put < 1) {
+      throw new Error(`Unexpected draft calls (POST=${summary.post}, PUT=${summary.put})`)
+    }
+    await page.reload({ waitUntil: 'networkidle' })
+    const persistedAttr = await page.locator('[data-blank-option]').nth(1).getAttribute('data-selected')
+    if (persistedAttr !== 'true') {
+      throw new Error('Blank selection did not persist after reload')
+    }
+    return `POST=${summary.post}, PUT=${summary.put}`
+  } finally {
+    await context.close()
+  }
+}
+
+async function runBlankDraftError(browser: Browser): Promise<string> {
+  const context = await browser.newContext()
+  context.addInitScript(() => window.localStorage.clear())
+  let shouldFailNext = true
+  await context.route('**/api/design-studio/drafts**', async route => {
+    const method = route.request().method()
+    if (shouldFailNext && method === 'PUT') {
+      shouldFailNext = false
+      return route.fulfill({ status: 500, body: 'forced failure' })
+    }
+    return route.continue()
+  })
+  try {
+    const page = await context.newPage()
+    await page.goto(designUrl, { waitUntil: 'networkidle' })
+    const options = page.locator('[data-blank-option]')
+    await options.first().waitFor({ timeout: 15000 })
+    await options.first().click()
+    await page.getByText('Draft saved').waitFor({ timeout: 10000 })
+    if ((await options.count()) < 2) {
+      throw new Error('Need at least two blank options for error retry test')
+    }
+    await options.nth(1).click()
+    await page.getByText('Unable to save draft. Retry?').waitFor({ timeout: 10000 })
+    await page.getByRole('button', { name: 'Retry draft save' }).click()
+    await page.getByText('Draft saved').waitFor({ timeout: 10000 })
+    return 'error->retry recovered'
+  } finally {
+    await context.close()
+  }
+}
+
+async function runTimelineRetry(browser: Browser): Promise<string> {
+  const context = await browser.newContext()
+  try {
+    let intercepted = false
+    await context.route('**/api/design-studio/builds**', async route => {
+      if (intercepted) {
+        return route.continue()
+      }
+      intercepted = true
+      console.warn('[theme-editor:smoke] Forcing timeline fetch failure')
+      return route.abort('failed')
+    })
+    const page = await context.newPage()
+    await page.goto(designUrl, { waitUntil: 'domcontentloaded' })
+    await page.getByText('Unable to load recent builds right now.').waitFor({ timeout: 10000 })
+    await page.getByRole('button', { name: 'Retry' }).click()
+    await page.getByText('Latest approved and in-progress builds for this shop.').waitFor({ timeout: 15000 })
+    const rows = await page.locator('text=TE-TIMELINE-').allTextContents()
+    if (!rows.length) {
+      throw new Error('Timeline did not repopulate after retry')
+    }
+    return `rows=${rows.length}`
+  } finally {
+    await context.close()
+  }
+}
+
+async function runNoJs(browser: Browser): Promise<string> {
+  const context = await browser.newContext({ javaScriptEnabled: false })
+  try {
+    const page = await context.newPage()
+    await page.goto(designUrl, { waitUntil: 'load' })
+    await page.getByRole('heading', { name: 'Core Design Studio sandbox' }).waitFor({ timeout: 10000 })
+    await page.getByRole('heading', { name: 'Active build summary' }).waitFor({ timeout: 10000 })
+    await page.getByText('Timeline available once the Theme Editor assets finish loading.').waitFor({ timeout: 10000 })
+    await page.getByText('Enable JavaScript to build a draft.').waitFor({ timeout: 10000 })
+    return 'hero+active+timeline placeholders visible + blank warning'
+  } finally {
+    await context.close()
+  }
+}
+
+main().catch(error => {
+  console.error('[theme-editor:smoke] Unhandled error', error)
+  process.exitCode = 1
+})

@@ -7,6 +7,8 @@ import { addDocumentResponseHeaders } from './shopify.server'
 import { resolveAbsoluteAssetPublicPath } from './utils/assetBase.server'
 import { ensureShopifyCorsHeaders } from './utils/shopifyCors.server'
 
+type MutableAssetsManifest = EntryContext['manifest'] & { publicPath?: string }
+
 export const streamTimeout = 5000
 
 export default async function handleRequest(
@@ -17,8 +19,9 @@ export default async function handleRequest(
 ) {
   addDocumentResponseHeaders(request, responseHeaders)
   ensureShopifyCorsHeaders(request, responseHeaders)
-  remixContext.manifest.publicPath = resolveAbsoluteAssetPublicPath(request, remixContext.manifest.publicPath)
-  ensureManifestAssetsUseAbsoluteUrls(remixContext)
+  const manifest = remixContext.manifest as MutableAssetsManifest
+  manifest.publicPath = resolveAbsoluteAssetPublicPath(request, manifest.publicPath)
+  ensureManifestAssetsUseAbsoluteUrls(manifest)
   const userAgent = request.headers.get('user-agent')
   const callbackName = isbot(userAgent ?? '') ? 'onAllReady' : 'onShellReady'
 
@@ -54,22 +57,29 @@ export default async function handleRequest(
 
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:/
 
-function ensureManifestAssetsUseAbsoluteUrls(remixContext: EntryContext) {
-  const manifest = remixContext.manifest
+function ensureManifestAssetsUseAbsoluteUrls(manifest: MutableAssetsManifest) {
   const base = manifest.publicPath
   if (!base) return
 
+  type AssetWithCss = { css?: string[] }
+
   manifest.entry.module = absolutizeSpecifier(manifest.entry.module, base)
-  manifest.entry.imports = manifest.entry.imports.map(specifier => absolutizeSpecifier(specifier, base))
-  manifest.entry.css = manifest.entry.css.map(href => absolutizeSpecifier(href, base))
+  if (Array.isArray(manifest.entry.imports)) {
+    manifest.entry.imports = manifest.entry.imports.map((specifier: string) => absolutizeSpecifier(specifier, base))
+  }
+  const entryWithCss = manifest.entry as typeof manifest.entry & AssetWithCss
+  if (Array.isArray(entryWithCss.css)) {
+    entryWithCss.css = entryWithCss.css.map((href: string) => absolutizeSpecifier(href, base))
+  }
 
   Object.values(manifest.routes).forEach(route => {
-    route.module = absolutizeSpecifier(route.module, base)
-    if (route.imports) {
-      route.imports = route.imports.map(specifier => absolutizeSpecifier(specifier, base))
+    const routeWithCss = route as typeof route & AssetWithCss
+    routeWithCss.module = absolutizeSpecifier(routeWithCss.module, base)
+    if (Array.isArray(routeWithCss.imports)) {
+      routeWithCss.imports = routeWithCss.imports.map((specifier: string) => absolutizeSpecifier(specifier, base))
     }
-    if (route.css) {
-      route.css = route.css.map(href => absolutizeSpecifier(href, base))
+    if (Array.isArray(routeWithCss.css)) {
+      routeWithCss.css = routeWithCss.css.map((href: string) => absolutizeSpecifier(href, base))
     }
   })
 

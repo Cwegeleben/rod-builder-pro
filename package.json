@@ -48,6 +48,7 @@
     "preflight:importer-smoke": "rm -rf .tmp/crawlee && mkdir -p .tmp && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} prisma migrate deploy && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} CRAWLEE_STORAGE_DIR=${CRAWLEE_STORAGE_DIR:-.tmp/crawlee} BATSON_SEEDS=${BATSON_SEEDS:-https://batsonenterprises.com/collections/blanks} tsx packages/importer/src/cli/smoke.ts",
     "preflight:design-studio-metrics": "mkdir -p .tmp && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} tsx scripts/dev/seedDesignStudioSamples.ts && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} tsx scripts/migrate/backfill-design-studio.ts && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} DESIGN_STUDIO_SUPPLIERS=${DESIGN_STUDIO_SUPPLIERS:-batson} tsx scripts/migrate/backfill-design-storefront-products.ts && DATABASE_URL=${DATABASE_URL:-file:./.tmp/importer-smoke-dev.sqlite} tsx scripts/diagnostics/designStudioMetrics.ts",
     "smoke:single-seed": "node scripts/smoke/single-seed-run.mjs",
+    "theme-editor:smoke": "tsx scripts/smoke/themeEditorSmoke.ts",
     "migrate:templates-cost": "tsx scripts/migrate/migrate-templates-cost.mts",
     "migrate:backfill:publish-handles": "node scripts/migrate/backfill-publish-handles.mjs",
     "validate:templateversion-json": "node scripts/migrate/validate-templateversion-json.mjs",

@@ -145,6 +145,10 @@ Optional (set as secrets only if you use the feature):
 - `PRICE_REFRESH_TOKEN` — bearer token for price/availability refresh hook
 - `IMPORTER_BG_ENABLED`, `VITE_IMPORTER_SSE_ENABLED` — importer / UI flags
 
+### Theme Editor smoke profile
+
+Use `.env.theme-editor-smoke` when running `npm run theme-editor:smoke`. The command loads that profile, boots the Remix server on `http://127.0.0.1:3100`, and exercises the Theme Editor timeline (happy path, forced error + retry, and no-JS fallbacks) with Playwright. Update the SQLite path in the env file if your smoke database lives elsewhere. If SHOPIFY_APP_URL is wrong, hydration will never run.
+
 Examples (production):
 
 ```bash

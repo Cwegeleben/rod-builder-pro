@@ -21,6 +21,7 @@ import {
 import { logDesignStudioValidationEvent } from './validation'
 
 const PRODUCT_DB_ENABLED = process.env.PRODUCT_DB_ENABLED === '1'
+const BLANK_DRAFTS_ENABLED = process.env.DESIGN_STUDIO_DRAFTS_V1 === '1'
 const DEFAULT_BASE_PRICE = Number(process.env.DESIGN_STOREFRONT_BASE_PRICE ?? 250)
 const DEFAULT_ROLE_ORDER: DesignStorefrontPartRole[] = [
   'blank',
@@ -225,6 +226,10 @@ export async function loadDesignStorefrontOptions({
         take,
         reasoning: 'no-products-returned',
       })
+      if (shouldFallbackToMockOptions(role)) {
+        console.warn('[designStudio] Falling back to mock options for blank role')
+        return { options: await loadMockOptions(role), issues: [] }
+      }
       return { options: [], issues: [] }
     }
 
@@ -535,6 +540,10 @@ async function loadMockOptions(role: DesignStorefrontPartRole): Promise<DesignSt
     default:
       return getMockDesignStorefrontOptions(role)
   }
+}
+
+function shouldFallbackToMockOptions(role: DesignStorefrontPartRole): boolean {
+  return BLANK_DRAFTS_ENABLED && role === 'blank'
 }
 
 function normalizeRole(value: string | null | undefined): DesignStorefrontPartRole | null {

@@ -37,6 +37,10 @@ import {
 import {
   appendDesignStudioParams,
   type DesignStorefrontRequestOptions,
+  type DesignStorefrontActiveBuild,
+  type DesignStorefrontTimelineBuild,
+  useDesignActiveBuild,
+  useDesignBuildTimeline,
   useDesignConfig,
   useDesignOptions,
 } from '../hooks/useDesignStorefront'
@@ -48,6 +52,8 @@ import {
   type DesignStudioValidationState,
   type DesignStudioValidationTelemetryEvent,
 } from '../lib/designStudio/validation'
+import { loadLatestActiveDesignBuildSummary } from '../lib/designStudio/builds.server'
+import { loadDesignStorefrontConfig } from '../lib/designStudio/storefront.server'
 import type {
   StorefrontBuildPayload,
   StorefrontSelectionSnapshot,
@@ -71,6 +77,47 @@ type DesignStudioRequestContext = {
   themeSectionId?: string | null
 }
 
+type InitialStorefrontSnapshot = {
+  hero: { title: string; body: string } | null
+  activeBuild: DesignStorefrontActiveBuild | null
+  activeBuildResolved: boolean
+}
+
+type DraftAutosaveStatus =
+  | { state: 'idle' }
+  | { state: 'saving' }
+  | { state: 'success'; timestamp: number }
+  | { state: 'error'; message: string }
+
+type PendingDraftSubmission = {
+  payload: string
+  method: 'POST' | 'PUT'
+  token: string | null
+}
+
+type DraftLoadResponse = {
+  draft: StorefrontBuildPayload | null
+  token: string | null
+}
+
+type DraftSaveResponse = {
+  ok: boolean
+  token?: string | null
+}
+
+type BuildSaveResponse = {
+  ok: boolean
+  reference?: string
+  error?: string
+}
+
+const BLANK_ROLE: DesignStorefrontPartRole = 'blank'
+
+const DEFAULT_HERO_CONTENT = {
+  title: 'Design Studio',
+  body: 'Curated storefront components for Rainshadow builds.',
+} as const
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const isThemeRequest = url.searchParams.get('rbp_theme') === '1'
@@ -83,9 +130,37 @@ export async function loader({ request }: LoaderFunctionArgs) {
     source: isThemeRequest ? 'theme-extension' : 'app-proxy',
     themeSectionId: url.searchParams.get('rbp_theme_section'),
   }
+  const initialStorefront: InitialStorefrontSnapshot = {
+    hero: null,
+    activeBuild: null,
+    activeBuildResolved: false,
+  }
+  if (designStudioAccess.enabled) {
+    const configPromise = loadDesignStorefrontConfig(designStudioAccess).catch(error => {
+      console.error('[designStudio] Failed to preload storefront config', error)
+      return null
+    })
+    const activeBuildPromise = designStudioAccess.shopDomain
+      ? loadLatestActiveDesignBuildSummary(designStudioAccess.shopDomain)
+          .then(build => ({ build, resolved: true }))
+          .catch(error => {
+            console.error('[designStudio] Failed to preload active build summary', error)
+            return { build: null, resolved: false }
+          })
+      : Promise.resolve({ build: null, resolved: false })
+    const [configResult, activeBuildResult] = await Promise.all([configPromise, activeBuildPromise])
+    initialStorefront.hero = configResult?.hero ?? null
+    initialStorefront.activeBuild = activeBuildResult.build
+    initialStorefront.activeBuildResolved = activeBuildResult.resolved
+  }
   const frameAncestors = buildFrameAncestors(designStudioAccess.shopDomain)
   return json(
-    { designStudioAccess, requestContext },
+    {
+      designStudioAccess,
+      requestContext,
+      initialStorefront,
+      storefrontBlankDraftEnabled: process.env.DESIGN_STUDIO_DRAFTS_V1 === '1',
+    },
     {
       headers: buildShopifyCorsHeaders(request, {
         'Content-Security-Policy': `frame-ancestors ${frameAncestors.join(' ')};`,
@@ -106,8 +181,16 @@ function buildFrameAncestors(shopDomain: string | null): string[] {
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: polarisStyles }]
 
 export default function DesignStudioStorefrontRoute() {
-  const { designStudioAccess, requestContext } = useLoaderData<typeof loader>()
+  const { designStudioAccess, requestContext, initialStorefront, storefrontBlankDraftEnabled } =
+    useLoaderData<typeof loader>()
+  console.log('[designStudio] access payload', {
+    shopDomain: designStudioAccess.shopDomain,
+    enabled: designStudioAccess.enabled,
+    tier: designStudioAccess.tier,
+  })
   const themeRequest = requestContext.source === 'theme-extension'
+  const blankDraftMode = themeRequest && storefrontBlankDraftEnabled
+  const hydrated = useHydrationReady()
   const requestOptions = useMemo<DesignStorefrontRequestOptions>(
     () => ({
       shopDomain: designStudioAccess.shopDomain,
@@ -116,40 +199,51 @@ export default function DesignStudioStorefrontRoute() {
     }),
     [designStudioAccess.shopDomain, themeRequest, requestContext.themeSectionId],
   )
+  const draftStorageKey = designStudioAccess.shopDomain ? `ds-draft:${designStudioAccess.shopDomain}` : null
+  const draftPayloadStorageKey = draftStorageKey ? `${draftStorageKey}:payload` : null
   const { data: config, loading: configLoading } = useDesignConfig(requestOptions)
-  const saveFetcher = useFetcher<{ ok: boolean; reference?: string; error?: string }>()
-  const draftLoadFetcher = useFetcher<{ draft: StorefrontBuildPayload | null; token: string | null }>()
-  const draftSaveFetcher = useFetcher<{ ok: boolean; token: string | null }>()
-  const steps = config?.steps ?? []
-  const [activeStepId, setActiveStepId] = useState<string | null>(steps[0]?.id ?? null)
-  const [activeRole, setActiveRole] = useState<DesignStorefrontPartRole | null>(null)
+  const [statusToast, setStatusToast] = useState<StatusToast | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [activeStepId, setActiveStepId] = useState<string | null>(null)
+  const [activeRole, setActiveRole] = useState<DesignStorefrontPartRole | null>(null)
   const [selections, setSelections] = useState<
     Partial<Record<DesignStorefrontPartRole, DesignStorefrontOption | null>>
   >({})
-  const [validationEntries, setValidationEntries] = useState<DesignStudioValidationState>([])
-  const [validationUpdatedAt, setValidationUpdatedAt] = useState<string | null>(null)
   const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>({ status: 'idle' })
-  const [statusToast, setStatusToast] = useState<ValidationToast | null>(null)
+  const [validationEntries, setValidationEntries] = useState<DesignStudioValidationEntry[]>([])
+  const [validationUpdatedAt, setValidationUpdatedAt] = useState<string | null>(null)
   const [draftToken, setDraftToken] = useState<string | null>(null)
-  const lastDraftPayloadRef = useRef<string | null>(null)
+  const [draftHydrated, setDraftHydrated] = useState(() => !draftStorageKey)
+  const [draftAutosaveStatus, setDraftAutosaveStatus] = useState<DraftAutosaveStatus>({ state: 'idle' })
+  const autosaveStatusResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const incompatibleSelectionsRef = useRef<Set<string>>(new Set())
-  const draftStorageKey = useMemo(
-    () => (designStudioAccess.shopDomain ? `ds-draft:${designStudioAccess.shopDomain}` : null),
-    [designStudioAccess.shopDomain],
-  )
-
+  const pendingDraftSubmissionRef = useRef<PendingDraftSubmission | null>(null)
+  const lastDraftPayloadRef = useRef<string | null>(null)
+  const draftLoadRequestedRef = useRef(false)
+  const saveFetcher = useFetcher<BuildSaveResponse>()
+  const draftSaveFetcher = useFetcher<DraftSaveResponse>()
+  const draftLoadFetcher = useFetcher<DraftLoadResponse>()
+  const {
+    data: activeBuild,
+    loading: activeBuildLoading,
+    error: activeBuildError,
+    refresh: refreshActiveBuild,
+  } = useDesignActiveBuild(requestOptions)
+  const {
+    data: timelineBuilds,
+    loading: timelineLoading,
+    error: timelineError,
+    refresh: refreshTimeline,
+  } = useDesignBuildTimeline(requestOptions)
+  const steps = config?.steps ?? []
+  const orderedRoles = useMemo(() => steps.flatMap(step => step.roles), [steps])
   const roleStepMap = useMemo(() => {
     const map = new Map<DesignStorefrontPartRole, string>()
     steps.forEach(step => {
-      step.roles.forEach(role => {
-        map.set(role, step.id)
-      })
+      step.roles.forEach(role => map.set(role, step.id))
     })
     return map
   }, [steps])
-
-  const orderedRoles = useMemo(() => steps.flatMap(step => step.roles), [steps])
 
   useEffect(() => {
     if (!statusToast) return
@@ -226,6 +320,21 @@ export default function DesignStudioStorefrontRoute() {
     })
   }, [orderedRoles])
 
+  useEffect(() => {
+    if (!blankDraftMode) return
+    setActiveRole(BLANK_ROLE)
+  }, [blankDraftMode])
+
+  useEffect(() => {
+    return () => {
+      if (typeof window === 'undefined') return
+      if (autosaveStatusResetRef.current) {
+        window.clearTimeout(autosaveStatusResetRef.current)
+        autosaveStatusResetRef.current = null
+      }
+    }
+  }, [])
+
   const {
     data: options,
     issues: optionIssues,
@@ -238,11 +347,16 @@ export default function DesignStudioStorefrontRoute() {
     upsertValidationEntries(activeRole, 'options', entries)
   }, [activeRole, optionIssues, buildValidationEntries, upsertValidationEntries])
 
-  const handleSelectOption = useCallback((option: DesignStorefrontOption) => {
-    setSelections(prev => ({ ...prev, [option.role]: option }))
-    setDrawerOpen(true)
-    setSaveFeedback(current => (current.status === 'idle' ? current : { status: 'idle' }))
-  }, [])
+  const handleSelectOption = useCallback(
+    (option: DesignStorefrontOption) => {
+      setSelections(prev => ({ ...prev, [option.role]: option }))
+      if (!blankDraftMode) {
+        setDrawerOpen(true)
+      }
+      setSaveFeedback(current => (current.status === 'idle' ? current : { status: 'idle' }))
+    },
+    [blankDraftMode],
+  )
 
   const summary = useMemo(
     () =>
@@ -253,6 +367,8 @@ export default function DesignStudioStorefrontRoute() {
       ),
     [selections, config?.basePrice, steps],
   )
+
+  const blankSelection = (selections[BLANK_ROLE] ?? null) as DesignStorefrontOption | null
 
   useEffect(() => {
     if (!orderedRoles.length) return
@@ -340,6 +456,27 @@ export default function DesignStudioStorefrontRoute() {
 
   const handleDismissToast = useCallback(() => setStatusToast(null), [])
 
+  const markAutosaveSuccess = useCallback(() => {
+    setDraftAutosaveStatus({ state: 'success', timestamp: Date.now() })
+    if (typeof window === 'undefined') return
+    if (autosaveStatusResetRef.current) {
+      window.clearTimeout(autosaveStatusResetRef.current)
+    }
+    autosaveStatusResetRef.current = window.setTimeout(() => {
+      setDraftAutosaveStatus({ state: 'idle' })
+      autosaveStatusResetRef.current = null
+    }, 2500)
+  }, [])
+
+  const markAutosaveError = useCallback((message: string) => {
+    if (typeof window === 'undefined') return setDraftAutosaveStatus({ state: 'error', message })
+    if (autosaveStatusResetRef.current) {
+      window.clearTimeout(autosaveStatusResetRef.current)
+      autosaveStatusResetRef.current = null
+    }
+    setDraftAutosaveStatus({ state: 'error', message })
+  }, [])
+
   const selectionSnapshots = useMemo<StorefrontSelectionSnapshot[]>(() => {
     return Object.entries(selections).reduce<StorefrontSelectionSnapshot[]>((acc, [role, option]) => {
       if (!option) return acc
@@ -401,38 +538,99 @@ export default function DesignStudioStorefrontRoute() {
     return query ? `/api/design-studio/drafts?${query}` : '/api/design-studio/drafts'
   }, [requestOptions.shopDomain, requestOptions.themeRequest, requestOptions.themeSectionId])
 
+  const submitDraftPayload = useCallback(
+    (serialized: string, method: 'POST' | 'PUT', token: string | null) => {
+      const formData = new FormData()
+      formData.set('payload', serialized)
+      if (token) {
+        formData.set('token', token)
+      }
+      pendingDraftSubmissionRef.current = { payload: serialized, method, token }
+      draftSaveFetcher.submit(formData, {
+        method: method.toLowerCase() as 'post' | 'put',
+        action: draftsActionUrl,
+        preventScrollReset: true,
+      })
+    },
+    [draftSaveFetcher, draftsActionUrl],
+  )
+
+  const handleRetryAutosave = useCallback(() => {
+    const pending = pendingDraftSubmissionRef.current
+    if (!pending) return
+    if (blankDraftMode) {
+      setDraftAutosaveStatus({ state: 'saving' })
+    }
+    submitDraftPayload(pending.payload, pending.method, pending.token)
+  }, [blankDraftMode, submitDraftPayload])
+
   useEffect(() => {
-    if (typeof window === 'undefined' || !draftStorageKey) return
-    const storedToken = window.localStorage.getItem(draftStorageKey)
-    if (!storedToken) return
+    if (typeof window === 'undefined') return
+    if (!draftStorageKey) {
+      setDraftHydrated(true)
+      return
+    }
+    const storedToken = window.sessionStorage.getItem(draftStorageKey) ?? window.localStorage.getItem(draftStorageKey)
+    if (!storedToken) {
+      setDraftHydrated(true)
+      return
+    }
+    draftLoadRequestedRef.current = true
+    setDraftHydrated(false)
     setDraftToken(storedToken)
     const params = new URLSearchParams()
     appendDesignStudioParams(params, requestOptions)
     params.set('token', storedToken)
+    console.log('[designStudio] requesting draft load', {
+      tokenLength: storedToken.length,
+      params: params.toString(),
+    })
     draftLoadFetcher.load(`/api/design-studio/drafts?${params.toString()}`)
   }, [draftStorageKey, draftLoadFetcher, requestOptions])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !draftStorageKey) return
     if (draftToken) {
+      window.sessionStorage.setItem(draftStorageKey, draftToken)
       window.localStorage.setItem(draftStorageKey, draftToken)
     } else {
+      window.sessionStorage.removeItem(draftStorageKey)
       window.localStorage.removeItem(draftStorageKey)
+      if (draftPayloadStorageKey) {
+        window.localStorage.removeItem(draftPayloadStorageKey)
+      }
     }
-  }, [draftStorageKey, draftToken])
+  }, [draftStorageKey, draftPayloadStorageKey, draftToken])
 
   useEffect(() => {
-    if (draftSaveFetcher.state !== 'idle' || !draftSaveFetcher.data) return
-    if (draftSaveFetcher.data.ok) {
-      setDraftToken(draftSaveFetcher.data.token ?? null)
-    } else {
-      lastDraftPayloadRef.current = null
+    if (draftSaveFetcher.state !== 'idle') return
+    const pendingSubmission = pendingDraftSubmissionRef.current
+    const result = draftSaveFetcher.data
+    if (result && result.ok) {
+      setDraftToken(result.token ?? null)
+      pendingDraftSubmissionRef.current = null
+      if (blankDraftMode) {
+        markAutosaveSuccess()
+      }
+      return
     }
-  }, [draftSaveFetcher.state, draftSaveFetcher.data])
+    if (!result && !pendingSubmission) {
+      return
+    }
+    if (blankDraftMode) {
+      markAutosaveError('Unable to save draft. Retry?')
+    }
+  }, [draftSaveFetcher.state, draftSaveFetcher.data, blankDraftMode, markAutosaveError, markAutosaveSuccess])
 
   useEffect(() => {
-    if (draftLoadFetcher.state !== 'idle' || !draftLoadFetcher.data) return
-    const { draft, token } = draftLoadFetcher.data
+    if (draftLoadFetcher.state !== 'idle') return
+    if (!draftLoadRequestedRef.current && !draftLoadFetcher.data) return
+    const { draft, token } = draftLoadFetcher.data ?? { draft: null, token: null }
+    console.log('[designStudio] draft load effect', {
+      state: draftLoadFetcher.state,
+      hasData: Boolean(draftLoadFetcher.data),
+      hasDraft: Boolean(draft?.selections?.length),
+    })
     if (draft && Array.isArray(draft.selections)) {
       hydrateSelectionsFromDraft(draft, setSelections)
       lastDraftPayloadRef.current = JSON.stringify(
@@ -459,6 +657,8 @@ export default function DesignStudioStorefrontRoute() {
       setSaveFeedback({ status: 'idle' })
     }
     setDraftToken(token ?? null)
+    draftLoadRequestedRef.current = false
+    setDraftHydrated(true)
   }, [draftLoadFetcher.state, draftLoadFetcher.data])
 
   const handleSaveBuild = useCallback(() => {
@@ -503,7 +703,7 @@ export default function DesignStudioStorefrontRoute() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    if (!config) return
+    if (!config || !draftHydrated) return
     const hasSelections = selectionSnapshots.length > 0
     if (!hasSelections && !draftToken) {
       lastDraftPayloadRef.current = null
@@ -522,19 +722,25 @@ export default function DesignStudioStorefrontRoute() {
     })
     const serialized = JSON.stringify(payload)
     if (serialized === lastDraftPayloadRef.current) return
-    const timeoutId = window.setTimeout(() => {
+
+    const runAutosave = () => {
       lastDraftPayloadRef.current = serialized
-      const formData = new FormData()
-      formData.set('payload', serialized)
-      if (draftToken) {
-        formData.set('token', draftToken)
+      if (draftPayloadStorageKey && typeof window !== 'undefined') {
+        window.localStorage.setItem(draftPayloadStorageKey, serialized)
       }
-      draftSaveFetcher.submit(formData, {
-        method: 'post',
-        action: draftsActionUrl,
-        preventScrollReset: true,
-      })
-    }, 800)
+      const method: 'POST' | 'PUT' = draftToken ? 'PUT' : 'POST'
+      if (blankDraftMode) {
+        setDraftAutosaveStatus({ state: 'saving' })
+      }
+      submitDraftPayload(serialized, method, draftToken ?? null)
+    }
+
+    if (blankDraftMode) {
+      runAutosave()
+      return
+    }
+
+    const timeoutId = window.setTimeout(runAutosave, 800)
     return () => window.clearTimeout(timeoutId)
   }, [
     config,
@@ -543,8 +749,10 @@ export default function DesignStudioStorefrontRoute() {
     summary,
     validationSnapshot,
     draftToken,
-    draftSaveFetcher,
-    draftsActionUrl,
+    submitDraftPayload,
+    blankDraftMode,
+    draftPayloadStorageKey,
+    draftHydrated,
   ])
 
   if (!designStudioAccess.enabled) {
@@ -567,65 +775,102 @@ export default function DesignStudioStorefrontRoute() {
     )
   }
 
+  const heroContent = config?.hero ?? initialStorefront.hero ?? DEFAULT_HERO_CONTENT
+  const headerLoading = hydrated && configLoading && !config?.hero && !initialStorefront.hero
+  const activeBuildSnapshot = activeBuild ?? initialStorefront.activeBuild ?? null
+  const activeBuildLoadingState = hydrated && activeBuildLoading && !activeBuildSnapshot
+  const requiresHydrationForActive = !hydrated && !initialStorefront.activeBuildResolved
+
   return (
     <PolarisAppProvider i18n={polarisTranslations}>
       <div className="min-h-screen bg-slate-50">
         <div className="mx-auto max-w-6xl px-4 py-8">
           <BlockStack gap="400">
-            <Header configLoading={configLoading} hero={config?.hero} tier={config?.tier ?? designStudioAccess.tier} />
-            <InlineStack align="end">
-              <Button icon={CartIcon} onClick={() => setDrawerOpen(true)} accessibilityLabel="Open build list">
-                {`Build (${summary.selectedParts}/${summary.totalParts} parts - ${formatCurrency(summary.subtotal)})`}
-              </Button>
-            </InlineStack>
-            <div className="flex flex-col gap-6 md:flex-row">
-              <div className="flex-1">
-                <ComponentSelector
-                  loading={configLoading || !activeStep}
-                  steps={steps}
-                  activeStep={activeStep}
-                  activeRole={activeRole}
-                  onStepChange={index => setActiveStepId(steps[index]?.id ?? null)}
-                  onRoleChange={setActiveRole}
-                  options={options}
-                  optionsLoading={optionsLoading}
-                  selections={selections}
-                  onSelect={handleSelectOption}
-                  formatCurrency={formatCurrency}
-                  roleValidation={validationByRole}
-                />
-              </div>
-              <div className="hidden w-full max-w-sm md:block">
-                <BuildDrawer
-                  steps={steps}
-                  selections={selections}
-                  summary={summary}
-                  formatCurrency={formatCurrency}
-                  onJumpToRole={handleJumpToRole}
-                  onSave={handleSaveBuild}
-                  saving={saveFetcher.state !== 'idle'}
-                  canSave={canSaveBuild}
-                  saveResult={saveFeedback}
-                  roleValidation={roleValidation}
-                />
-              </div>
-            </div>
+            <Header configLoading={headerLoading} hero={heroContent} tier={config?.tier ?? designStudioAccess.tier} />
+            <ActiveBuildSummaryCard
+              loading={activeBuildLoadingState}
+              error={activeBuildError}
+              build={activeBuildSnapshot}
+              onRetry={refreshActiveBuild}
+              formatCurrency={formatCurrency}
+              requiresHydration={requiresHydrationForActive}
+            />
+            <PublishedBuildTimelineCard
+              loading={timelineLoading}
+              error={timelineError}
+              builds={timelineBuilds}
+              onRetry={refreshTimeline}
+            />
+            {blankDraftMode ? (
+              <BlankSelectionCard
+                hydrated={hydrated}
+                loading={configLoading || optionsLoading}
+                options={options}
+                selectedOptionId={blankSelection?.id ?? null}
+                onSelect={handleSelectOption}
+                autosaveStatus={draftAutosaveStatus}
+                onRetry={handleRetryAutosave}
+                formatCurrency={formatCurrency}
+              />
+            ) : (
+              <>
+                <InlineStack align="end">
+                  <Button icon={CartIcon} onClick={() => setDrawerOpen(true)} accessibilityLabel="Open build list">
+                    {`Build (${summary.selectedParts}/${summary.totalParts} parts - ${formatCurrency(summary.subtotal)})`}
+                  </Button>
+                </InlineStack>
+                <div className="flex flex-col gap-6 md:flex-row">
+                  <div className="flex-1">
+                    <ComponentSelector
+                      loading={configLoading || !activeStep}
+                      steps={steps}
+                      activeStep={activeStep}
+                      activeRole={activeRole}
+                      onStepChange={index => setActiveStepId(steps[index]?.id ?? null)}
+                      onRoleChange={setActiveRole}
+                      options={options}
+                      optionsLoading={optionsLoading}
+                      selections={selections}
+                      onSelect={handleSelectOption}
+                      formatCurrency={formatCurrency}
+                      roleValidation={validationByRole}
+                    />
+                  </div>
+                  <div className="hidden w-full max-w-sm md:block">
+                    <BuildDrawer
+                      steps={steps}
+                      selections={selections}
+                      summary={summary}
+                      formatCurrency={formatCurrency}
+                      onJumpToRole={handleJumpToRole}
+                      onSave={handleSaveBuild}
+                      saving={saveFetcher.state !== 'idle'}
+                      canSave={canSaveBuild}
+                      saveResult={saveFeedback}
+                      roleValidation={roleValidation}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
           </BlockStack>
         </div>
-        <MobileDrawer
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          steps={steps}
-          selections={selections}
-          summary={summary}
-          formatCurrency={formatCurrency}
-          onJumpToRole={handleJumpToRole}
-          onSave={handleSaveBuild}
-          saving={saveFetcher.state !== 'idle'}
-          canSave={canSaveBuild}
-          saveResult={saveFeedback}
-          roleValidation={roleValidation}
-        />
+        {blankDraftMode ? null : (
+          <MobileDrawer
+            open={drawerOpen}
+            onClose={() => setDrawerOpen(false)}
+            steps={steps}
+            selections={selections}
+            summary={summary}
+            formatCurrency={formatCurrency}
+            onJumpToRole={handleJumpToRole}
+            onSave={handleSaveBuild}
+            saving={saveFetcher.state !== 'idle'}
+            canSave={canSaveBuild}
+            saveResult={saveFeedback}
+            roleValidation={roleValidation}
+          />
+        )}
         {statusToast ? (
           <div className="fixed right-6 bottom-6 z-40 max-w-sm">
             <div
@@ -659,34 +904,387 @@ type HeaderProps = {
   tier: string
 }
 
+type StatusToast = {
+  tone: 'warning' | 'critical'
+  message: string
+}
+
 function Header({ configLoading, hero, tier }: HeaderProps) {
-  if (configLoading && !hero) {
-    return (
-      <Card>
-        <BlockStack gap="200">
-          <SkeletonDisplayText size="large" />
-          <SkeletonBodyText lines={2} />
-        </BlockStack>
-      </Card>
-    )
-  }
+  const resolvedHero = hero ?? DEFAULT_HERO_CONTENT
+
   return (
     <Card>
       <BlockStack gap="200">
         <InlineStack align="space-between" blockAlign="center">
           <BlockStack gap="050">
             <Text as="h1" variant="headingXl">
-              {hero?.title ?? 'Design Studio'}
+              {resolvedHero.title}
             </Text>
             <Text as="p" tone="subdued">
-              {hero?.body ?? 'Curated storefront components for Rainshadow builds.'}
+              {resolvedHero.body}
             </Text>
+            {configLoading && !hero ? (
+              <Text as="span" tone="subdued" variant="bodySm">
+                Updating Design Studio copy; refresh once assets load.
+              </Text>
+            ) : null}
           </BlockStack>
           <Badge tone="success">{tier}</Badge>
         </InlineStack>
       </BlockStack>
     </Card>
   )
+}
+
+type ActiveBuildSummaryCardProps = {
+  loading: boolean
+  error: Error | null
+  build: DesignStorefrontActiveBuild | null
+  onRetry: () => void
+  formatCurrency: (value: number) => string
+  requiresHydration: boolean
+}
+
+function ActiveBuildSummaryCard({
+  loading,
+  error,
+  build,
+  onRetry,
+  formatCurrency,
+  requiresHydration,
+}: ActiveBuildSummaryCardProps) {
+  if (requiresHydration && !build) {
+    return (
+      <Card>
+        <BlockStack gap="050">
+          <Text as="h2" variant="headingMd">
+            Active build summary
+          </Text>
+          <Text as="p" tone="subdued">
+            Save a Design Studio build or refresh later to see the latest submission details here.
+          </Text>
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <BlockStack gap="100">
+          <SkeletonDisplayText size="small" />
+          <SkeletonBodyText lines={3} />
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <BlockStack gap="150">
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="025">
+              <Text as="h2" variant="headingMd">
+                Active build summary
+              </Text>
+              <Text as="p" tone="critical">
+                Unable to load the latest build right now.
+              </Text>
+            </BlockStack>
+            <Button onClick={onRetry}>Retry</Button>
+          </InlineStack>
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  if (!build) {
+    return (
+      <Card>
+        <BlockStack gap="050">
+          <Text as="h2" variant="headingMd">
+            Active build summary
+          </Text>
+          <Text as="p" tone="subdued">
+            Publish a Design Studio build to see its status here.
+          </Text>
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  const badge = STATUS_BADGE_CONTENT[build.status] ?? {
+    label: formatStatusFallback(build.status),
+    tone: 'info',
+  }
+  const updatedDisplay = formatTimestamp(build.updatedAt)
+  const totalParts = Math.max(build.pricing.totalParts || 0, build.pricing.selectedParts || 0)
+  const componentPreview = build.components.slice(0, 3)
+
+  return (
+    <Card>
+      <BlockStack gap="200">
+        <InlineStack align="space-between" blockAlign="center">
+          <BlockStack gap="025">
+            <Text as="h2" variant="headingMd">
+              Active build summary
+            </Text>
+            <Text as="p" tone="subdued">
+              Latest in-progress Design Studio build for this shop.
+            </Text>
+          </BlockStack>
+          <Badge tone={badge.tone}>{badge.label}</Badge>
+        </InlineStack>
+        <Divider />
+        <div className="grid gap-4 md:grid-cols-3">
+          <div>
+            <Text as="p" tone="subdued">
+              Reference
+            </Text>
+            <Text as="p" variant="headingSm">
+              {build.reference}
+            </Text>
+          </div>
+          <div>
+            <Text as="p" tone="subdued">
+              Updated
+            </Text>
+            <Text as="p">{updatedDisplay}</Text>
+          </div>
+          <div>
+            <Text as="p" tone="subdued">
+              Subtotal
+            </Text>
+            <Text as="p" variant="headingSm">
+              {formatCurrency(build.pricing.subtotal)}
+            </Text>
+          </div>
+        </div>
+        <Divider />
+        <BlockStack gap="150">
+          <div>
+            <Text as="p" tone="subdued">
+              Blank
+            </Text>
+            <Text as="p">{build.blankTitle ?? 'Pending blank selection'}</Text>
+            {build.blankSku ? (
+              <Text as="span" tone="subdued" variant="bodySm">
+                {build.blankSku}
+              </Text>
+            ) : null}
+          </div>
+          <InlineStack gap="400" wrap>
+            <BlockStack gap="025">
+              <Text as="p" tone="subdued">
+                Parts locked
+              </Text>
+              <Text as="p">
+                {build.pricing.selectedParts}/{totalParts || build.pricing.selectedParts || 0} parts
+              </Text>
+            </BlockStack>
+            <BlockStack gap="025">
+              <Text as="p" tone="subdued">
+                Base price
+              </Text>
+              <Text as="p">{formatCurrency(build.pricing.basePrice)}</Text>
+            </BlockStack>
+          </InlineStack>
+          {componentPreview.length ? (
+            <div>
+              <Text as="p" tone="subdued">
+                Key components
+              </Text>
+              <ul className="mt-1 list-disc pl-5 text-sm text-slate-700">
+                {componentPreview.map((component, index) => {
+                  const label = maybeFormatRoleLabel(component.role)
+                  return (
+                    <li key={`${component.title ?? 'component'}-${index}`} className="pl-1">
+                      <span className="font-medium text-slate-900">{component.title ?? 'Component'}</span>
+                      {label ? <span className="ml-2 text-slate-500">{label}</span> : null}
+                      {typeof component.price === 'number' ? (
+                        <span className="ml-2 text-slate-500">{formatCurrency(component.price)}</span>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ) : null}
+        </BlockStack>
+      </BlockStack>
+    </Card>
+  )
+}
+
+type PublishedBuildTimelineCardProps = {
+  loading: boolean
+  error: Error | null
+  builds: DesignStorefrontTimelineBuild[]
+  onRetry: () => void
+}
+
+function PublishedBuildTimelineCard({ loading, error, builds, onRetry }: PublishedBuildTimelineCardProps) {
+  const hydrated = useHydrationReady()
+
+  if (!hydrated) {
+    return (
+      <Card>
+        <BlockStack gap="050">
+          <Text as="h2" variant="headingMd">
+            Published build timeline
+          </Text>
+          <Text as="p" tone="subdued">
+            Timeline available once the Theme Editor assets finish loading.
+          </Text>
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <BlockStack gap="150">
+          <BlockStack gap="025">
+            <Text as="h2" variant="headingMd">
+              Published build timeline
+            </Text>
+            <Text as="p" tone="subdued">
+              Tracking recent published builds.
+            </Text>
+          </BlockStack>
+          <SkeletonBodyText lines={3} />
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <BlockStack gap="150">
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="025">
+              <Text as="h2" variant="headingMd">
+                Published build timeline
+              </Text>
+              <Text as="p" tone="critical">
+                Unable to load recent builds right now.
+              </Text>
+            </BlockStack>
+            <Button onClick={onRetry}>Retry</Button>
+          </InlineStack>
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  const rows = builds.slice(0, 3)
+
+  return (
+    <Card>
+      <BlockStack gap="150">
+        <Text as="h2" variant="headingMd">
+          Published build timeline
+        </Text>
+        <Text as="p" tone="subdued">
+          Latest approved and in-progress builds for this shop.
+        </Text>
+        {rows.length === 0 ? (
+          <Text as="p" tone="subdued">
+            No published builds yet.
+          </Text>
+        ) : (
+          <BlockStack gap="100">
+            {rows.map(build => {
+              const badge = STATUS_BADGE_CONTENT[build.status] ?? {
+                label: formatStatusFallback(build.status),
+                tone: 'info' as const,
+              }
+              return (
+                <div key={build.id} className="rounded-xl border border-slate-100 bg-white p-4">
+                  <InlineStack align="space-between" wrap>
+                    <BlockStack gap="025">
+                      <InlineStack gap="200" blockAlign="center" wrap>
+                        <Text as="span" variant="headingSm">
+                          {build.reference}
+                        </Text>
+                        <Badge tone={badge.tone}>{badge.label}</Badge>
+                      </InlineStack>
+                      <Text as="span" tone="subdued">
+                        {build.blankSku ? `Blank ${build.blankSku}` : 'Blank pending'}
+                      </Text>
+                    </BlockStack>
+                    <Text as="span" tone="subdued">
+                      {formatRelativeTimeFromNow(build.updatedAt)}
+                    </Text>
+                  </InlineStack>
+                </div>
+              )
+            })}
+          </BlockStack>
+        )}
+      </BlockStack>
+    </Card>
+  )
+}
+
+function useHydrationReady(): boolean {
+  const [hydrated, setHydrated] = useState(() => typeof window !== 'undefined')
+  useEffect(() => {
+    setHydrated(true)
+  }, [])
+  return hydrated
+}
+
+type StatusBadgeTone = 'info' | 'success' | 'warning' | 'critical' | 'attention'
+
+const STATUS_BADGE_CONTENT: Record<DesignStorefrontActiveBuild['status'], { label: string; tone: StatusBadgeTone }> = {
+  DRAFT: { label: 'Draft', tone: 'info' },
+  REVIEW: { label: 'Needs review', tone: 'attention' },
+  APPROVED: { label: 'Approved', tone: 'success' },
+  SCHEDULED: { label: 'Scheduled', tone: 'info' },
+  IN_PROGRESS: { label: 'In progress', tone: 'info' },
+  FULFILLED: { label: 'Fulfilled', tone: 'success' },
+  ARCHIVED: { label: 'Archived', tone: 'info' },
+  BLOCKED: { label: 'Blocked', tone: 'critical' },
+}
+
+function formatStatusFallback(status: string): string {
+  return status
+    .toLowerCase()
+    .split('_')
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function formatTimestamp(value: string | null): string {
+  if (!value) return '—'
+  try {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+  } catch {
+    return value
+  }
+}
+
+function formatRelativeTimeFromNow(value: string | null): string {
+  if (!value) return '—'
+  try {
+    const target = new Date(value).getTime()
+    if (!Number.isFinite(target)) return value
+    const now = Date.now()
+    const diffMs = Math.max(0, Math.abs(now - target))
+    const minutes = Math.floor(diffMs / 60000)
+    if (minutes < 1) return 'just now'
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    return `${days}d ago`
+  } catch {
+    return value
+  }
 }
 
 type ComponentSelectorProps = {
@@ -702,6 +1300,154 @@ type ComponentSelectorProps = {
   onSelect: (option: DesignStorefrontOption) => void
   formatCurrency: (value: number) => string
   roleValidation: Partial<Record<DesignStorefrontPartRole, DesignStudioValidationEntry[]>>
+}
+
+type BlankSelectionCardProps = {
+  hydrated: boolean
+  loading: boolean
+  options: DesignStorefrontOption[]
+  selectedOptionId: string | null
+  onSelect: (option: DesignStorefrontOption) => void
+  autosaveStatus: DraftAutosaveStatus
+  onRetry: () => void
+  formatCurrency: (value: number) => string
+}
+
+function BlankSelectionCard({
+  hydrated,
+  loading,
+  options,
+  selectedOptionId,
+  onSelect,
+  autosaveStatus,
+  onRetry,
+  formatCurrency,
+}: BlankSelectionCardProps) {
+  if (!hydrated) {
+    return (
+      <Card>
+        <BlockStack gap="100">
+          <Text as="h2" variant="headingMd">
+            Select a blank
+          </Text>
+          <Text as="p" tone="subdued">
+            Enable JavaScript to build a draft. This view stays read-only without it.
+          </Text>
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <BlockStack gap="150">
+          <Text as="h2" variant="headingMd">
+            Select a blank
+          </Text>
+          <SkeletonBodyText lines={3} />
+        </BlockStack>
+      </Card>
+    )
+  }
+
+  const blankOptions = options.filter(option => option.role === BLANK_ROLE)
+
+  return (
+    <Card>
+      <BlockStack gap="150">
+        <BlockStack gap="025">
+          <Text as="h2" variant="headingMd">
+            Select a blank
+          </Text>
+          <Text as="p" tone="subdued">
+            Choose a blank to start your draft. Autosave runs immediately after you pick one.
+          </Text>
+        </BlockStack>
+        <DraftAutosaveIndicator status={autosaveStatus} onRetry={onRetry} />
+        {blankOptions.length ? (
+          <BlockStack gap="100">
+            {blankOptions.map(option => {
+              const selected = option.id === selectedOptionId
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  data-blank-option={option.id}
+                  data-selected={selected ? 'true' : 'false'}
+                  className={`w-full rounded-2xl border px-4 py-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 ${selected ? 'border-emerald-500 bg-white shadow-sm' : 'border-slate-200 bg-white/80 hover:border-emerald-200'}`}
+                  aria-pressed={selected}
+                  onClick={() => onSelect(option)}
+                >
+                  <BlockStack gap="025">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="span" variant="headingSm" tone={selected ? undefined : 'subdued'}>
+                        {option.title}
+                      </Text>
+                      {selected ? (
+                        <Badge tone="success" icon={ClipboardCheckIcon}>
+                          Draft selection
+                        </Badge>
+                      ) : null}
+                    </InlineStack>
+                    {option.sku ? (
+                      <Text as="span" tone="subdued">
+                        {option.sku}
+                      </Text>
+                    ) : null}
+                    {typeof option.price === 'number' ? (
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        MSRP {formatCurrency(option.price)}
+                      </Text>
+                    ) : null}
+                  </BlockStack>
+                </button>
+              )
+            })}
+          </BlockStack>
+        ) : (
+          <Text as="p" tone="subdued">
+            No blanks available yet.
+          </Text>
+        )}
+      </BlockStack>
+    </Card>
+  )
+}
+
+type DraftAutosaveIndicatorProps = {
+  status: DraftAutosaveStatus
+  onRetry: () => void
+}
+
+function DraftAutosaveIndicator({ status, onRetry }: DraftAutosaveIndicatorProps) {
+  if (status.state === 'saving') {
+    return (
+      <Text as="p" tone="subdued" variant="bodySm">
+        Saving draft…
+      </Text>
+    )
+  }
+  if (status.state === 'success') {
+    return (
+      <Text as="p" tone="success" variant="bodySm">
+        Draft saved
+      </Text>
+    )
+  }
+  if (status.state === 'error') {
+    return (
+      <InlineStack gap="200" blockAlign="center" wrap>
+        <Text as="p" tone="critical" variant="bodySm">
+          {status.message}
+        </Text>
+        <Button size="slim" onClick={onRetry} variant="secondary">
+          Retry draft save
+        </Button>
+      </InlineStack>
+    )
+  }
+  return null
 }
 
 function ComponentSelector({
@@ -1079,24 +1825,31 @@ function buildDraftPayloadSnapshot({
   }
 }
 
+const ROLE_LABEL_MAP: Record<DesignStorefrontPartRole, string> = {
+  blank: 'Blank',
+  rear_grip: 'Rear grip',
+  fore_grip: 'Foregrip',
+  reel_seat: 'Reel seat',
+  butt_cap: 'Butt cap',
+  guide_set: 'Guide set',
+  guide: 'Guide',
+  tip_top: 'Tip top',
+  guide_tip: 'Tip top',
+  winding_check: 'Winding check',
+  decal: 'Decal',
+  handle: 'Handle',
+  component: 'Component',
+  accessory: 'Accessory',
+}
+
 function formatRoleLabel(role: DesignStorefrontPartRole) {
-  const map: Record<DesignStorefrontPartRole, string> = {
-    blank: 'Blank',
-    rear_grip: 'Rear grip',
-    fore_grip: 'Foregrip',
-    reel_seat: 'Reel seat',
-    butt_cap: 'Butt cap',
-    guide_set: 'Guide set',
-    guide: 'Guide',
-    tip_top: 'Tip top',
-    guide_tip: 'Tip top',
-    winding_check: 'Winding check',
-    decal: 'Decal',
-    handle: 'Handle',
-    component: 'Component',
-    accessory: 'Accessory',
-  }
-  return map[role] || role.replace(/_/g, ' ')
+  return ROLE_LABEL_MAP[role] || role.replace(/_/g, ' ')
+}
+
+function maybeFormatRoleLabel(role: string | null | undefined): string | null {
+  if (!role) return null
+  const label = (ROLE_LABEL_MAP as Record<string, string | undefined>)[role]
+  return label ?? role.replace(/_/g, ' ')
 }
 
 function deriveSeverityFromIssue(issue: CompatibilityIssue): DesignStudioValidationSeverity {

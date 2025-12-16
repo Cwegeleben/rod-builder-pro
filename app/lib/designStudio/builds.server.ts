@@ -53,6 +53,67 @@ export async function loadDesignBuildQueue({
   }))
 }
 
+const ACTIVE_CUSTOMER_STATUSES: DesignBuildStatus[] = ['REVIEW', 'APPROVED', 'SCHEDULED', 'IN_PROGRESS']
+
+export type LoadRecentDesignBuildSummariesArgs = {
+  shopDomain: string
+  statuses: DesignBuildStatus[]
+  take?: number
+}
+
+export async function loadRecentDesignBuildSummaries({
+  shopDomain,
+  statuses,
+  take = 3,
+}: LoadRecentDesignBuildSummariesArgs): Promise<DesignBuildSummary[]> {
+  if (!shopDomain || !statuses.length) {
+    return []
+  }
+  const cappedTake = clampRecentTake(take)
+  const builds = await prisma.designBuild.findMany({
+    where: {
+      shopDomain,
+      status: { in: statuses },
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: cappedTake,
+  })
+  return builds.map(mapBuildSummary)
+}
+
+export type ActiveDesignBuildSummary = {
+  id: string
+  reference: string
+  status: DesignBuildStatus
+  submittedAt: string | null
+  updatedAt: string
+  blankTitle: string | null
+  blankSku: string | null
+  pricing: {
+    subtotal: number
+    basePrice: number
+    selectedParts: number
+    totalParts: number
+  }
+  components: Array<{ title: string | null; role: string | null; price: number }>
+}
+
+export async function loadLatestActiveDesignBuildSummary(
+  shopDomain: string,
+  statuses: DesignBuildStatus[] = ACTIVE_CUSTOMER_STATUSES,
+): Promise<ActiveDesignBuildSummary | null> {
+  if (!shopDomain || !statuses.length) return null
+  const build = await prisma.designBuild.findFirst({
+    where: {
+      shopDomain,
+      status: { in: statuses },
+    },
+    orderBy: { updatedAt: 'desc' },
+  })
+  if (!build) return null
+  return mapActiveDesignBuildSummary(build)
+}
+
 export async function loadDesignBuildDetail(buildId: string): Promise<DesignBuildDetail | null> {
   const build = await prisma.designBuild.findUnique({
     where: { id: buildId },
@@ -257,4 +318,83 @@ function mapBuildSummary(build: PrismaDesignBuild): DesignBuildSummary {
     assignedBuilder: build.assignedBuilder,
     updatedAt: build.updatedAt.toISOString(),
   }
+}
+
+function mapActiveDesignBuildSummary(build: PrismaDesignBuild): ActiveDesignBuildSummary {
+  const summary = parseComponentSummary(build.componentSummary)
+  return {
+    id: build.id,
+    reference: build.reference,
+    status: build.status,
+    submittedAt: build.submittedAt ? build.submittedAt.toISOString() : null,
+    updatedAt: build.updatedAt.toISOString(),
+    blankTitle: build.blankTitle ?? summary.blank.title,
+    blankSku: build.blankSku ?? summary.blank.sku,
+    pricing: summary.pricing,
+    components: summary.components,
+  }
+}
+
+type ParsedComponentSummary = {
+  blank: { title: string | null; sku: string | null }
+  components: Array<{ title: string | null; role: string | null; price: number }>
+  pricing: {
+    subtotal: number
+    basePrice: number
+    selectedParts: number
+    totalParts: number
+  }
+}
+
+function parseComponentSummary(value: Prisma.JsonValue | null): ParsedComponentSummary {
+  const record = asJsonObject(value)
+  const blankRecord = asJsonObject(record?.blank)
+  const pricingRecord = asJsonObject(record?.pricing)
+  const componentsArray = Array.isArray(record?.components) ? record?.components : []
+  return {
+    blank: {
+      title: coerceString(blankRecord?.title),
+      sku: coerceString(blankRecord?.sku),
+    },
+    components: componentsArray
+      .map(entry => {
+        const component = asJsonObject(entry)
+        if (!component) return null
+        return {
+          title: coerceString(component.title),
+          role: coerceString(component.role),
+          price: coerceNumber(component.price),
+        }
+      })
+      .filter((entry): entry is { title: string | null; role: string | null; price: number } => entry !== null),
+    pricing: {
+      subtotal: coerceNumber(pricingRecord?.subtotal),
+      basePrice: coerceNumber(pricingRecord?.basePrice),
+      selectedParts: coerceNumber(pricingRecord?.selectedParts),
+      totalParts: coerceNumber(pricingRecord?.totalParts),
+    },
+  }
+}
+
+function asJsonObject(value: Prisma.JsonValue | null | undefined): Record<string, any> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, any>
+}
+
+function coerceString(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed.length ? trimmed : null
+  }
+  return null
+}
+
+function coerceNumber(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+function clampRecentTake(value: number | undefined): number {
+  if (!value || !Number.isFinite(value)) return 3
+  return Math.max(1, Math.min(3, Math.floor(value)))
 }
