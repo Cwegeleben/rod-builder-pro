@@ -2,6 +2,7 @@
 set -eu
 
 echo "[startup] NODE_ENV=${NODE_ENV:-} PORT=${PORT:-3000} starting production server" >&2
+node ./scripts/preflight/assert-app-url.mjs
 # Prisma client should be generated at build time in the image; skip runtime generate to avoid startup hangs
 if [ ! -d node_modules/.prisma ]; then
   echo "[startup] WARNING: Prisma client not found; proceeding without runtime generate" >&2

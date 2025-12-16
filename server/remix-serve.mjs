@@ -12,6 +12,9 @@ const BUILD_PATH = fileURLToPath(new URL('../build/server/index.js', import.meta
 const build = await import(BUILD_PATH)
 installGlobals({ nativeFetch: build.future?.v3_singleFetch })
 
+const SHOPIFY_APP_URL = process.env.SHOPIFY_APP_URL ?? ''
+enforceShopifyAppUrl(SHOPIFY_APP_URL)
+
 const PORT = Number(process.env.PORT ?? 3000)
 const HOST = process.env.HOST ?? '0.0.0.0'
 const MODE = process.env.NODE_ENV ?? 'production'
@@ -158,4 +161,14 @@ function extractManifestJson(contents) {
   } catch {
     return null
   }
+}
+
+function enforceShopifyAppUrl(value) {
+  const mode = process.env.NODE_ENV ?? 'production'
+  if (mode !== 'production') return
+  if (value && !/example\.com/i.test(value)) return
+  const display = value || '(unset)'
+  console.error(`[rbp-app] SHOPIFY_APP_URL is invalid in production: ${display}`)
+  console.error('[rbp-app] Set SHOPIFY_APP_URL to the public Fly URL before booting the server')
+  process.exit(1)
 }

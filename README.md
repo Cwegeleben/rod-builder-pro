@@ -133,7 +133,7 @@ Required for app boot (set as Fly secrets):
 
 Provided via Fly config (already in `fly.production.toml`/`fly.staging.toml`):
 
-- `SHOPIFY_APP_URL` — public URL (e.g., `https://rbp-app.fly.dev`)
+- `SHOPIFY_APP_URL` — public URL (e.g., `https://rbp-app.fly.dev`). Production startup fails fast if this is unset or still `example.com` so hydration never ships with placeholder origins.
 - `SCOPES` — required app scopes
 - `PORT`, `HOST`, `DATABASE_URL` — server binding and SQLite path
 
